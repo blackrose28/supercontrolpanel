@@ -1,0 +1,38 @@
+node_modules
+dist
+dist-ssr
+*.local
+
+# Tauri / Rust
+/src-tauri/target
+**/*.rs.bk
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE / editor settings
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# App config and runtime state (do not sync machine-local secrets)
+app-config/
+
+# Cursor / local tools
+.cursor/
+.codex/
+
+node_modules/
+dist/
+.vite/
+
+src-tauri/target/
+src-tauri/Cargo.lock

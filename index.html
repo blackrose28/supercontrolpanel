@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Super Control Panel Prototype</title>
+  </head>
+  <body>
+    <div class="app">
+      <header class="toolbar">
+        <button id="nav-status" class="nav-btn active">Status</button>
+        <button id="nav-openvpn" class="nav-btn">OpenVPN</button>
+        <button id="nav-servers" class="nav-btn">Servers</button>
+        <button id="nav-boundary" class="nav-btn">Boundary</button>
+        <button id="nav-config" class="nav-btn">Config</button>
+      </header>
+      <main class="views">
+        <section id="view-status" class="view active">
+          <h2>Function Status</h2>
+          <p class="hint">
+            OpenVPN and SSH show live sessions. <strong>Boundary</strong> reflects the CLI token in your OS keyring
+            (same as <code>boundary token read</code>) — after you log in on the Boundary tab, status shows authenticated
+            until the token expires or is cleared.
+          </p>
+          <div id="status-list" class="status-list"></div>
+        </section>
+
+        <section id="view-openvpn" class="view">
+          <h2>OpenVPN Automation</h2>
+          <p class="hint">
+            Uses saved config to start OpenVPN in a PTY, handle prompts, and keep it running.
+          </p>
+          <div id="openvpn-config-preview" class="hint"></div>
+
+          <div class="actions">
+            <button id="vpn-start">Start Function</button>
+            <button id="vpn-stop">Stop Function</button>
+          </div>
+
+          <div id="terminal" class="terminal-host"></div>
+        </section>
+
+        <section id="view-servers" class="view">
+          <h2>Server management</h2>
+          <p class="hint">
+            Metadata, SSH (direct or via Boundary <code>boundary connect ssh</code>), and SCP for direct SSH only.
+          </p>
+          <div class="servers-toolbar">
+            <button type="button" id="server-add">Add server</button>
+            <span id="servers-status" class="hint"></span>
+          </div>
+          <section class="boundary-search-section">
+            <h3>Search Boundary targets</h3>
+            <p class="hint">Uses your current Boundary CLI session. Authenticate on the Boundary tab first.</p>
+            <div class="boundary-search-bar">
+              <input type="text" id="boundary-search-input" placeholder="Filter by name or target ID (optional)" />
+              <button type="button" id="boundary-search-btn">Search</button>
+            </div>
+            <div id="boundary-search-status" class="hint"></div>
+            <div class="boundary-search-results-wrap">
+              <table class="boundary-search-results" id="boundary-search-results">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Target ID</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                    <th>Address</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="boundary-search-tbody"></tbody>
+              </table>
+            </div>
+          </section>
+          <div class="servers-table-wrap">
+            <table class="servers-table" id="servers-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Host</th>
+                  <th>OS</th>
+                  <th>Method</th>
+                  <th>SSH port</th>
+                  <th>User</th>
+                  <th>Services</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="servers-tbody"></tbody>
+            </table>
+          </div>
+          <div class="actions server-ssh-actions">
+            <button type="button" id="server-tunnel-start-btn" disabled>Start tunnel</button>
+            <button type="button" id="server-tunnel-stop-btn" disabled>Stop tunnel</button>
+            <button type="button" id="server-ssh-btn" disabled>SSH</button>
+            <button type="button" id="server-rdp-btn" disabled>RDP</button>
+            <button type="button" id="server-ssh-stop-btn" disabled>Stop SSH</button>
+            <button type="button" id="server-upload-btn" disabled>Upload (SCP)…</button>
+            <button type="button" id="server-download-btn" disabled>Download (SCP)…</button>
+            <label class="server-tunnel-visibility">
+              <input type="checkbox" id="server-tunnel-visible" checked />
+              <span>Show tunnel panel</span>
+            </label>
+          </div>
+          <div id="scp-result" class="scp-result" aria-live="polite"></div>
+          <div class="server-terminals">
+            <div class="server-terminal-block" id="server-tunnel-block">
+              <div class="server-terminal-label">Tunnel</div>
+              <div id="server-tunnel-terminal" class="terminal-host terminal-host-sm"></div>
+            </div>
+            <div class="server-terminal-block">
+              <div class="server-terminal-label">SSH</div>
+              <div id="server-terminal" class="terminal-host terminal-host-sm"></div>
+            </div>
+          </div>
+
+          <div id="server-editor-overlay" class="modal-overlay hidden" aria-hidden="true">
+            <div class="modal-panel" role="dialog">
+              <h3 id="server-editor-title">Server</h3>
+              <div class="form-grid server-editor-grid">
+                <label for="se-name">Name</label>
+                <input id="se-name" type="text" autocomplete="off" />
+                <label for="se-host">Host / address</label>
+                <input id="se-host" type="text" placeholder="IP or DNS" autocomplete="off" />
+                <label for="se-os">OS</label>
+                <select id="se-os">
+                  <option value="linux">Linux</option>
+                  <option value="windows">Windows</option>
+                </select>
+                <label for="se-method">Connect via</label>
+                <select id="se-method">
+                  <option value="ssh">SSH (direct)</option>
+                  <option value="boundary">HashiCorp Boundary</option>
+                </select>
+                <label for="se-port">SSH port</label>
+                <input id="se-port" type="number" min="1" max="65535" value="22" />
+                <label for="se-user">SSH username</label>
+                <input id="se-user" type="text" autocomplete="off" />
+                <label for="se-btarget">Boundary target ID</label>
+                <input id="se-btarget" type="text" placeholder="ttcp_…" autocomplete="off" />
+                <label for="se-listen-port" class="se-boundary-only">Tunnel listen port</label>
+                <input id="se-listen-port" class="se-boundary-only" type="number" min="1" max="65535" value="6222" placeholder="6222" />
+                <label for="se-services">Services (one per line: <code>name port</code>)</label>
+                <textarea id="se-services" rows="4" placeholder="nginx 80&#10;postgres 5432"></textarea>
+              </div>
+              <div class="modal-actions">
+                <button type="button" id="se-cancel">Cancel</button>
+                <button type="button" id="se-save">Save</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="view-boundary" class="view">
+          <h2>Boundary authentication</h2>
+          <p class="hint">
+            Configure <strong>Config → Boundary</strong> (controller URL, CLI path, auth type). <strong>OIDC</strong> runs
+            <code>boundary authenticate oidc</code> and opens your browser. <strong>Password</strong> runs
+            <code>boundary authenticate password</code> and sends the password via the terminal.
+          </p>
+          <div class="actions">
+            <button type="button" id="boundary-start">Start login</button>
+            <button type="button" id="boundary-stop">Stop</button>
+          </div>
+          <div id="boundary-terminal" class="terminal-host terminal-host-sm"></div>
+        </section>
+
+        <section id="view-config" class="view">
+          <h2>Application and Function Config</h2>
+          <p class="hint">
+            Paths and username are saved in a local config file. OpenVPN password and OTP secret are stored in the OS
+            secure store (Windows Credential Manager, macOS Keychain, Linux Secret Service).
+          </p>
+
+          <h3>Config sync (Git repo)</h3>
+          <p class="hint">
+            Use a private Git repo (optionally inside Google Drive/OneDrive/Dropbox) as the shared source of truth for
+            <code>config.json</code>. These helpers copy between the app’s config directory and
+            <code>app-config/config.json</code> in your repo.
+          </p>
+          <div class="form-grid">
+            <label for="cfg-sync-repo-root">Config repo root</label>
+            <input
+              id="cfg-sync-repo-root"
+              type="text"
+              placeholder="D:\\config-sync or /home/you/config-sync"
+              autocomplete="off"
+            />
+
+            <div class="form-grid-span">
+              <div class="hint">
+                App config file path:
+                <code id="cfg-sync-app-path">(resolving…)</code>
+              </div>
+            </div>
+          </div>
+          <div class="actions">
+            <button type="button" id="cfg-sync-pull">Copy from repo → app</button>
+            <button type="button" id="cfg-sync-push">Copy from app → repo</button>
+            <span id="cfg-sync-status" class="hint"></span>
+          </div>
+
+          <h3>App Runtime</h3>
+          <div class="form-grid">
+            <label for="cfg-terminal-cols">Default terminal cols</label>
+            <input id="cfg-terminal-cols" type="number" min="40" max="300" />
+
+            <label for="cfg-terminal-rows">Default terminal rows</label>
+            <input id="cfg-terminal-rows" type="number" min="10" max="120" />
+          </div>
+
+          <h3>OpenVPN Function</h3>
+          <div class="form-grid">
+            <label for="cfg-openvpn-executable">OpenVPN executable</label>
+            <div class="inline-input-actions">
+              <input id="cfg-openvpn-executable" type="text" placeholder="C:\\Program Files\\OpenVPN\\bin\\openvpn.exe" />
+              <button id="cfg-openvpn-browse" type="button">Browse</button>
+              <button id="cfg-openvpn-detect" type="button">Auto detect</button>
+            </div>
+
+            <label for="cfg-openvpn-ovpn">OVPN file</label>
+            <div class="inline-input-actions single-action">
+              <input id="cfg-openvpn-ovpn" type="text" placeholder="C:\\Users\\you\\OpenVPN\\config\\profile.ovpn" />
+              <button id="cfg-openvpn-ovpn-browse" type="button">Browse</button>
+            </div>
+
+            <label for="cfg-openvpn-extra-args">Extra args (optional)</label>
+            <input id="cfg-openvpn-extra-args" type="text" placeholder="--verb 3" />
+
+            <label for="cfg-openvpn-username">Username</label>
+            <input id="cfg-openvpn-username" type="text" autocomplete="off" />
+
+            <label for="cfg-openvpn-password">Password</label>
+            <input id="cfg-openvpn-password" type="text" class="masked-secret" autocomplete="off" spellcheck="false" />
+
+            <label for="cfg-openvpn-otp-secret">OTP secret (base32)</label>
+            <input id="cfg-openvpn-otp-secret" type="text" class="masked-secret" autocomplete="off" spellcheck="false" />
+            <div class="form-grid-span openvpn-terminate-block">
+              <label class="openvpn-terminate-check" for="cfg-openvpn-terminate-with-helper">
+                <input id="cfg-openvpn-terminate-with-helper" type="checkbox" />
+                <span><strong>Stop OpenVPN when helper closes</strong> <span class="muted">(Windows)</span></span>
+              </label>
+              <p class="hint openvpn-terminate-hint">
+                Off by default: VPN stays up if you close the elevated PowerShell helper. When enabled, OpenVPN is tied
+                to the helper via a Windows job object, so closing the helper stops the VPN.
+              </p>
+            </div>
+          </div>
+
+          <h3>Boundary (HashiCorp)</h3>
+          <div class="form-grid">
+            <label for="cfg-boundary-cli">Boundary CLI executable</label>
+            <div class="inline-input-actions single-action">
+              <input id="cfg-boundary-cli" type="text" placeholder="boundary.exe or full path" />
+              <button id="cfg-boundary-browse" type="button">Browse</button>
+            </div>
+            <label for="cfg-boundary-addr">Controller URL</label>
+            <input id="cfg-boundary-addr" type="text" placeholder="https://boundary.example.com:9200" />
+            <label for="cfg-boundary-auth-kind">Auth type</label>
+            <select id="cfg-boundary-auth-kind">
+              <option value="oidc">OIDC (browser login)</option>
+              <option value="password">Password</option>
+            </select>
+            <label for="cfg-boundary-auth-method">Auth method ID</label>
+            <input id="cfg-boundary-auth-method" type="text" placeholder="amoidc_… or ampw_…" autocomplete="off" />
+            <label for="cfg-boundary-connect-ssh-options">SSH options for Boundary connect</label>
+            <input id="cfg-boundary-connect-ssh-options" type="text" placeholder="-o MACs=hmac-sha2-256 (fixes Corrupted MAC on input)" />
+            <label for="cfg-boundary-login" class="cfg-boundary-password-only">Login name</label>
+            <input id="cfg-boundary-login" class="cfg-boundary-password-only" type="text" autocomplete="off" />
+            <label for="cfg-boundary-password" class="cfg-boundary-password-only">Password</label>
+            <input
+              id="cfg-boundary-password"
+              class="cfg-boundary-password-only masked-secret"
+              type="text"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </div>
+
+          <div class="actions">
+            <button id="cfg-save">Save Config</button>
+            <button id="cfg-reload">Reload Config</button>
+            <span id="cfg-status" class="hint"></span>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
