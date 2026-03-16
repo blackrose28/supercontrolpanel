@@ -2261,7 +2261,7 @@ fn delete_server(app: AppHandle, id: String) -> Result<Vec<Server>, String> {
     Ok(list)
 }
 
-/// Search Boundary targets (uses CLI token). Optional name filter; empty = list all.
+/// Search Boundary targets (uses CLI token). Optional text filter; empty = list all.
 #[tauri::command]
 fn search_boundary_targets(
     app: AppHandle,
@@ -2345,7 +2345,10 @@ fn search_boundary_targets(
             .unwrap_or("")
             .to_string();
         if let Some(ref f) = filter_lower {
-            if !name.to_lowercase().contains(f) && !id.to_lowercase().contains(f) {
+            if !name.to_lowercase().contains(f)
+                && !id.to_lowercase().contains(f)
+                && !description.to_lowercase().contains(f)
+            {
                 continue;
             }
         }

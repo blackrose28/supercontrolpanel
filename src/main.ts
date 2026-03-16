@@ -183,6 +183,12 @@ const cfgSyncStatus = mustElement<HTMLElement>("#cfg-sync-status");
 
 const serversTbody = mustElement<HTMLElement>("#servers-tbody");
 const serversStatus = mustElement<HTMLElement>("#servers-status");
+const serversSearchInput = mustElement<HTMLInputElement>(
+  "#servers-search-input",
+);
+const serversSearchClearBtn = mustElement<HTMLButtonElement>(
+  "#servers-search-clear",
+);
 const boundarySearchInput = mustElement<HTMLInputElement>(
   "#boundary-search-input",
 );
@@ -286,6 +292,7 @@ const serverTunnelBuffers: Record<string, string> = {};
 const serverSshBuffers: Record<string, string> = {};
 let boundarySessionId: string | null = null;
 let serversList: Server[] = [];
+let serversSearchTerm = "";
 let selectedServerId: string | null = null;
 let editingServerId: string | null = null;
 let appConfig: AppConfig | null = null;
@@ -998,6 +1005,25 @@ function formatServicesLines(services: ServerService[]): string {
   return services.map((s) => `${s.name} ${s.port}`).join("\n");
 }
 
+function matchesServerSearch(server: Server, rawTerm: string): boolean {
+  const term = rawTerm.trim().toLowerCase();
+  if (!term) {
+    return true;
+  }
+  const haystack = [
+    server.name,
+    server.host,
+    server.os,
+    server.connectionMethod,
+    server.sshUser,
+    server.boundaryTargetId,
+    ...server.services.map((service) => `${service.name} ${service.port}`),
+  ]
+    .join("\n")
+    .toLowerCase();
+  return haystack.includes(term);
+}
+
 function parseServicesText(text: string): ServerService[] {
   const out: ServerService[] = [];
   for (const line of text.split("\n")) {
@@ -1038,7 +1064,10 @@ function selectServer(serverId: string | null) {
 }
 
 function renderServersTable() {
-  serversTbody.innerHTML = serversList
+  const filteredServers = serversList.filter((s) =>
+    matchesServerSearch(s, serversSearchTerm),
+  );
+  serversTbody.innerHTML = filteredServers
     .map((s) => {
       const svc =
         s.services.map((x) => `${x.name}:${x.port}`).join(", ") || "—";
@@ -1058,6 +1087,9 @@ function renderServersTable() {
       </tr>`;
     })
     .join("");
+  if (selectedServerId && !serversList.some((s) => s.id === selectedServerId)) {
+    selectedServerId = null;
+  }
   serversTbody.querySelectorAll("tr[data-id]").forEach((row) => {
     row.addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("button")) {
@@ -1091,11 +1123,26 @@ function renderServersTable() {
         renderServersTable();
         syncServerActions();
         serversStatus.textContent = "Deleted.";
+        updateServersStatus();
       } catch (err) {
         serversStatus.textContent = String(err);
       }
     });
   });
+}
+
+function updateServersStatus(message?: string) {
+  if (message) {
+    serversStatus.textContent = message;
+    return;
+  }
+  const visibleCount = serversList.filter((s) =>
+    matchesServerSearch(s, serversSearchTerm),
+  ).length;
+  const searchPart = serversSearchTerm.trim()
+    ? ` ${visibleCount}/${serversList.length} visible.`
+    : ` ${serversList.length} server(s).`;
+  serversStatus.textContent = `Internal servers:${searchPart}`;
 }
 
 function syncServerEditorBoundaryFields() {
@@ -1147,7 +1194,7 @@ async function loadServers() {
   try {
     serversList = await invoke<Server[]>("list_servers");
     renderServersTable();
-    serversStatus.textContent = `${serversList.length} server(s).`;
+    updateServersStatus();
   } catch (e) {
     serversStatus.textContent = String(e);
   }
@@ -1233,7 +1280,7 @@ async function addBoundaryTargetToList(
     btn.textContent = "Adding…";
     serversList = await invoke<Server[]>("upsert_server", { server });
     renderServersTable();
-    serversStatus.textContent = `Added "${server.name}" to server list.`;
+    updateServersStatus(`Added "${server.name}" to internal server list.`);
     btn.textContent = "Added";
   } catch (e) {
     serversStatus.textContent = String(e);
@@ -1276,6 +1323,32 @@ navBoundary.addEventListener("click", () => {
 });
 
 serverAddBtn.addEventListener("click", () => openServerEditor(null));
+
+serversSearchInput.addEventListener("input", () => {
+  serversSearchTerm = serversSearchInput.value;
+  const selectedServer = selectedServerId
+    ? serversList.find((s) => s.id === selectedServerId)
+    : null;
+  if (
+    selectedServer &&
+    !matchesServerSearch(selectedServer, serversSearchTerm)
+  ) {
+    selectServer(null);
+  } else {
+    renderServersTable();
+    syncServerActions();
+  }
+  updateServersStatus();
+});
+
+serversSearchClearBtn.addEventListener("click", () => {
+  serversSearchTerm = "";
+  serversSearchInput.value = "";
+  renderServersTable();
+  syncServerActions();
+  updateServersStatus();
+  serversSearchInput.focus();
+});
 
 boundarySearchBtn.addEventListener("click", () => void runBoundarySearch());
 boundarySearchInput.addEventListener("keydown", (e) => {
@@ -1328,7 +1401,7 @@ seSave.addEventListener("click", async () => {
     serversList = await invoke<Server[]>("upsert_server", { server });
     closeServerEditor();
     renderServersTable();
-    serversStatus.textContent = "Saved.";
+    updateServersStatus("Saved.");
     syncServerActions();
   } catch (e) {
     serversStatus.textContent = String(e);

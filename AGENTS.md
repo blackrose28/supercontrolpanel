@@ -126,6 +126,7 @@ Do not break these names unless updating both frontend and backend in the same c
   - Output path is `openvpn-log` (helper) or `pty-output` (non-Windows fallback).
 - Servers page:
   - Table of `Server` records (`name`, `host`, `os`, connection method, SSH port, SSH user, services).
+  - Includes its own local search field for filtering the internal server list without querying Boundary.
   - Supports two connection methods:
     - `ssh` (direct host/port/user)
     - `boundary` (target ID, tunnel listen port, SSH user to connect to `127.0.0.1`).
@@ -138,7 +139,9 @@ Do not break these names unless updating both frontend and backend in the same c
   - Servers view includes a "Show tunnel panel" checkbox that toggles visibility of the tunnel PTY panel so the SSH terminal can use more space when tunnel output is not needed.
 - Boundary page:
   - Runs `boundary authenticate` in a PTY (OIDC or password mode).
-  - Shows live login PTY and updates `boundary-auth` function status based on CLI token.
+  - Shows a compact live login PTY and updates `boundary-auth` function status based on CLI token.
+  - Owns the Boundary target search UI; search results can be added into the Servers list.
+  - Boundary target search filter matches target name, target ID, and description text.
 
 ## If you add features
 
