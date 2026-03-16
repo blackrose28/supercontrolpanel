@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
+import {
+  open as openDialog,
+  save as saveDialog,
+} from "@tauri-apps/plugin-dialog";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "./styles.css";
@@ -63,6 +66,9 @@ type AppConfig = {
 
 type SyncSettings = {
   repoRoot: string;
+  openvpnExecutablePath?: string;
+  openvpnOvpnPath?: string;
+  boundaryCliPath?: string;
 };
 
 type ServerService = { name: string; port: number };
@@ -109,34 +115,66 @@ const viewServers = mustElement<HTMLElement>("#view-servers");
 const viewBoundary = mustElement<HTMLElement>("#view-boundary");
 const viewConfig = mustElement<HTMLElement>("#view-config");
 const statusList = mustElement<HTMLElement>("#status-list");
-const openvpnConfigPreview = mustElement<HTMLElement>("#openvpn-config-preview");
+const openvpnConfigPreview = mustElement<HTMLElement>(
+  "#openvpn-config-preview",
+);
 const vpnStartBtn = mustElement<HTMLButtonElement>("#vpn-start");
 const vpnStopBtn = mustElement<HTMLButtonElement>("#vpn-stop");
 const cfgTerminalCols = mustElement<HTMLInputElement>("#cfg-terminal-cols");
 const cfgTerminalRows = mustElement<HTMLInputElement>("#cfg-terminal-rows");
-const cfgOpenvpnExecutable = mustElement<HTMLInputElement>("#cfg-openvpn-executable");
-const cfgOpenvpnBrowseBtn = mustElement<HTMLButtonElement>("#cfg-openvpn-browse");
-const cfgOpenvpnDetectBtn = mustElement<HTMLButtonElement>("#cfg-openvpn-detect");
+const cfgOpenvpnExecutable = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-executable",
+);
+const cfgOpenvpnBrowseBtn = mustElement<HTMLButtonElement>(
+  "#cfg-openvpn-browse",
+);
+const cfgOpenvpnDetectBtn = mustElement<HTMLButtonElement>(
+  "#cfg-openvpn-detect",
+);
 const cfgOpenvpnOvpn = mustElement<HTMLInputElement>("#cfg-openvpn-ovpn");
-const cfgOpenvpnOvpnBrowseBtn = mustElement<HTMLButtonElement>("#cfg-openvpn-ovpn-browse");
-const cfgOpenvpnExtraArgs = mustElement<HTMLInputElement>("#cfg-openvpn-extra-args");
-const cfgOpenvpnUsername = mustElement<HTMLInputElement>("#cfg-openvpn-username");
-const cfgOpenvpnPassword = mustElement<HTMLInputElement>("#cfg-openvpn-password");
-const cfgOpenvpnOtpSecret = mustElement<HTMLInputElement>("#cfg-openvpn-otp-secret");
-const cfgOpenvpnTerminateWithHelper = mustElement<HTMLInputElement>("#cfg-openvpn-terminate-with-helper");
+const cfgOpenvpnOvpnBrowseBtn = mustElement<HTMLButtonElement>(
+  "#cfg-openvpn-ovpn-browse",
+);
+const cfgOpenvpnExtraArgs = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-extra-args",
+);
+const cfgOpenvpnUsername = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-username",
+);
+const cfgOpenvpnPassword = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-password",
+);
+const cfgOpenvpnOtpSecret = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-otp-secret",
+);
+const cfgOpenvpnTerminateWithHelper = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-terminate-with-helper",
+);
 const cfgSaveBtn = mustElement<HTMLButtonElement>("#cfg-save");
 const cfgReloadBtn = mustElement<HTMLButtonElement>("#cfg-reload");
 const cfgStatus = mustElement<HTMLElement>("#cfg-status");
 const cfgBoundaryCli = mustElement<HTMLInputElement>("#cfg-boundary-cli");
-const cfgBoundaryBrowseBtn = mustElement<HTMLButtonElement>("#cfg-boundary-browse");
+const cfgBoundaryBrowseBtn = mustElement<HTMLButtonElement>(
+  "#cfg-boundary-browse",
+);
 const cfgBoundaryAddr = mustElement<HTMLInputElement>("#cfg-boundary-addr");
-const cfgBoundaryAuthKind = mustElement<HTMLSelectElement>("#cfg-boundary-auth-kind");
-const cfgBoundaryAuthMethod = mustElement<HTMLInputElement>("#cfg-boundary-auth-method");
-const cfgBoundaryConnectSshOptions = mustElement<HTMLInputElement>("#cfg-boundary-connect-ssh-options");
+const cfgBoundaryAuthKind = mustElement<HTMLSelectElement>(
+  "#cfg-boundary-auth-kind",
+);
+const cfgBoundaryAuthMethod = mustElement<HTMLInputElement>(
+  "#cfg-boundary-auth-method",
+);
+const cfgBoundaryConnectSshOptions = mustElement<HTMLInputElement>(
+  "#cfg-boundary-connect-ssh-options",
+);
 const cfgBoundaryLogin = mustElement<HTMLInputElement>("#cfg-boundary-login");
-const cfgBoundaryPassword = mustElement<HTMLInputElement>("#cfg-boundary-password");
+const cfgBoundaryPassword = mustElement<HTMLInputElement>(
+  "#cfg-boundary-password",
+);
 const cfgBoundaryPasswordOnly = () =>
-  Array.from(document.querySelectorAll<HTMLElement>(".cfg-boundary-password-only"));
+  Array.from(
+    document.querySelectorAll<HTMLElement>(".cfg-boundary-password-only"),
+  );
 const cfgSyncRepoRoot = mustElement<HTMLInputElement>("#cfg-sync-repo-root");
 const cfgSyncAppPath = mustElement<HTMLElement>("#cfg-sync-app-path");
 const cfgSyncPullBtn = mustElement<HTMLButtonElement>("#cfg-sync-pull");
@@ -145,18 +183,30 @@ const cfgSyncStatus = mustElement<HTMLElement>("#cfg-sync-status");
 
 const serversTbody = mustElement<HTMLElement>("#servers-tbody");
 const serversStatus = mustElement<HTMLElement>("#servers-status");
-const boundarySearchInput = mustElement<HTMLInputElement>("#boundary-search-input");
-const boundarySearchBtn = mustElement<HTMLButtonElement>("#boundary-search-btn");
-const boundarySearchStatus = mustElement<HTMLElement>("#boundary-search-status");
+const boundarySearchInput = mustElement<HTMLInputElement>(
+  "#boundary-search-input",
+);
+const boundarySearchBtn = mustElement<HTMLButtonElement>(
+  "#boundary-search-btn",
+);
+const boundarySearchStatus = mustElement<HTMLElement>(
+  "#boundary-search-status",
+);
 const boundarySearchTbody = mustElement<HTMLElement>("#boundary-search-tbody");
 const serverAddBtn = mustElement<HTMLButtonElement>("#server-add");
-const serverTunnelStartBtn = mustElement<HTMLButtonElement>("#server-tunnel-start-btn");
-const serverTunnelStopBtn = mustElement<HTMLButtonElement>("#server-tunnel-stop-btn");
+const serverTunnelStartBtn = mustElement<HTMLButtonElement>(
+  "#server-tunnel-start-btn",
+);
+const serverTunnelStopBtn = mustElement<HTMLButtonElement>(
+  "#server-tunnel-stop-btn",
+);
 const serverSshBtn = mustElement<HTMLButtonElement>("#server-ssh-btn");
 const serverRdpBtn = mustElement<HTMLButtonElement>("#server-rdp-btn");
 const serverSshStopBtn = mustElement<HTMLButtonElement>("#server-ssh-stop-btn");
 const serverUploadBtn = mustElement<HTMLButtonElement>("#server-upload-btn");
-const serverDownloadBtn = mustElement<HTMLButtonElement>("#server-download-btn");
+const serverDownloadBtn = mustElement<HTMLButtonElement>(
+  "#server-download-btn",
+);
 const scpResultEl = mustElement<HTMLElement>("#scp-result");
 const serverEditorOverlay = mustElement<HTMLElement>("#server-editor-overlay");
 const seName = mustElement<HTMLInputElement>("#se-name");
@@ -167,22 +217,27 @@ const sePort = mustElement<HTMLInputElement>("#se-port");
 const seUser = mustElement<HTMLInputElement>("#se-user");
 const seBtarget = mustElement<HTMLInputElement>("#se-btarget");
 const seListenPort = mustElement<HTMLInputElement>("#se-listen-port");
-const seBoundaryOnly = () => Array.from(document.querySelectorAll<HTMLElement>(".se-boundary-only"));
+const seBoundaryOnly = () =>
+  Array.from(document.querySelectorAll<HTMLElement>(".se-boundary-only"));
 const seServices = mustElement<HTMLTextAreaElement>("#se-services");
 const seCancel = mustElement<HTMLButtonElement>("#se-cancel");
 const seSave = mustElement<HTMLButtonElement>("#se-save");
 const boundaryStartBtn = mustElement<HTMLButtonElement>("#boundary-start");
 const boundaryStopBtn = mustElement<HTMLButtonElement>("#boundary-stop");
-const serverTunnelVisibleToggle = mustElement<HTMLInputElement>("#server-tunnel-visible");
+const serverTunnelVisibleToggle = mustElement<HTMLInputElement>(
+  "#server-tunnel-visible",
+);
 
 const serverTerminalHost = mustElement<HTMLElement>("#server-terminal");
-const serverTunnelTerminalHost = mustElement<HTMLElement>("#server-tunnel-terminal");
+const serverTunnelTerminalHost = mustElement<HTMLElement>(
+  "#server-tunnel-terminal",
+);
 const boundaryTerminalHost = mustElement<HTMLElement>("#boundary-terminal");
 
 const term = new Terminal({
   cursorBlink: true,
   convertEol: true,
-  scrollback: 4000
+  scrollback: 4000,
 });
 
 const fitAddon = new FitAddon();
@@ -194,7 +249,7 @@ const serverFit = new FitAddon();
 const serverTerm = new Terminal({
   cursorBlink: true,
   convertEol: true,
-  scrollback: 3000
+  scrollback: 3000,
 });
 serverTerm.loadAddon(serverFit);
 serverTerm.open(serverTerminalHost);
@@ -204,7 +259,7 @@ const serverTunnelFit = new FitAddon();
 const serverTunnelTerm = new Terminal({
   cursorBlink: true,
   convertEol: true,
-  scrollback: 3000
+  scrollback: 3000,
 });
 serverTunnelTerm.loadAddon(serverTunnelFit);
 serverTunnelTerm.open(serverTunnelTerminalHost);
@@ -214,7 +269,7 @@ const boundaryFit = new FitAddon();
 const boundaryTerm = new Terminal({
   cursorBlink: true,
   convertEol: true,
-  scrollback: 3000
+  scrollback: 3000,
 });
 boundaryTerm.loadAddon(boundaryFit);
 boundaryTerm.open(boundaryTerminalHost);
@@ -275,7 +330,8 @@ async function attachListeners() {
 
   unlistenExit = await listen<PtyExitPayload>("pty-exit", (event) => {
     const { id, exitCode, reason } = event.payload;
-    const codePart = exitCode === null ? "unknown code" : `exit code ${exitCode}`;
+    const codePart =
+      exitCode === null ? "unknown code" : `exit code ${exitCode}`;
     const line = `\r\n[PTY exited: ${codePart}, reason=${reason}]\r\n`;
     if (id === openvpnSessionId) {
       term.write(line);
@@ -314,42 +370,55 @@ async function attachListeners() {
     }
   });
 
-  unlistenFunctionStatus = await listen<FunctionStatus>("function-status", (event) => {
-    statusMap.set(event.payload.functionId, event.payload);
-    renderStatusList();
-    if (event.payload.functionId === OPENVPN_FUNCTION_ID) {
-      openvpnSessionId = event.payload.sessionId;
-      syncFunctionButtons();
-    }
-    if (event.payload.functionId.startsWith(SERVER_TUNNEL_PREFIX)) {
-      const serverId = event.payload.functionId.slice(SERVER_TUNNEL_PREFIX.length);
-      if (event.payload.sessionId) {
-        serverTunnelSessions[serverId] = event.payload.sessionId;
-      } else {
-        delete serverTunnelSessions[serverId];
+  unlistenFunctionStatus = await listen<FunctionStatus>(
+    "function-status",
+    (event) => {
+      statusMap.set(event.payload.functionId, event.payload);
+      renderStatusList();
+      if (event.payload.functionId === OPENVPN_FUNCTION_ID) {
+        openvpnSessionId = event.payload.sessionId;
+        syncFunctionButtons();
       }
-      syncServerActions();
-    }
-    if (event.payload.functionId.startsWith(SERVER_SSH_PREFIX)) {
-      const serverId = event.payload.functionId.slice(SERVER_SSH_PREFIX.length);
-      if (event.payload.sessionId) {
-        serverSshSessions[serverId] = event.payload.sessionId;
-      } else {
-        delete serverSshSessions[serverId];
+      if (event.payload.functionId.startsWith(SERVER_TUNNEL_PREFIX)) {
+        const serverId = event.payload.functionId.slice(
+          SERVER_TUNNEL_PREFIX.length,
+        );
+        if (event.payload.sessionId) {
+          serverTunnelSessions[serverId] = event.payload.sessionId;
+        } else {
+          delete serverTunnelSessions[serverId];
+        }
+        syncServerActions();
       }
-      syncServerActions();
-    }
-    if (event.payload.functionId === BOUNDARY_AUTH_FUNCTION_ID) {
-      boundarySessionId = event.payload.sessionId;
-      syncBoundaryButtons();
-    }
-  });
+      if (event.payload.functionId.startsWith(SERVER_SSH_PREFIX)) {
+        const serverId = event.payload.functionId.slice(
+          SERVER_SSH_PREFIX.length,
+        );
+        if (event.payload.sessionId) {
+          serverSshSessions[serverId] = event.payload.sessionId;
+        } else {
+          delete serverSshSessions[serverId];
+        }
+        syncServerActions();
+      }
+      if (event.payload.functionId === BOUNDARY_AUTH_FUNCTION_ID) {
+        boundarySessionId = event.payload.sessionId;
+        syncBoundaryButtons();
+      }
+    },
+  );
 
-  unlistenOpenVpnLog = await listen<OpenVpnLogPayload>("openvpn-log", (event) => {
-    if (event.payload.functionId === OPENVPN_FUNCTION_ID && event.payload.sessionId === openvpnSessionId) {
-      term.write(event.payload.data);
-    }
-  });
+  unlistenOpenVpnLog = await listen<OpenVpnLogPayload>(
+    "openvpn-log",
+    (event) => {
+      if (
+        event.payload.functionId === OPENVPN_FUNCTION_ID &&
+        event.payload.sessionId === openvpnSessionId
+      ) {
+        term.write(event.payload.data);
+      }
+    },
+  );
 }
 
 async function detachListeners() {
@@ -371,7 +440,9 @@ async function detachListeners() {
   }
 }
 
-function setActiveView(which: "status" | "openvpn" | "servers" | "boundary" | "config") {
+function setActiveView(
+  which: "status" | "openvpn" | "servers" | "boundary" | "config",
+) {
   navStatus.classList.toggle("active", which === "status");
   navOpenvpn.classList.toggle("active", which === "openvpn");
   navServers.classList.toggle("active", which === "servers");
@@ -398,7 +469,7 @@ function setActiveView(which: "status" | "openvpn" | "servers" | "boundary" | "c
 
 const STATUS_CARD_TITLE: Record<string, string> = {
   [OPENVPN_FUNCTION_ID]: "OpenVPN",
-  [BOUNDARY_AUTH_FUNCTION_ID]: "Boundary CLI"
+  [BOUNDARY_AUTH_FUNCTION_ID]: "Boundary CLI",
 };
 
 function escapeHtml(s: string): string {
@@ -417,7 +488,10 @@ function renderStatusList() {
   const serverIds = new Set(serversList.map((s) => s.id));
   const statuses = [...statusMap.values()]
     .filter((s) => {
-      if (s.functionId.startsWith(SERVER_TUNNEL_PREFIX) || s.functionId.startsWith(SERVER_SSH_PREFIX)) {
+      if (
+        s.functionId.startsWith(SERVER_TUNNEL_PREFIX) ||
+        s.functionId.startsWith(SERVER_SSH_PREFIX)
+      ) {
         const serverId = s.functionId.startsWith(SERVER_TUNNEL_PREFIX)
           ? s.functionId.slice(SERVER_TUNNEL_PREFIX.length)
           : s.functionId.slice(SERVER_SSH_PREFIX.length);
@@ -431,10 +505,15 @@ function renderStatusList() {
     .sort((a, b) => a.functionId.localeCompare(b.functionId));
   statusList.innerHTML = statuses
     .map((status) => {
-      const sessionPart = status.sessionId ? `session=${status.sessionId}` : "session=none";
+      const sessionPart = status.sessionId
+        ? `session=${status.sessionId}`
+        : "session=none";
       let title = STATUS_CARD_TITLE[status.functionId];
       if (!title) {
-        if (status.functionId.startsWith(SERVER_TUNNEL_PREFIX) || status.functionId.startsWith(SERVER_SSH_PREFIX)) {
+        if (
+          status.functionId.startsWith(SERVER_TUNNEL_PREFIX) ||
+          status.functionId.startsWith(SERVER_SSH_PREFIX)
+        ) {
           const isTunnel = status.functionId.startsWith(SERVER_TUNNEL_PREFIX);
           const serverId = isTunnel
             ? status.functionId.slice(SERVER_TUNNEL_PREFIX.length)
@@ -485,24 +564,33 @@ async function navigateFromStatusCard(functionId: string) {
     setActiveView("boundary");
     requestAnimationFrame(() => {
       boundaryStartBtn.focus();
-      boundaryTerminalHost.scrollIntoView({ block: "start", behavior: "smooth" });
+      boundaryTerminalHost.scrollIntoView({
+        block: "start",
+        behavior: "smooth",
+      });
     });
     return;
   }
 
-  if (functionId.startsWith(SERVER_TUNNEL_PREFIX) || functionId.startsWith(SERVER_SSH_PREFIX)) {
+  if (
+    functionId.startsWith(SERVER_TUNNEL_PREFIX) ||
+    functionId.startsWith(SERVER_SSH_PREFIX)
+  ) {
     const serverId = functionId.startsWith(SERVER_TUNNEL_PREFIX)
       ? functionId.slice(SERVER_TUNNEL_PREFIX.length)
       : functionId.slice(SERVER_SSH_PREFIX.length);
     setActiveView("servers");
     await loadServers();
     if (!serversList.some((s) => s.id === serverId)) {
-      serversStatus.textContent = "The server for this status no longer exists.";
+      serversStatus.textContent =
+        "The server for this status no longer exists.";
       return;
     }
     selectServer(serverId);
     requestAnimationFrame(() => {
-      const rows = Array.from(serversTbody.querySelectorAll<HTMLTableRowElement>("tr[data-id]"));
+      const rows = Array.from(
+        serversTbody.querySelectorAll<HTMLTableRowElement>("tr[data-id]"),
+      );
       const row = rows.find((r) => r.dataset.id === serverId);
       if (row) {
         row.tabIndex = -1;
@@ -528,14 +616,14 @@ function renderConfigPreview() {
   const username = appConfig.openvpn.username || "(empty)";
   const passwordLabel = appConfig.openvpn.password ? "********" : "(empty)";
   const otpLabel = appConfig.openvpn.otpSecret ? "configured" : "(empty)";
-  const executable = appConfig.openvpn.executablePath || appConfig.openvpn.command || "(empty)";
+  const executable =
+    appConfig.openvpn.executablePath || appConfig.openvpn.command || "(empty)";
   const ovpn = appConfig.openvpn.ovpnPath || "(empty)";
   const link =
     appConfig.openvpn.terminateOpenVpnWhenHelperExits === true
       ? "helper close stops VPN"
       : "VPN survives helper close";
-  openvpnConfigPreview.textContent =
-    `Executable: ${executable} | OVPN: ${ovpn} | Username: ${username} | Password: ${passwordLabel} | OTP secret: ${otpLabel} | ${link}`;
+  openvpnConfigPreview.textContent = `Executable: ${executable} | OVPN: ${ovpn} | Username: ${username} | Password: ${passwordLabel} | OTP secret: ${otpLabel} | ${link}`;
 }
 
 function renderConfigForm() {
@@ -544,13 +632,15 @@ function renderConfigForm() {
   }
   cfgTerminalCols.value = String(appConfig.app.defaultTerminalCols);
   cfgTerminalRows.value = String(appConfig.app.defaultTerminalRows);
-  cfgOpenvpnExecutable.value = appConfig.openvpn.executablePath || appConfig.openvpn.command || "";
+  cfgOpenvpnExecutable.value =
+    appConfig.openvpn.executablePath || appConfig.openvpn.command || "";
   cfgOpenvpnOvpn.value = appConfig.openvpn.ovpnPath;
   cfgOpenvpnExtraArgs.value = appConfig.openvpn.extraArgs;
   cfgOpenvpnUsername.value = appConfig.openvpn.username;
   cfgOpenvpnPassword.value = appConfig.openvpn.password;
   cfgOpenvpnOtpSecret.value = appConfig.openvpn.otpSecret;
-  cfgOpenvpnTerminateWithHelper.checked = appConfig.openvpn.terminateOpenVpnWhenHelperExits === true;
+  cfgOpenvpnTerminateWithHelper.checked =
+    appConfig.openvpn.terminateOpenVpnWhenHelperExits === true;
   const b = appConfig.boundary ?? {
     cliPath: "",
     addr: "",
@@ -558,7 +648,7 @@ function renderConfigForm() {
     authMethodId: "",
     loginName: "",
     password: "",
-    connectSshOptions: ""
+    connectSshOptions: "",
   };
   cfgBoundaryCli.value = b.cliPath;
   cfgBoundaryAddr.value = b.addr;
@@ -597,7 +687,7 @@ function readConfigForm(): AppConfig | null {
   return {
     app: {
       defaultTerminalCols: cols,
-      defaultTerminalRows: rows
+      defaultTerminalRows: rows,
     },
     openvpn: {
       executablePath: cfgOpenvpnExecutable.value.trim(),
@@ -606,7 +696,7 @@ function readConfigForm(): AppConfig | null {
       username: cfgOpenvpnUsername.value.trim(),
       password: pw || appConfig?.openvpn.password || "",
       otpSecret: otp || appConfig?.openvpn.otpSecret || "",
-      terminateOpenVpnWhenHelperExits: cfgOpenvpnTerminateWithHelper.checked
+      terminateOpenVpnWhenHelperExits: cfgOpenvpnTerminateWithHelper.checked,
     },
     boundary: {
       cliPath: cfgBoundaryCli.value.trim(),
@@ -615,8 +705,8 @@ function readConfigForm(): AppConfig | null {
       authMethodId: cfgBoundaryAuthMethod.value.trim(),
       loginName: cfgBoundaryLogin.value.trim(),
       password: bpw || appConfig?.boundary?.password || "",
-      connectSshOptions: cfgBoundaryConnectSshOptions.value.trim()
-    }
+      connectSshOptions: cfgBoundaryConnectSshOptions.value.trim(),
+    },
   };
 }
 
@@ -633,8 +723,13 @@ async function saveConfig() {
     return;
   }
   try {
-    appConfig = await invoke<AppConfig>("save_app_config", { config: nextConfig });
-    console.info("[SCP] save_app_config ok; password in response:", Boolean(appConfig.openvpn.password));
+    appConfig = await invoke<AppConfig>("save_app_config", {
+      config: nextConfig,
+    });
+    console.info(
+      "[SCP] save_app_config ok; password in response:",
+      Boolean(appConfig.openvpn.password),
+    );
     renderConfigForm();
     cfgStatus.textContent = "Config saved.";
     void refreshConfigPaths();
@@ -667,7 +762,8 @@ async function refreshConfigPaths() {
 }
 
 async function runConfigSync(mode: "pull" | "push") {
-  const repoRoot = cfgSyncRepoRoot.value.trim() || syncSettings?.repoRoot?.trim() || "";
+  const repoRoot =
+    cfgSyncRepoRoot.value.trim() || syncSettings?.repoRoot?.trim() || "";
   if (!repoRoot) {
     cfgSyncStatus.textContent = "Set config repo root first.";
     return;
@@ -679,7 +775,8 @@ async function runConfigSync(mode: "pull" | "push") {
   } catch {
     // Non-fatal; still attempt to run sync.
   }
-  cfgSyncStatus.textContent = mode === "pull" ? "Copying from repo to app…" : "Copying from app to repo…";
+  cfgSyncStatus.textContent =
+    mode === "pull" ? "Copying from repo to app…" : "Copying from app to repo…";
   try {
     if (mode === "pull") {
       await invoke("sync_config_pull", { repoRoot });
@@ -697,7 +794,7 @@ async function browseOpenvpnExecutable() {
   const selected = await openDialog({
     directory: false,
     multiple: false,
-    title: "Select OpenVPN executable"
+    title: "Select OpenVPN executable",
   });
   if (typeof selected === "string") {
     cfgOpenvpnExecutable.value = selected;
@@ -710,7 +807,7 @@ async function browseOpenvpnOvpnFile() {
     directory: false,
     multiple: false,
     title: "Select OVPN config file",
-    filters: [{ name: "OVPN config", extensions: ["ovpn"] }]
+    filters: [{ name: "OVPN config", extensions: ["ovpn"] }],
   });
   if (typeof selected === "string") {
     cfgOpenvpnOvpn.value = selected;
@@ -725,8 +822,8 @@ async function browseBoundaryCli() {
     title: "Select Boundary CLI executable",
     filters: [
       { name: "Executable", extensions: ["exe"] },
-      { name: "All files", extensions: ["*"] }
-    ]
+      { name: "All files", extensions: ["*"] },
+    ],
   });
   if (typeof selected === "string") {
     cfgBoundaryCli.value = selected;
@@ -743,7 +840,9 @@ async function autoDetectOpenvpnExecutable() {
     if (saveNow) {
       const nextConfig = readConfigForm();
       if (nextConfig) {
-        appConfig = await invoke<AppConfig>("save_app_config", { config: nextConfig });
+        appConfig = await invoke<AppConfig>("save_app_config", {
+          config: nextConfig,
+        });
         renderConfigForm();
         cfgStatus.textContent = "Config saved with detected executable.";
       }
@@ -789,7 +888,9 @@ async function refreshStatuses() {
 async function startOpenVpnFunction() {
   if (!appConfig) {
     console.warn("[SCP] Start blocked: appConfig null");
-    term.writeln("\r\n[Config not loaded. Open Config page and reload/save first.]\r\n");
+    term.writeln(
+      "\r\n[Config not loaded. Open Config page and reload/save first.]\r\n",
+    );
     return;
   }
   if (
@@ -802,10 +903,10 @@ async function startOpenVpnFunction() {
       executablePath: Boolean(appConfig.openvpn.executablePath),
       ovpnPath: Boolean(appConfig.openvpn.ovpnPath),
       username: Boolean(appConfig.openvpn.username),
-      password: Boolean(appConfig.openvpn.password)
+      password: Boolean(appConfig.openvpn.password),
     });
     term.writeln(
-      "\r\n[OpenVPN config incomplete. Fill executable/ovpn/username/password in Config page.]\r\n"
+      "\r\n[OpenVPN config incomplete. Fill executable/ovpn/username/password in Config page.]\r\n",
     );
     return;
   }
@@ -816,10 +917,13 @@ async function startOpenVpnFunction() {
     const result = await invoke<StartFunctionResult>("start_openvpn_function", {
       command: "",
       username: "",
-      password: ""
+      password: "",
     });
     openvpnSessionId = result.sessionId;
-    console.info("[SCP] start_openvpn_function ok, sessionId=", result.sessionId);
+    console.info(
+      "[SCP] start_openvpn_function ok, sessionId=",
+      result.sessionId,
+    );
     syncFunctionButtons();
   } catch (e) {
     console.error("[SCP] start_openvpn_function failed", e);
@@ -842,10 +946,16 @@ function writePtyIf(id: string | null, data: string) {
 
 term.onData((data) => writePtyIf(openvpnSessionId, data));
 serverTerm.onData((data) =>
-  writePtyIf(selectedServerId ? serverSshSessions[selectedServerId] ?? null : null, data)
+  writePtyIf(
+    selectedServerId ? (serverSshSessions[selectedServerId] ?? null) : null,
+    data,
+  ),
 );
 serverTunnelTerm.onData((data) =>
-  writePtyIf(selectedServerId ? serverTunnelSessions[selectedServerId] ?? null : null, data)
+  writePtyIf(
+    selectedServerId ? (serverTunnelSessions[selectedServerId] ?? null) : null,
+    data,
+  ),
 );
 boundaryTerm.onData((data) => writePtyIf(boundarySessionId, data));
 
@@ -855,27 +965,31 @@ window.addEventListener("resize", () => {
   serverTunnelFit.fit();
   boundaryFit.fit();
   if (openvpnSessionId) {
-    void invoke("resize_pty", { id: openvpnSessionId, cols: term.cols, rows: term.rows });
+    void invoke("resize_pty", {
+      id: openvpnSessionId,
+      cols: term.cols,
+      rows: term.rows,
+    });
   }
   for (const sid of Object.values(serverTunnelSessions)) {
     void invoke("resize_pty", {
       id: sid,
       cols: serverTunnelTerm.cols,
-      rows: serverTunnelTerm.rows
+      rows: serverTunnelTerm.rows,
     });
   }
   for (const sid of Object.values(serverSshSessions)) {
     void invoke("resize_pty", {
       id: sid,
       cols: serverTerm.cols,
-      rows: serverTerm.rows
+      rows: serverTerm.rows,
     });
   }
   if (boundarySessionId) {
     void invoke("resize_pty", {
       id: boundarySessionId,
       cols: boundaryTerm.cols,
-      rows: boundaryTerm.rows
+      rows: boundaryTerm.rows,
     });
   }
 });
@@ -926,8 +1040,9 @@ function selectServer(serverId: string | null) {
 function renderServersTable() {
   serversTbody.innerHTML = serversList
     .map((s) => {
-      const svc = s.services.map((x) => `${x.name}:${x.port}`).join(", ") || "—";
-      const sel = s.id === selectedServerId ? " class=\"selected\"" : "";
+      const svc =
+        s.services.map((x) => `${x.name}:${x.port}`).join(", ") || "—";
+      const sel = s.id === selectedServerId ? ' class="selected"' : "";
       return `<tr data-id="${s.id}"${sel}>
         <td>${escapeHtml(s.name)}</td>
         <td>${escapeHtml(s.host)}</td>
@@ -1045,9 +1160,12 @@ async function runBoundarySearch() {
   boundarySearchStatus.textContent = "Searching…";
   boundarySearchBtn.disabled = true;
   try {
-    boundarySearchResults = await invoke<BoundaryTargetSummary[]>("search_boundary_targets", {
-      filter: filter || null
-    });
+    boundarySearchResults = await invoke<BoundaryTargetSummary[]>(
+      "search_boundary_targets",
+      {
+        filter: filter || null,
+      },
+    );
     renderBoundarySearchResults();
     boundarySearchStatus.textContent =
       boundarySearchResults.length === 0
@@ -1075,26 +1193,28 @@ function renderBoundarySearchResults() {
           <td class="row-actions">
             <button type="button" class="link-btn boundary-add-target-btn" data-target-id="${escapeHtml(t.id)}" data-target-name="${escapeHtml(t.name)}" data-target-address="${escapeHtml(t.address ?? "")}">Add to list</button>
           </td>
-        </tr>`
+        </tr>`,
     )
     .join("");
-  boundarySearchTbody.querySelectorAll(".boundary-add-target-btn").forEach((btn) => {
-    btn.addEventListener("click", async (ev) => {
-      ev.stopPropagation();
-      const el = btn as HTMLButtonElement;
-      const id = el.dataset.targetId!;
-      const name = el.dataset.targetName!;
-      const address = el.dataset.targetAddress ?? "";
-      await addBoundaryTargetToList(id, name, address, el);
+  boundarySearchTbody
+    .querySelectorAll(".boundary-add-target-btn")
+    .forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        ev.stopPropagation();
+        const el = btn as HTMLButtonElement;
+        const id = el.dataset.targetId!;
+        const name = el.dataset.targetName!;
+        const address = el.dataset.targetAddress ?? "";
+        await addBoundaryTargetToList(id, name, address, el);
+      });
     });
-  });
 }
 
 async function addBoundaryTargetToList(
   targetId: string,
   name: string,
   address: string,
-  btn: HTMLButtonElement
+  btn: HTMLButtonElement,
 ) {
   const server: Server = {
     id: "",
@@ -1106,7 +1226,7 @@ async function addBoundaryTargetToList(
     sshUser: "",
     boundaryTargetId: targetId,
     boundaryListenPort: 6222,
-    services: []
+    services: [],
   };
   try {
     btn.disabled = true;
@@ -1123,11 +1243,13 @@ async function addBoundaryTargetToList(
 }
 
 function syncServerActions() {
-  const sel = selectedServerId ? serversList.find((s) => s.id === selectedServerId) : undefined;
+  const sel = selectedServerId
+    ? serversList.find((s) => s.id === selectedServerId)
+    : undefined;
   const tunnelRunning = Boolean(sel && serverTunnelSessions[sel.id]);
   const sshRunning = Boolean(sel && serverSshSessions[sel.id]);
   const isBoundary = sel?.connectionMethod === "boundary";
-   const isWindows = sel?.os === "windows";
+  const isWindows = sel?.os === "windows";
   serverTunnelStartBtn.disabled = !sel || !isBoundary || tunnelRunning;
   serverTunnelStopBtn.disabled = !tunnelRunning;
   serverSshBtn.disabled = !sel || sshRunning;
@@ -1176,15 +1298,19 @@ seSave.addEventListener("click", async () => {
     sshPort: Math.min(65535, Math.max(1, Number(sePort.value) || 22)),
     sshUser: seUser.value.trim(),
     boundaryTargetId: seBtarget.value.trim(),
-    boundaryListenPort: seMethod.value === "boundary" ? Math.min(65535, Math.max(1, Number(seListenPort.value) || 6222)) : 0,
-    services: parseServicesText(seServices.value)
+    boundaryListenPort:
+      seMethod.value === "boundary"
+        ? Math.min(65535, Math.max(1, Number(seListenPort.value) || 6222))
+        : 0,
+    services: parseServicesText(seServices.value),
   };
   if (!server.name) {
     serversStatus.textContent = "Name is required.";
     return;
   }
   if (server.connectionMethod === "ssh" && (!server.host || !server.sshUser)) {
-    serversStatus.textContent = "Host and SSH user are required for direct SSH.";
+    serversStatus.textContent =
+      "Host and SSH user are required for direct SSH.";
     return;
   }
   if (server.connectionMethod === "boundary") {
@@ -1193,7 +1319,8 @@ seSave.addEventListener("click", async () => {
       return;
     }
     if (!server.sshUser) {
-      serversStatus.textContent = "SSH username is required for Boundary (used to connect to localhost after tunnel).";
+      serversStatus.textContent =
+        "SSH username is required for Boundary (used to connect to localhost after tunnel).";
       return;
     }
   }
@@ -1219,14 +1346,14 @@ serverTunnelStartBtn.addEventListener("click", async () => {
     const r = await invoke<StartFunctionResult>("start_server_tunnel", {
       serverId: selectedServerId,
       cols: serverTunnelTerm.cols,
-      rows: serverTunnelTerm.rows
+      rows: serverTunnelTerm.rows,
     });
     serverTunnelSessions[selectedServerId] = r.sessionId;
     syncServerActions();
     void invoke("resize_pty", {
       id: r.sessionId,
       cols: serverTunnelTerm.cols,
-      rows: serverTunnelTerm.rows
+      rows: serverTunnelTerm.rows,
     });
   } catch (e) {
     serverTunnelTerm.writeln(`\x1b[31m${String(e)}\x1b[0m`);
@@ -1257,14 +1384,14 @@ serverSshBtn.addEventListener("click", async () => {
     const r = await invoke<StartFunctionResult>("start_server_ssh", {
       serverId: selectedServerId,
       cols: serverTerm.cols,
-      rows: serverTerm.rows
+      rows: serverTerm.rows,
     });
     serverSshSessions[selectedServerId] = r.sessionId;
     syncServerActions();
     void invoke("resize_pty", {
       id: r.sessionId,
       cols: serverTerm.cols,
-      rows: serverTerm.rows
+      rows: serverTerm.rows,
     });
   } catch (e) {
     serverTerm.writeln(`\x1b[31m${String(e)}\x1b[0m`);
@@ -1291,12 +1418,15 @@ serverUploadBtn.addEventListener("click", async () => {
   const local = await openDialog({
     multiple: false,
     directory: false,
-    title: "File to upload"
+    title: "File to upload",
   });
   if (typeof local !== "string") {
     return;
   }
-  const remote = window.prompt("Remote path (e.g. /home/user/file.txt)", "/tmp/upload.bin");
+  const remote = window.prompt(
+    "Remote path (e.g. /home/user/file.txt)",
+    "/tmp/upload.bin",
+  );
   if (remote === null) {
     return;
   }
@@ -1306,7 +1436,7 @@ serverUploadBtn.addEventListener("click", async () => {
     const msg = await invoke<string>("scp_upload", {
       serverId: selectedServerId,
       localPath: local,
-      remotePath: remote
+      remotePath: remote,
     });
     scpResultEl.textContent = msg;
     scpResultEl.className = "scp-result success";
@@ -1320,13 +1450,16 @@ serverDownloadBtn.addEventListener("click", async () => {
   if (!selectedServerId) {
     return;
   }
-  const remote = window.prompt("Remote path (e.g. /var/log/syslog)", "/etc/hostname");
+  const remote = window.prompt(
+    "Remote path (e.g. /var/log/syslog)",
+    "/etc/hostname",
+  );
   if (remote === null || !remote) {
     return;
   }
   const local = await saveDialog({
     title: "Save downloaded file as…",
-    defaultPath: remote.split("/").pop() ?? "download"
+    defaultPath: remote.split("/").pop() ?? "download",
   });
   if (typeof local !== "string") {
     return;
@@ -1337,7 +1470,7 @@ serverDownloadBtn.addEventListener("click", async () => {
     const msg = await invoke<string>("scp_download", {
       serverId: selectedServerId,
       remotePath: remote,
-      localPath: local
+      localPath: local,
     });
     scpResultEl.textContent = msg;
     scpResultEl.className = "scp-result success";
@@ -1360,26 +1493,34 @@ serverRdpBtn.addEventListener("click", async () => {
   }
 });
 
-cfgBoundaryAuthKind.addEventListener("change", () => syncBoundaryPasswordFieldsVisibility());
+cfgBoundaryAuthKind.addEventListener("change", () =>
+  syncBoundaryPasswordFieldsVisibility(),
+);
 
 boundaryStartBtn.addEventListener("click", async () => {
   const kind = appConfig?.boundary?.authKind ?? cfgBoundaryAuthKind.value;
-  if (kind === "password" && !appConfig?.boundary?.password && !cfgBoundaryPassword.value) {
-    boundaryTerm.writeln("Password auth: set login and password in Config and Save first.");
+  if (
+    kind === "password" &&
+    !appConfig?.boundary?.password &&
+    !cfgBoundaryPassword.value
+  ) {
+    boundaryTerm.writeln(
+      "Password auth: set login and password in Config and Save first.",
+    );
     return;
   }
   boundaryTerm.clear();
   try {
     const r = await invoke<StartFunctionResult>("start_boundary_auth", {
       cols: boundaryTerm.cols,
-      rows: boundaryTerm.rows
+      rows: boundaryTerm.rows,
     });
     boundarySessionId = r.sessionId;
     syncBoundaryButtons();
     void invoke("resize_pty", {
       id: r.sessionId,
       cols: boundaryTerm.cols,
-      rows: boundaryTerm.rows
+      rows: boundaryTerm.rows,
     });
   } catch (e) {
     boundaryTerm.writeln(`\x1b[31m${String(e)}\x1b[0m`);
@@ -1392,7 +1533,9 @@ boundaryStopBtn.addEventListener("click", async () => {
 });
 
 serverTunnelVisibleToggle.addEventListener("change", () => {
-  const tunnelBlock = document.querySelector<HTMLElement>("#server-tunnel-block");
+  const tunnelBlock = document.querySelector<HTMLElement>(
+    "#server-tunnel-block",
+  );
   if (!tunnelBlock) {
     return;
   }
@@ -1408,7 +1551,9 @@ navStatus.addEventListener("click", () => {
 });
 
 statusList.addEventListener("click", (event) => {
-  const card = (event.target as HTMLElement).closest<HTMLElement>(".status-card[data-function-id]");
+  const card = (event.target as HTMLElement).closest<HTMLElement>(
+    ".status-card[data-function-id]",
+  );
   const functionId = card?.dataset.functionId;
   if (!functionId) {
     return;

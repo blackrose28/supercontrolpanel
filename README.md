@@ -125,14 +125,14 @@ npm run tauri build
 
 - The Config page covers:
   - **App runtime** defaults (terminal cols/rows).
-  - **OpenVPN** paths and credentials (with secrets stored in OS keyring, not on disk).
-  - **Boundary** controller/CLI/auth settings.
+  - **OpenVPN** settings. Credentials stay in the OS keyring; the OpenVPN executable path and `.ovpn` file path are device-local and are not synced to the repo.
+  - **Boundary** controller/auth settings. The Boundary CLI executable path is device-local and is not synced to the repo.
   - **Config sync (Git repo)**:
     - A `Config repo root` field pointing to a local clone of a private Git repo (e.g. `config-sync`) that contains `app-config/config.json` and (optionally) `app-config/servers.json`.
     - Read-only display of the resolved app `config.json` path.
     - Two helper buttons:
-      - **Copy from repo → app** (`sync_config_pull`): copies `app-config/config.json` (and `app-config/servers.json` when present) from the repo into the app config directory.
-      - **Copy from app → repo** (`sync_config_push`): copies the app config file and `servers.json` into `app-config/config.json` / `app-config/servers.json` in the repo.
+      - **Copy from repo → app** (`sync_config_pull`): copies shared `app-config/config.json` (and `app-config/servers.json` when present) from the repo into the app config directory.
+      - **Copy from app → repo** (`sync_config_push`): copies the shared app config file and `servers.json` into `app-config/config.json` / `app-config/servers.json` in the repo.
     - Recommended usage:
       - Use a private Git repo as the source of truth for config.
       - Optionally place the repo clone inside a cloud-synced folder (Google Drive/OneDrive/Dropbox) so Git handles history/merging and the cloud service provides backup and multi-device availability.

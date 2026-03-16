@@ -75,9 +75,9 @@ Additional commands/events added in this iteration:
 Config behavior:
 
 - `config.json` persists in the app config directory.
-- OpenVPN executablePath/ovpnPath/extraArgs/username live in `config.json`; password and otpSecret live in the OS keyring (`keyring` crate: Windows Credential Manager, macOS Keychain, Linux Secret Service).
+- OpenVPN `extraArgs`/`username` live in `config.json`; `executablePath` and `ovpnPath` are device-local in `sync-local.json`; password and otpSecret live in the OS keyring (`keyring` crate: Windows Credential Manager, macOS Keychain, Linux Secret Service).
 - Boundary config section stores:
-  - CLI path
+  - CLI path (device-local in `sync-local.json`, not synced)
   - controller URL (`BOUNDARY_ADDR`)
   - auth kind (`oidc` or `password`)
   - auth method id
@@ -87,7 +87,7 @@ Config behavior:
 - When password prompt appears (non-Windows PTY path), backend sends `TOTP(otpSecret, 6 digits) + password`.
 - On Windows, OpenVPN uses an elevated helper (UAC) instead of the normal PTY flow.
 - On Linux/macOS, OpenVPN runs in PTY via `sudo`.
-- Config sync helpers (`sync_config_pull` / `sync_config_push`) copy `config.json` and `servers.json` between the app config directory and `app-config/config.json` / `app-config/servers.json` inside a Git-managed repo. The repo root path is configured via the Config page “Config sync (Git repo)” section, which is the recommended way to sync config across machines (optionally inside a Google Drive/OneDrive/Dropbox folder).
+- Config sync helpers (`sync_config_pull` / `sync_config_push`) copy only the shared `config.json` and `servers.json` between the app config directory and `app-config/config.json` / `app-config/servers.json` inside a Git-managed repo. Device-local settings such as OpenVPN executable/OVPN paths, Boundary CLI path, and sync repo root stay in `sync-local.json`. The repo root path is configured via the Config page “Config sync (Git repo)” section, which is the recommended way to sync config across machines (optionally inside a Google Drive/OneDrive/Dropbox folder).
 
 Do not break these names unless updating both frontend and backend in the same change.
 
