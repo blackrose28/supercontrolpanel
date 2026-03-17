@@ -142,6 +142,9 @@ const cfgSyncAppPath = mustElement<HTMLElement>("#cfg-sync-app-path");
 const cfgSyncPullBtn = mustElement<HTMLButtonElement>("#cfg-sync-pull");
 const cfgSyncPushBtn = mustElement<HTMLButtonElement>("#cfg-sync-push");
 const cfgSyncStatus = mustElement<HTMLElement>("#cfg-sync-status");
+const cfgGitPullBtn = mustElement<HTMLButtonElement>("#cfg-git-pull");
+const cfgGitPushBtn = mustElement<HTMLButtonElement>("#cfg-git-push");
+const cfgGitStatus = mustElement<HTMLElement>("#cfg-git-status");
 
 const serversTbody = mustElement<HTMLElement>("#servers-tbody");
 const serversStatus = mustElement<HTMLElement>("#servers-status");
@@ -690,6 +693,31 @@ async function runConfigSync(mode: "pull" | "push") {
     }
   } catch (e) {
     cfgSyncStatus.textContent = String(e);
+  }
+}
+
+async function runConfigGit(mode: "pull" | "push") {
+  const repoRoot = cfgSyncRepoRoot.value.trim() || syncSettings?.repoRoot?.trim() || "";
+  if (!repoRoot) {
+    cfgGitStatus.textContent = "Set config repo root first.";
+    return;
+  }
+  try {
+    const next: SyncSettings = { repoRoot };
+    await invoke("save_sync_settings", { settings: next });
+    syncSettings = next;
+  } catch {
+    // Non-fatal; still attempt to run git.
+  }
+  cfgGitStatus.textContent = mode === "pull" ? "Running git pull…" : "Running git add/commit/push…";
+  try {
+    const out =
+      mode === "pull"
+        ? await invoke<string>("config_git_pull", { repoRoot })
+        : await invoke<string>("config_git_push", { repoRoot });
+    cfgGitStatus.textContent = out;
+  } catch (e) {
+    cfgGitStatus.textContent = String(e);
   }
 }
 
@@ -1468,6 +1496,14 @@ cfgSyncPullBtn.addEventListener("click", () => {
 
 cfgSyncPushBtn.addEventListener("click", () => {
   void runConfigSync("push");
+});
+
+cfgGitPullBtn.addEventListener("click", () => {
+  void runConfigGit("pull");
+});
+
+cfgGitPushBtn.addEventListener("click", () => {
+  void runConfigGit("push");
 });
 
 cfgSyncRepoRoot.addEventListener("change", () => {

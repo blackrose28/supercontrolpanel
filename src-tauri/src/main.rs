@@ -2,6 +2,7 @@
 
 use std::{
     collections::HashMap,
+    env,
     fs,
     io::{Read, Write},
     path::PathBuf,
@@ -1842,6 +1843,89 @@ fn sync_config_push(app: AppHandle, repo_root: String) -> Result<(), String> {
     Ok(())
 }
 
+fn config_git_computer_name() -> String {
+    if cfg!(target_os = "windows") {
+        if let Ok(v) = env::var("COMPUTERNAME") {
+            let t = v.trim().to_string();
+            if !t.is_empty() {
+                return t;
+            }
+        }
+    }
+    if let Ok(v) = env::var("HOSTNAME") {
+        let t = v.trim().to_string();
+        if !t.is_empty() {
+            return t;
+        }
+    }
+    "unknown-computer".to_string()
+}
+
+fn run_git(repo_root: &str, args: &[&str]) -> Result<String, String> {
+    let root = repo_root.trim();
+    if root.is_empty() {
+        return Err("repoRoot cannot be empty".into());
+    }
+    let git_dir = PathBuf::from(root).join(".git");
+    if !git_dir.exists() {
+        return Err(format!(
+            "Not a git repo: {} (missing .git)",
+            PathBuf::from(root).to_string_lossy()
+        ));
+    }
+
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        // Avoid hanging on credential prompts in a GUI app.
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .map_err(|e| format!("failed to run git {:?}: {e}", args))?;
+
+    let mut combined = String::new();
+    combined.push_str(&String::from_utf8_lossy(&out.stdout));
+    combined.push_str(&String::from_utf8_lossy(&out.stderr));
+    let combined = combined.trim().to_string();
+
+    if out.status.success() {
+        Ok(if combined.is_empty() { "OK".into() } else { combined })
+    } else {
+        let code = out.status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".into());
+        Err(if combined.is_empty() {
+            format!("git {:?} failed (exit code {code})", args)
+        } else {
+            format!("git {:?} failed (exit code {code}):\n{combined}", args)
+        })
+    }
+}
+
+#[tauri::command]
+fn config_git_pull(repo_root: String) -> Result<String, String> {
+    run_git(repo_root.trim(), &["pull"])
+}
+
+#[tauri::command]
+fn config_git_push(repo_root: String) -> Result<String, String> {
+    let repo_root = repo_root.trim().to_string();
+    if repo_root.is_empty() {
+        return Err("repoRoot cannot be empty".into());
+    }
+
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(run_git(&repo_root, &["add", "."])?);
+
+    let status = run_git(&repo_root, &["status", "--porcelain"])?;
+    if status.trim().is_empty() || status.trim() == "OK" {
+        return Ok("No changes to commit.".into());
+    }
+
+    let computer = config_git_computer_name();
+    let msg = format!("Change config from {computer}");
+    lines.push(run_git(&repo_root, &["commit", "-m", &msg])?);
+    lines.push(run_git(&repo_root, &["push"])?);
+    Ok(lines.join("\n"))
+}
+
 #[tauri::command]
 fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, String> {
     let incoming_pw_len = config.openvpn.password.len();
@@ -2769,7 +2853,9 @@ fn main() {
             start_boundary_auth,
             stop_boundary_auth,
             sync_config_pull,
-            sync_config_push
+            sync_config_push,
+            config_git_pull,
+            config_git_push
         ])
         .plugin(tauri_plugin_dialog::init())
         .run(tauri::generate_context!())

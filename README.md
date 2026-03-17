@@ -130,9 +130,11 @@ npm run tauri build
   - **Config sync (Git repo)**:
     - A `Config repo root` field pointing to a local clone of a private Git repo (e.g. `config-sync`) that contains `app-config/config.json` and (optionally) `app-config/servers.json`.
     - Read-only display of the resolved app `config.json` path.
-    - Two helper buttons:
+    - Helper buttons:
       - **Copy from repo → app** (`sync_config_pull`): copies `app-config/config.json` (and `app-config/servers.json` when present) from the repo into the app config directory.
       - **Copy from app → repo** (`sync_config_push`): copies the app config file and `servers.json` into `app-config/config.json` / `app-config/servers.json` in the repo.
+      - **Git pull** (`config_git_pull`): runs `git pull` inside the repo root.
+      - **Git add + commit + push** (`config_git_push`): runs `git add .`, then `git commit -m "Change config from {computerName}"`, then `git push` inside the repo root.
     - Recommended usage:
       - Use a private Git repo as the source of truth for config.
       - Optionally place the repo clone inside a cloud-synced folder (Google Drive/OneDrive/Dropbox) so Git handles history/merging and the cloud service provides backup and multi-device availability.
