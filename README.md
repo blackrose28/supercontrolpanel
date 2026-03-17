@@ -114,10 +114,12 @@ npm run tauri build
   - optional extra SSH options for `boundary connect ssh`.
 - Boundary auth page:
   - Runs `boundary authenticate oidc` or `boundary authenticate password` in a PTY.
-  - Shows a live login terminal.
+  - Shows a compact live login terminal intended for status/output, not long interactive work.
   - Status page reflects CLI token state via `boundary config get-token` (`boundary-auth` function card with “Token active” pill).
 - Boundary target search:
+  - Lives on the Boundary page next to the auth terminal.
   - Searches Boundary targets via CLI.
+  - Filter text matches target name, target ID, and description.
   - Displays results in a table (Name, ID, Type, Description, Address).
   - “Add to list” creates a server entry using the target **Address** as `host`.
 
@@ -125,8 +127,8 @@ npm run tauri build
 
 - The Config page covers:
   - **App runtime** defaults (terminal cols/rows).
-  - **OpenVPN** paths and credentials (with secrets stored in OS keyring, not on disk).
-  - **Boundary** controller/CLI/auth settings.
+  - **OpenVPN** settings. Credentials stay in the OS keyring; the OpenVPN executable path and `.ovpn` file path are device-local and are not synced to the repo.
+  - **Boundary** controller/auth settings. The Boundary CLI executable path is device-local and is not synced to the repo.
   - **Config sync (Git repo)**:
     - A `Config repo root` field pointing to a local clone of a private Git repo (e.g. `config-sync`) that contains `app-config/config.json` and (optionally) `app-config/servers.json`.
     - Read-only display of the resolved app `config.json` path.
@@ -145,6 +147,9 @@ npm run tauri build
   - name, host, **OS** (`linux` or `windows`), SSH port, SSH username.
   - connection method: `ssh` (direct) or `boundary`.
   - for Boundary: target ID, tunnel listen port, optional services list.
+- Local server discovery:
+  - A dedicated search field filters the internal server list by name, host, SSH user, service text, or Boundary target ID.
+  - This is frontend-only filtering; it does not query Boundary.
 - Per-server PTYs:
   - **Tunnel** PTY for `boundary connect` (per server).
   - **SSH** PTY per server (direct or via localhost + listen port).

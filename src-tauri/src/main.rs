@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap,
     env,
@@ -12,8 +14,6 @@ use std::{
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 use keyring::{Entry, Error as KeyringError};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -22,9 +22,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use totp_rs::{Algorithm, Secret, TOTP};
 
 mod server_mgmt;
-use server_mgmt::{
-    load_servers, new_server_id, save_servers, ConnectionMethod, Server, ServerOs,
-};
+use server_mgmt::{load_servers, new_server_id, save_servers, ConnectionMethod, Server, ServerOs};
 
 /// One target from `boundary targets list` for search results.
 #[derive(Serialize, Clone)]
@@ -136,8 +134,6 @@ impl Default for BoundaryConfig {
 #[serde(rename_all = "camelCase")]
 struct BoundaryConfigForDisk {
     #[serde(default)]
-    cli_path: String,
-    #[serde(default)]
     addr: String,
     #[serde(default)]
     auth_method_id: String,
@@ -203,8 +199,6 @@ struct HelperStatusFile {
 #[serde(rename_all = "camelCase")]
 struct OpenVpnConfigForDisk {
     command: String,
-    executable_path: String,
-    ovpn_path: String,
     extra_args: String,
     username: String,
     #[serde(default, alias = "terminateOpenvpnWhenHelperExits")]
@@ -225,15 +219,14 @@ impl From<&AppConfig> for AppConfigForDisk {
         Self {
             app: c.app.clone(),
             openvpn: OpenVpnConfigForDisk {
-                command: c.openvpn.command.clone(),
-                executable_path: c.openvpn.executable_path.clone(),
-                ovpn_path: c.openvpn.ovpn_path.clone(),
+                command: String::new(),
                 extra_args: c.openvpn.extra_args.clone(),
                 username: c.openvpn.username.clone(),
-                terminate_open_vpn_when_helper_exits: c.openvpn.terminate_open_vpn_when_helper_exits,
+                terminate_open_vpn_when_helper_exits: c
+                    .openvpn
+                    .terminate_open_vpn_when_helper_exits,
             },
             boundary: BoundaryConfigForDisk {
-                cli_path: c.boundary.cli_path.clone(),
                 addr: c.boundary.addr.clone(),
                 auth_method_id: c.boundary.auth_method_id.clone(),
                 login_name: c.boundary.login_name.clone(),
@@ -391,6 +384,12 @@ fn servers_file_path(app: &AppHandle) -> Result<PathBuf, String> {
 struct SyncSettings {
     #[serde(default)]
     repo_root: String,
+    #[serde(default)]
+    openvpn_executable_path: String,
+    #[serde(default)]
+    openvpn_ovpn_path: String,
+    #[serde(default)]
+    boundary_cli_path: String,
 }
 
 fn sync_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -400,6 +399,23 @@ fn sync_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|e| format!("failed to resolve app config dir: {e}"))?;
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create config dir: {e}"))?;
     Ok(dir.join(SYNC_SETTINGS_FILE_NAME))
+}
+
+fn load_sync_settings_from_disk(app: &AppHandle) -> Result<SyncSettings, String> {
+    let path = sync_settings_path(app)?;
+    if !path.exists() {
+        return Ok(SyncSettings::default());
+    }
+    let raw =
+        fs::read_to_string(&path).map_err(|e| format!("failed to read sync settings: {e}"))?;
+    serde_json::from_str(&raw).map_err(|e| format!("invalid sync settings format: {e}"))
+}
+
+fn save_sync_settings_to_disk(app: &AppHandle, settings: &SyncSettings) -> Result<(), String> {
+    let path = sync_settings_path(app)?;
+    let encoded = serde_json::to_string_pretty(settings)
+        .map_err(|e| format!("failed to encode sync settings: {e}"))?;
+    fs::write(path, encoded).map_err(|e| format!("failed to write sync settings: {e}"))
 }
 
 #[derive(Serialize)]
@@ -444,7 +460,11 @@ fn detect_openvpn_executable_path() -> Option<String> {
             }
         }
 
-        let candidates = ["/usr/sbin/openvpn", "/usr/local/sbin/openvpn", "/opt/homebrew/sbin/openvpn"];
+        let candidates = [
+            "/usr/sbin/openvpn",
+            "/usr/local/sbin/openvpn",
+            "/opt/homebrew/sbin/openvpn",
+        ];
         for candidate in candidates {
             if PathBuf::from(candidate).exists() {
                 return Some(candidate.to_string());
@@ -487,10 +507,43 @@ fn load_app_config_from_disk(app: &AppHandle) -> Result<AppConfig, String> {
         default_app_config()
     } else {
         let raw = fs::read_to_string(&path).map_err(|e| format!("failed to read config: {e}"))?;
-        serde_json::from_str::<AppConfig>(&raw).map_err(|e| format!("invalid config format: {e}"))?
+        serde_json::from_str::<AppConfig>(&raw)
+            .map_err(|e| format!("invalid config format: {e}"))?
     };
 
     let mut needs_disk_rewrite = false;
+    let mut sync_settings = load_sync_settings_from_disk(app)?;
+    let mut needs_sync_settings_rewrite = false;
+
+    if sync_settings.openvpn_executable_path.trim().is_empty()
+        && !config.openvpn.executable_path.trim().is_empty()
+    {
+        sync_settings.openvpn_executable_path = config.openvpn.executable_path.clone();
+        needs_sync_settings_rewrite = true;
+        needs_disk_rewrite = true;
+    }
+    if sync_settings.openvpn_ovpn_path.trim().is_empty()
+        && !config.openvpn.ovpn_path.trim().is_empty()
+    {
+        sync_settings.openvpn_ovpn_path = config.openvpn.ovpn_path.clone();
+        needs_sync_settings_rewrite = true;
+        needs_disk_rewrite = true;
+    }
+    if sync_settings.boundary_cli_path.trim().is_empty()
+        && !config.boundary.cli_path.trim().is_empty()
+    {
+        sync_settings.boundary_cli_path = config.boundary.cli_path.clone();
+        needs_sync_settings_rewrite = true;
+        needs_disk_rewrite = true;
+    }
+
+    config.openvpn.executable_path = sync_settings.openvpn_executable_path.clone();
+    config.openvpn.ovpn_path = sync_settings.openvpn_ovpn_path.clone();
+    config.boundary.cli_path = sync_settings.boundary_cli_path.clone();
+    if config.openvpn.command.trim().is_empty() && !config.openvpn.executable_path.trim().is_empty()
+    {
+        config.openvpn.command = config.openvpn.executable_path.clone();
+    }
 
     match keyring_get_optional(KEYRING_OPENVPN_PASSWORD)? {
         Some(p) => config.openvpn.password = p,
@@ -525,6 +578,9 @@ fn load_app_config_from_disk(app: &AppHandle) -> Result<AppConfig, String> {
     if needs_disk_rewrite {
         save_app_config_to_disk(app, &config)?;
     }
+    if needs_sync_settings_rewrite {
+        save_sync_settings_to_disk(app, &sync_settings)?;
+    }
 
     Ok(config)
 }
@@ -535,6 +591,14 @@ fn save_app_config_to_disk(app: &AppHandle, config: &AppConfig) -> Result<(), St
     let serialized =
         serde_json::to_string_pretty(&disk).map_err(|e| format!("failed to encode config: {e}"))?;
     fs::write(path, serialized).map_err(|e| format!("failed to write config: {e}"))
+}
+
+fn save_local_app_settings(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let mut sync_settings = load_sync_settings_from_disk(app)?;
+    sync_settings.openvpn_executable_path = config.openvpn.executable_path.trim().to_string();
+    sync_settings.openvpn_ovpn_path = config.openvpn.ovpn_path.trim().to_string();
+    sync_settings.boundary_cli_path = config.boundary.cli_path.trim().to_string();
+    save_sync_settings_to_disk(app, &sync_settings)
 }
 
 fn runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -717,7 +781,9 @@ fn set_openvpn_admin_session(
     Ok(())
 }
 
-fn get_openvpn_admin_session(admin_store: &OpenVpnAdminStore) -> Result<Option<OpenVpnAdminSession>, String> {
+fn get_openvpn_admin_session(
+    admin_store: &OpenVpnAdminStore,
+) -> Result<Option<OpenVpnAdminSession>, String> {
     let slot = lock_err(&admin_store.session)?;
     Ok(slot.as_ref().map(|s| OpenVpnAdminSession {
         id: s.id.clone(),
@@ -731,7 +797,9 @@ fn is_windows_pid_running(pid: u32) -> bool {
         return false;
     }
     use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
     const STILL_ACTIVE: u32 = 259;
     unsafe {
         let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
@@ -965,11 +1033,7 @@ fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
     let addr = cfg.boundary.addr.trim();
     scp_debug!(
         "boundary_cli_token_summary: exe={exe:?} BOUNDARY_ADDR={}",
-        if addr.is_empty() {
-            "unset"
-        } else {
-            addr
-        }
+        if addr.is_empty() { "unset" } else { addr }
     );
     if exe != "boundary" && !PathBuf::from(&exe).exists() {
         return Err(format!("Boundary CLI not found: {exe}"));
@@ -1131,7 +1195,10 @@ fn open_pty_with_command_builder(
         if let Some(payload) = exit_payload {
             let removed = {
                 let state = monitor_app.state::<SessionStore>();
-                remove_session(&state, &monitor_session_id).ok().flatten().is_some()
+                remove_session(&state, &monitor_session_id)
+                    .ok()
+                    .flatten()
+                    .is_some()
             };
 
             if removed {
@@ -1177,7 +1244,9 @@ fn close_pty_internal(id: &str, store: &SessionStore) -> Result<Option<PtyExitPa
     if let Some(session) = session {
         let mut child = lock_err(&session.child)?;
         let _ = child.kill();
-        let exit_status = child.wait().map_err(|e| format!("failed to wait child: {e}"))?;
+        let exit_status = child
+            .wait()
+            .map_err(|e| format!("failed to wait child: {e}"))?;
         return Ok(Some(PtyExitPayload {
             id: id.to_string(),
             exit_code: i32::try_from(exit_status.exit_code()).ok(),
@@ -1262,9 +1331,10 @@ fn start_openvpn_admin_worker(
         password,
         terminate_open_vpn_when_helper_exits,
     };
-    let launch_payload =
-        serde_json::to_string_pretty(&launch).map_err(|e| format!("failed to encode launch config: {e}"))?;
-    fs::write(&launch_path, launch_payload).map_err(|e| format!("failed to write launch config: {e}"))?;
+    let launch_payload = serde_json::to_string_pretty(&launch)
+        .map_err(|e| format!("failed to encode launch config: {e}"))?;
+    fs::write(&launch_path, launch_payload)
+        .map_err(|e| format!("failed to write launch config: {e}"))?;
     fs::write(&log_path, "").map_err(|e| format!("failed to initialize log file: {e}"))?;
     fs::write(&err_path, "").map_err(|e| format!("failed to initialize err file: {e}"))?;
     if stop_path.exists() {
@@ -1357,7 +1427,10 @@ fn start_openvpn_admin_worker(
                                 "Elevated helper ended before status file was available",
                                 None,
                             );
-                            let _ = set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                            let _ = set_openvpn_admin_session(
+                                &status_app.state::<OpenVpnAdminStore>(),
+                                None,
+                            );
                             break;
                         }
                     }
@@ -1375,11 +1448,18 @@ fn start_openvpn_admin_worker(
                         OPENVPN_FUNCTION_ID,
                         &state,
                         &parsed.message,
-                        if terminal { None } else { Some(status_session.clone()) },
+                        if terminal {
+                            None
+                        } else {
+                            Some(status_session.clone())
+                        },
                     );
                     if terminal {
                         let _ = fs::remove_file(&helper_pid_path_watch);
-                        let _ = set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                        let _ = set_openvpn_admin_session(
+                            &status_app.state::<OpenVpnAdminStore>(),
+                            None,
+                        );
                         break;
                     }
                 }
@@ -1396,7 +1476,8 @@ fn start_openvpn_admin_worker(
                         "Elevated helper ended (window closed or process exited)",
                         None,
                     );
-                    let _ = set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                    let _ =
+                        set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
                     break;
                 }
             }
@@ -1525,7 +1606,8 @@ fn run_openvpn_automation(
                 }
 
                 if !password_sent && scan_buffer.contains("password") {
-                    let combined_password = match generate_openvpn_password(&password, &otp_secret) {
+                    let combined_password = match generate_openvpn_password(&password, &otp_secret)
+                    {
                         Ok(value) => value,
                         Err(err) => {
                             let function_state = app.state::<FunctionStore>();
@@ -1541,7 +1623,8 @@ fn run_openvpn_automation(
                         }
                     };
                     let state = app.state::<SessionStore>();
-                    let _ = write_pty_internal(&session_id, &format!("{combined_password}\r"), &state);
+                    let _ =
+                        write_pty_internal(&session_id, &format!("{combined_password}\r"), &state);
                     password_sent = true;
                     let function_state = app.state::<FunctionStore>();
                     let _ = upsert_function_status(
@@ -1634,7 +1717,12 @@ fn write_pty(id: String, data: String, store: State<'_, SessionStore>) -> Result
 }
 
 #[tauri::command]
-fn resize_pty(id: String, cols: u16, rows: u16, store: State<'_, SessionStore>) -> Result<(), String> {
+fn resize_pty(
+    id: String,
+    cols: u16,
+    rows: u16,
+    store: State<'_, SessionStore>,
+) -> Result<(), String> {
     let session = {
         let sessions = lock_err(&store.sessions)?;
         sessions
@@ -1752,24 +1840,23 @@ fn get_config_paths(app: AppHandle) -> Result<ConfigPaths, String> {
 
 #[tauri::command]
 fn get_sync_settings(app: AppHandle) -> Result<SyncSettings, String> {
-    let path = sync_settings_path(&app)?;
-    if !path.exists() {
-        return Ok(SyncSettings::default());
-    }
-    let raw =
-        fs::read_to_string(&path).map_err(|e| format!("failed to read sync settings: {e}"))?;
-    let settings: SyncSettings =
-        serde_json::from_str(&raw).map_err(|e| format!("invalid sync settings format: {e}"))?;
-    Ok(settings)
+    load_sync_settings_from_disk(&app)
 }
 
 #[tauri::command]
 fn save_sync_settings(app: AppHandle, settings: SyncSettings) -> Result<(), String> {
-    let path = sync_settings_path(&app)?;
-    let encoded = serde_json::to_string_pretty(&settings)
-        .map_err(|e| format!("failed to encode sync settings: {e}"))?;
-    fs::write(path, encoded).map_err(|e| format!("failed to write sync settings: {e}"))?;
-    Ok(())
+    let mut merged = load_sync_settings_from_disk(&app)?;
+    merged.repo_root = settings.repo_root;
+    if !settings.openvpn_executable_path.is_empty() {
+        merged.openvpn_executable_path = settings.openvpn_executable_path;
+    }
+    if !settings.openvpn_ovpn_path.is_empty() {
+        merged.openvpn_ovpn_path = settings.openvpn_ovpn_path;
+    }
+    if !settings.boundary_cli_path.is_empty() {
+        merged.boundary_cli_path = settings.boundary_cli_path;
+    }
+    save_sync_settings_to_disk(&app, &merged)
 }
 
 #[tauri::command]
@@ -1960,6 +2047,7 @@ fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, S
     } else if let Some(p) = keyring_get_optional(KEYRING_BOUNDARY_PASSWORD)? {
         config.boundary.password = p;
     }
+    save_local_app_settings(&app, &config)?;
     save_app_config_to_disk(&app, &config)?;
     scp_debug!(
         "save_app_config: done; password_present={} otp_present={}",
@@ -1971,7 +2059,8 @@ fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, S
 
 #[tauri::command]
 fn detect_openvpn_executable() -> Result<String, String> {
-    detect_openvpn_executable_path().ok_or_else(|| "OpenVPN executable not found in PATH/common locations".to_string())
+    detect_openvpn_executable_path()
+        .ok_or_else(|| "OpenVPN executable not found in PATH/common locations".to_string())
 }
 
 #[tauri::command]
@@ -2024,13 +2113,14 @@ fn start_openvpn_function(
         return Err("password cannot be empty".to_string());
     }
 
-    let combined_password = match generate_openvpn_password(&resolved_password, &resolved_otp_secret) {
-        Ok(s) => s,
-        Err(e) => {
-            scp_debug!("start_openvpn_function: ERR generate_openvpn_password: {e}");
-            return Err(e);
-        }
-    };
+    let combined_password =
+        match generate_openvpn_password(&resolved_password, &resolved_otp_secret) {
+            Ok(s) => s,
+            Err(e) => {
+                scp_debug!("start_openvpn_function: ERR generate_openvpn_password: {e}");
+                return Err(e);
+            }
+        };
 
     #[cfg(target_os = "windows")]
     {
@@ -2139,7 +2229,8 @@ fn stop_openvpn_function(
         let _ = &session_store;
         let active = get_openvpn_admin_session(&admin_store)?;
         if let Some(active) = active {
-            let helper_pid_path = openvpn_runtime_dir(&app)?.join(format!("{}.helper.pid", active.id));
+            let helper_pid_path =
+                openvpn_runtime_dir(&app)?.join(format!("{}.helper.pid", active.id));
             if let Ok(s) = fs::read_to_string(&helper_pid_path) {
                 if let Ok(pid) = s.trim().parse::<u32>() {
                     if pid > 0 && !is_windows_pid_running(pid) {
@@ -2254,7 +2345,7 @@ fn delete_server(app: AppHandle, id: String) -> Result<Vec<Server>, String> {
     Ok(list)
 }
 
-/// Search Boundary targets (uses CLI token). Optional name filter; empty = list all.
+/// Search Boundary targets (uses CLI token). Optional text filter; empty = list all.
 #[tauri::command]
 fn search_boundary_targets(
     app: AppHandle,
@@ -2338,7 +2429,10 @@ fn search_boundary_targets(
             .unwrap_or("")
             .to_string();
         if let Some(ref f) = filter_lower {
-            if !name.to_lowercase().contains(f) && !id.to_lowercase().contains(f) {
+            if !name.to_lowercase().contains(f)
+                && !id.to_lowercase().contains(f)
+                && !description.to_lowercase().contains(f)
+            {
                 continue;
             }
         }
@@ -2440,7 +2534,11 @@ fn stop_server_tunnel(
         .ok()
         .and_then(|servers| servers.into_iter().find(|s| s.id == server_id))
         .map(|s| {
-            let port = if s.boundary_listen_port == 0 { 6222 } else { s.boundary_listen_port };
+            let port = if s.boundary_listen_port == 0 {
+                6222
+            } else {
+                s.boundary_listen_port
+            };
             format!("Tunnel: {} (port {}) — stopped", s.name, port)
         })
         .unwrap_or_else(|| "Stopped".to_string());
@@ -2585,7 +2683,10 @@ fn scp_upload(
         .arg("StrictHostKeyChecking=accept-new")
         .arg("-o")
         .arg("MACs=hmac-sha2-512");
-    let o = scp.arg(&local_path).arg(&remote_spec).output()
+    let o = scp
+        .arg(&local_path)
+        .arg(&remote_spec)
+        .output()
         .map_err(|e| format!("scp failed to run: {e}"))?;
     if !o.status.success() {
         return Err(String::from_utf8_lossy(&o.stderr).trim().to_string());
@@ -2627,7 +2728,10 @@ fn scp_download(
         .arg("StrictHostKeyChecking=accept-new")
         .arg("-o")
         .arg("MACs=hmac-sha2-512");
-    let o = scp.arg(&remote_spec).arg(&local_path).output()
+    let o = scp
+        .arg(&remote_spec)
+        .arg(&local_path)
+        .output()
         .map_err(|e| format!("scp failed to run: {e}"))?;
     if !o.status.success() {
         return Err(String::from_utf8_lossy(&o.stderr).trim().to_string());
@@ -2643,11 +2747,16 @@ fn start_server_rdp(app: AppHandle, server_id: String) -> Result<(), String> {
         .find(|s| s.id == server_id)
         .ok_or_else(|| "server not found".to_string())?;
     if server.os != ServerOs::Windows {
-        return Err("RDP is only available for Windows servers. Edit the server and set OS to Windows.".to_string());
+        return Err(
+            "RDP is only available for Windows servers. Edit the server and set OS to Windows."
+                .to_string(),
+        );
     }
     let host = server.host.trim();
     if host.is_empty() {
-        return Err("Host is required for RDP — set a DNS name or IP address on the server.".to_string());
+        return Err(
+            "Host is required for RDP — set a DNS name or IP address on the server.".to_string(),
+        );
     }
 
     #[cfg(target_os = "windows")]
@@ -2793,13 +2902,8 @@ fn stop_boundary_auth(
     };
     if let Some(p) = close_pty_internal(&sid, &session_store)? {
         emit_pty_exit(&app, p.clone());
-        let _ = update_functions_for_session_exit(
-            &app,
-            &function_store,
-            &sid,
-            p.exit_code,
-            &p.reason,
-        );
+        let _ =
+            update_functions_for_session_exit(&app, &function_store, &sid, p.exit_code, &p.reason);
     } else {
         let (state, msg) = match boundary_cli_token_summary(&app) {
             Ok(m) => ("authenticated", m),

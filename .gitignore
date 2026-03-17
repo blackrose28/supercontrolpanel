@@ -36,3 +36,7 @@ dist/
 
 src-tauri/target/
 src-tauri/Cargo.lock
+
+# Device/local generated files
+package-lock.json
+src-tauri/gen/
