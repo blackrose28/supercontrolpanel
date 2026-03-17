@@ -10,6 +10,7 @@
             <header class="toolbar">
                 <button id="nav-status" class="nav-btn active">Status</button>
                 <button id="nav-openvpn" class="nav-btn">OpenVPN</button>
+                <button id="nav-caddy" class="nav-btn">Caddy</button>
                 <button id="nav-servers" class="nav-btn">Servers</button>
                 <button id="nav-boundary" class="nav-btn">Boundary</button>
                 <button id="nav-config" class="nav-btn">Config</button>
@@ -41,6 +42,20 @@
                     </div>
 
                     <div id="terminal" class="terminal-host"></div>
+                </section>
+
+                <section id="view-caddy" class="view">
+                    <h2>Caddy</h2>
+                    <p class="hint">
+                        Runs <code>caddy run --config Caddyfile</code> inside the
+                        selected folder. Set the folder in
+                        <strong>Config</strong> first.
+                    </p>
+                    <div class="actions">
+                        <button id="caddy-start" type="button">Start</button>
+                        <button id="caddy-stop" type="button">Stop</button>
+                    </div>
+                    <div id="caddy-terminal" class="terminal-host"></div>
                 </section>
 
                 <section id="view-servers" class="view">
@@ -451,6 +466,25 @@
                                 OpenVPN is tied to the helper via a Windows job
                                 object, so closing the helper stops the VPN.
                             </p>
+                        </div>
+                    </div>
+
+                    <h3>Caddy</h3>
+                    <div class="form-grid">
+                        <label for="cfg-caddy-folder">Caddy folder</label>
+                        <div class="inline-input-actions single-action">
+                            <input
+                                id="cfg-caddy-folder"
+                                type="text"
+                                placeholder="D:\\site or /home/you/site"
+                                autocomplete="off"
+                            />
+                            <button id="cfg-caddy-browse" type="button">
+                                Browse
+                            </button>
+                        </div>
+                        <div class="form-grid-span hint">
+                            Must contain a <code>Caddyfile</code>.
                         </div>
                     </div>
 

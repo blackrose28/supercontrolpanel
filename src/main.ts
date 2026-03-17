@@ -69,6 +69,7 @@ type SyncSettings = {
   openvpnExecutablePath?: string;
   openvpnOvpnPath?: string;
   boundaryCliPath?: string;
+  caddyFolder?: string;
 };
 
 type ServerService = { name: string; port: number };
@@ -104,13 +105,16 @@ function mustElement<T extends Element>(selector: string): T {
 }
 
 const terminalHost = mustElement<HTMLElement>("#terminal");
+const caddyTerminalHost = mustElement<HTMLElement>("#caddy-terminal");
 const navStatus = mustElement<HTMLButtonElement>("#nav-status");
 const navOpenvpn = mustElement<HTMLButtonElement>("#nav-openvpn");
+const navCaddy = mustElement<HTMLButtonElement>("#nav-caddy");
 const navServers = mustElement<HTMLButtonElement>("#nav-servers");
 const navBoundary = mustElement<HTMLButtonElement>("#nav-boundary");
 const navConfig = mustElement<HTMLButtonElement>("#nav-config");
 const viewStatus = mustElement<HTMLElement>("#view-status");
 const viewOpenvpn = mustElement<HTMLElement>("#view-openvpn");
+const viewCaddy = mustElement<HTMLElement>("#view-caddy");
 const viewServers = mustElement<HTMLElement>("#view-servers");
 const viewBoundary = mustElement<HTMLElement>("#view-boundary");
 const viewConfig = mustElement<HTMLElement>("#view-config");
@@ -120,6 +124,8 @@ const openvpnConfigPreview = mustElement<HTMLElement>(
 );
 const vpnStartBtn = mustElement<HTMLButtonElement>("#vpn-start");
 const vpnStopBtn = mustElement<HTMLButtonElement>("#vpn-stop");
+const caddyStartBtn = mustElement<HTMLButtonElement>("#caddy-start");
+const caddyStopBtn = mustElement<HTMLButtonElement>("#caddy-stop");
 const cfgTerminalCols = mustElement<HTMLInputElement>("#cfg-terminal-cols");
 const cfgTerminalRows = mustElement<HTMLInputElement>("#cfg-terminal-rows");
 const cfgOpenvpnExecutable = mustElement<HTMLInputElement>(
@@ -183,6 +189,8 @@ const cfgSyncStatus = mustElement<HTMLElement>("#cfg-sync-status");
 const cfgGitPullBtn = mustElement<HTMLButtonElement>("#cfg-git-pull");
 const cfgGitPushBtn = mustElement<HTMLButtonElement>("#cfg-git-push");
 const cfgGitStatus = mustElement<HTMLElement>("#cfg-git-status");
+const cfgCaddyFolder = mustElement<HTMLInputElement>("#cfg-caddy-folder");
+const cfgCaddyBrowseBtn = mustElement<HTMLButtonElement>("#cfg-caddy-browse");
 
 const serversTbody = mustElement<HTMLElement>("#servers-tbody");
 const serversStatus = mustElement<HTMLElement>("#servers-status");
@@ -254,6 +262,16 @@ term.loadAddon(fitAddon);
 term.open(terminalHost);
 fitAddon.fit();
 
+const caddyFitAddon = new FitAddon();
+const caddyTerm = new Terminal({
+  cursorBlink: true,
+  convertEol: true,
+  scrollback: 4000,
+});
+caddyTerm.loadAddon(caddyFitAddon);
+caddyTerm.open(caddyTerminalHost);
+caddyFitAddon.fit();
+
 const serverFit = new FitAddon();
 const serverTerm = new Terminal({
   cursorBlink: true,
@@ -285,10 +303,12 @@ boundaryTerm.open(boundaryTerminalHost);
 boundaryFit.fit();
 
 const OPENVPN_FUNCTION_ID = "openvpn-connect";
+const CADDY_FUNCTION_ID = "caddy-run";
 const SERVER_TUNNEL_PREFIX = "server-tunnel-";
 const SERVER_SSH_PREFIX = "server-ssh-";
 const statusMap = new Map<string, FunctionStatus>();
 let openvpnSessionId: string | null = null;
+let caddySessionId: string | null = null;
 const serverTunnelSessions: Record<string, string> = {};
 const serverSshSessions: Record<string, string> = {};
 const serverTunnelBuffers: Record<string, string> = {};
@@ -310,6 +330,10 @@ async function attachListeners() {
     const { id, data } = event.payload;
     if (id === openvpnSessionId) {
       term.write(data);
+      return;
+    }
+    if (id === caddySessionId) {
+      caddyTerm.write(data);
       return;
     }
 
@@ -347,6 +371,11 @@ async function attachListeners() {
       term.write(line);
       openvpnSessionId = null;
       syncFunctionButtons();
+    }
+    if (id === caddySessionId) {
+      caddyTerm.write(line);
+      caddySessionId = null;
+      syncCaddyButtons();
     }
     if (selectedServerId && id === serverSshSessions[selectedServerId]) {
       serverTerm.write(line);
@@ -388,6 +417,10 @@ async function attachListeners() {
       if (event.payload.functionId === OPENVPN_FUNCTION_ID) {
         openvpnSessionId = event.payload.sessionId;
         syncFunctionButtons();
+      }
+      if (event.payload.functionId === CADDY_FUNCTION_ID) {
+        caddySessionId = event.payload.sessionId;
+        syncCaddyButtons();
       }
       if (event.payload.functionId.startsWith(SERVER_TUNNEL_PREFIX)) {
         const serverId = event.payload.functionId.slice(
@@ -451,18 +484,23 @@ async function detachListeners() {
 }
 
 function setActiveView(
-  which: "status" | "openvpn" | "servers" | "boundary" | "config",
+  which: "status" | "openvpn" | "caddy" | "servers" | "boundary" | "config",
 ) {
   navStatus.classList.toggle("active", which === "status");
   navOpenvpn.classList.toggle("active", which === "openvpn");
+  navCaddy.classList.toggle("active", which === "caddy");
   navServers.classList.toggle("active", which === "servers");
   navBoundary.classList.toggle("active", which === "boundary");
   navConfig.classList.toggle("active", which === "config");
   viewStatus.classList.toggle("active", which === "status");
   viewOpenvpn.classList.toggle("active", which === "openvpn");
+  viewCaddy.classList.toggle("active", which === "caddy");
   viewServers.classList.toggle("active", which === "servers");
   viewBoundary.classList.toggle("active", which === "boundary");
   viewConfig.classList.toggle("active", which === "config");
+  if (which === "caddy") {
+    requestAnimationFrame(() => caddyFitAddon.fit());
+  }
   if (which === "servers") {
     requestAnimationFrame(() => {
       serverFit.fit();
@@ -479,6 +517,7 @@ function setActiveView(
 
 const STATUS_CARD_TITLE: Record<string, string> = {
   [OPENVPN_FUNCTION_ID]: "OpenVPN",
+  [CADDY_FUNCTION_ID]: "Caddy",
   [BOUNDARY_AUTH_FUNCTION_ID]: "Boundary CLI",
 };
 
@@ -570,6 +609,15 @@ async function navigateFromStatusCard(functionId: string) {
     return;
   }
 
+  if (functionId === CADDY_FUNCTION_ID) {
+    setActiveView("caddy");
+    requestAnimationFrame(() => {
+      caddyStartBtn.focus();
+      caddyTerminalHost.scrollIntoView({ block: "start", behavior: "smooth" });
+    });
+    return;
+  }
+
   if (functionId === BOUNDARY_AUTH_FUNCTION_ID) {
     setActiveView("boundary");
     requestAnimationFrame(() => {
@@ -616,6 +664,13 @@ function syncFunctionButtons() {
   const running = Boolean(openvpnSessionId) || Boolean(status?.sessionId);
   vpnStartBtn.disabled = running;
   vpnStopBtn.disabled = !running;
+}
+
+function syncCaddyButtons() {
+  const status = statusMap.get(CADDY_FUNCTION_ID);
+  const running = Boolean(caddySessionId) || Boolean(status?.sessionId);
+  caddyStartBtn.disabled = running;
+  caddyStopBtn.disabled = !running;
 }
 
 function renderConfigPreview() {
@@ -669,6 +724,7 @@ function renderConfigForm() {
   cfgBoundaryPassword.value = b.password;
   syncBoundaryPasswordFieldsVisibility();
   cfgSyncRepoRoot.value = syncSettings?.repoRoot ?? "";
+  cfgCaddyFolder.value = syncSettings?.caddyFolder ?? "";
   renderConfigPreview();
 }
 
@@ -756,6 +812,7 @@ async function loadSyncSettings() {
     syncSettings = { repoRoot: "" };
   }
   cfgSyncRepoRoot.value = syncSettings.repoRoot ?? "";
+  cfgCaddyFolder.value = syncSettings.caddyFolder ?? "";
 }
 
 type ConfigPaths = {
@@ -866,6 +923,28 @@ async function browseBoundaryCli() {
   }
 }
 
+async function browseCaddyFolder() {
+  const selected = await openDialog({
+    directory: true,
+    multiple: false,
+    title: "Select Caddy folder (contains Caddyfile)",
+  });
+  if (typeof selected === "string") {
+    cfgCaddyFolder.value = selected;
+    cfgStatus.textContent = "Caddy folder selected.";
+    const repoRoot =
+      cfgSyncRepoRoot.value.trim() || syncSettings?.repoRoot?.trim() || "";
+    syncSettings = {
+      ...(syncSettings ?? { repoRoot }),
+      repoRoot: repoRoot || (syncSettings?.repoRoot ?? ""),
+      caddyFolder: selected,
+    };
+    void invoke("save_sync_settings", { settings: syncSettings }).catch(() => {
+      // Non-fatal: config is still usable for current session.
+    });
+  }
+}
+
 async function autoDetectOpenvpnExecutable() {
   try {
     const detected = await invoke<string>("detect_openvpn_executable");
@@ -894,6 +973,9 @@ async function refreshStatuses() {
     if (status.functionId === OPENVPN_FUNCTION_ID) {
       openvpnSessionId = status.sessionId;
     }
+    if (status.functionId === CADDY_FUNCTION_ID) {
+      caddySessionId = status.sessionId;
+    }
     if (status.functionId.startsWith(SERVER_TUNNEL_PREFIX)) {
       const serverId = status.functionId.slice(SERVER_TUNNEL_PREFIX.length);
       if (status.sessionId) {
@@ -916,6 +998,7 @@ async function refreshStatuses() {
   }
   renderStatusList();
   syncFunctionButtons();
+  syncCaddyButtons();
   syncServerActions();
   syncBoundaryButtons();
 }
@@ -972,6 +1055,39 @@ async function stopOpenVpnFunction() {
   syncFunctionButtons();
 }
 
+async function startCaddyFunction() {
+  const folder =
+    cfgCaddyFolder.value.trim() || syncSettings?.caddyFolder?.trim() || "";
+  if (!folder) {
+    caddyTerm.writeln("\r\n[Set Caddy folder in Config first.]\r\n");
+    return;
+  }
+  caddyTerm.clear();
+  caddyTerm.writeln("\x1b[32m[Starting Caddy]\x1b[0m");
+  try {
+    const result = await invoke<StartFunctionResult>("start_caddy_run", {
+      cols: caddyTerm.cols,
+      rows: caddyTerm.rows,
+      folder,
+    });
+    caddySessionId = result.sessionId;
+    syncCaddyButtons();
+    void invoke("resize_pty", {
+      id: result.sessionId,
+      cols: caddyTerm.cols,
+      rows: caddyTerm.rows,
+    });
+  } catch (e) {
+    caddyTerm.writeln(`\r\n\x1b[31m[Start failed: ${String(e)}]\x1b[0m\r\n`);
+    syncCaddyButtons();
+  }
+}
+
+async function stopCaddyFunction() {
+  await invoke("stop_caddy_run");
+  syncCaddyButtons();
+}
+
 function writePtyIf(id: string | null, data: string) {
   if (!id) {
     return;
@@ -980,6 +1096,7 @@ function writePtyIf(id: string | null, data: string) {
 }
 
 term.onData((data) => writePtyIf(openvpnSessionId, data));
+caddyTerm.onData((data) => writePtyIf(caddySessionId, data));
 serverTerm.onData((data) =>
   writePtyIf(
     selectedServerId ? (serverSshSessions[selectedServerId] ?? null) : null,
@@ -996,6 +1113,7 @@ boundaryTerm.onData((data) => writePtyIf(boundarySessionId, data));
 
 window.addEventListener("resize", () => {
   fitAddon.fit();
+  caddyFitAddon.fit();
   serverFit.fit();
   serverTunnelFit.fit();
   boundaryFit.fit();
@@ -1004,6 +1122,13 @@ window.addEventListener("resize", () => {
       id: openvpnSessionId,
       cols: term.cols,
       rows: term.rows,
+    });
+  }
+  if (caddySessionId) {
+    void invoke("resize_pty", {
+      id: caddySessionId,
+      cols: caddyTerm.cols,
+      rows: caddyTerm.rows,
     });
   }
   for (const sid of Object.values(serverTunnelSessions)) {
@@ -1666,6 +1791,10 @@ navOpenvpn.addEventListener("click", () => {
   setActiveView("openvpn");
 });
 
+navCaddy.addEventListener("click", () => {
+  setActiveView("caddy");
+});
+
 navConfig.addEventListener("click", () => {
   setActiveView("config");
 });
@@ -1682,6 +1811,14 @@ vpnStartBtn.addEventListener("click", () => {
 
 vpnStopBtn.addEventListener("click", () => {
   void stopOpenVpnFunction();
+});
+
+caddyStartBtn.addEventListener("click", () => {
+  void startCaddyFunction();
+});
+
+caddyStopBtn.addEventListener("click", () => {
+  void stopCaddyFunction();
 });
 
 cfgSaveBtn.addEventListener("click", () => {
@@ -1708,6 +1845,10 @@ cfgBoundaryBrowseBtn.addEventListener("click", () => {
   void browseBoundaryCli();
 });
 
+cfgCaddyBrowseBtn.addEventListener("click", () => {
+  void browseCaddyFolder();
+});
+
 cfgSyncPullBtn.addEventListener("click", () => {
   void runConfigSync("pull");
 });
@@ -1726,10 +1867,21 @@ cfgGitPushBtn.addEventListener("click", () => {
 
 cfgSyncRepoRoot.addEventListener("change", () => {
   const repoRoot = cfgSyncRepoRoot.value.trim();
-  syncSettings = { repoRoot };
+  syncSettings = { ...(syncSettings ?? { repoRoot: "" }), repoRoot };
   void invoke("save_sync_settings", { settings: syncSettings }).catch(() => {
     // Non-fatal; user will see error on actual sync if something is wrong.
   });
+});
+
+cfgCaddyFolder.addEventListener("change", () => {
+  const caddyFolder = cfgCaddyFolder.value.trim();
+  const repoRoot = cfgSyncRepoRoot.value.trim() || syncSettings?.repoRoot?.trim() || "";
+  syncSettings = {
+    ...(syncSettings ?? { repoRoot }),
+    repoRoot: repoRoot || (syncSettings?.repoRoot ?? ""),
+    caddyFolder,
+  };
+  void invoke("save_sync_settings", { settings: syncSettings }).catch(() => {});
 });
 
 void attachListeners();
@@ -1738,6 +1890,7 @@ void loadConfig();
 void loadSyncSettings();
 setActiveView("status");
 syncFunctionButtons();
+syncCaddyButtons();
 
 window.addEventListener("beforeunload", () => {
   void detachListeners();

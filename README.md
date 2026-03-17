@@ -14,6 +14,7 @@ This prototype provides a basic function-runner shell where each feature functio
 - Multi-page UI:
   - **Status** page for all function runtime states (OpenVPN, Boundary auth, server tunnels/SSH)
   - **OpenVPN** function page (first PTY-driven function)
+  - **Caddy** page (runs `caddy run --config Caddyfile` in a configured folder)
   - **Servers** page for SSH/Boundary servers, tunnels, SSH, and SCP
   - **Boundary** page for Boundary CLI authentication and target search
   - **Config** page for app, OpenVPN, Boundary, and Git-based config sync settings
@@ -128,6 +129,7 @@ npm run tauri build
 - The Config page covers:
   - **App runtime** defaults (terminal cols/rows).
   - **OpenVPN** settings. Credentials stay in the OS keyring; the OpenVPN executable path and `.ovpn` file path are device-local and are not synced to the repo.
+  - **Caddy** settings. The selected Caddy working folder (must contain `Caddyfile`) is device-local and is not synced to the repo.
   - **Boundary** controller/auth settings. The Boundary CLI executable path is device-local and is not synced to the repo.
   - **Config sync (Git repo)**:
     - A `Config repo root` field pointing to a local clone of a private Git repo (e.g. `config-sync`) that contains `app-config/config.json` and (optionally) `app-config/servers.json`.

@@ -260,6 +260,7 @@ impl Default for SessionStore {
 }
 
 const OPENVPN_FUNCTION_ID: &str = "openvpn-connect";
+const CADDY_FUNCTION_ID: &str = "caddy-run";
 const CONFIG_FILE_NAME: &str = "config.json";
 const SERVERS_FILE_NAME: &str = "servers.json";
 const SYNC_SETTINGS_FILE_NAME: &str = "sync-local.json";
@@ -311,6 +312,7 @@ impl Default for FunctionStore {
         let mut statuses = HashMap::new();
         for (id, msg) in [
             (OPENVPN_FUNCTION_ID, "Ready"),
+            (CADDY_FUNCTION_ID, "Ready"),
             (BOUNDARY_AUTH_FUNCTION_ID, "Not authenticated"),
         ] {
             statuses.insert(
@@ -390,6 +392,8 @@ struct SyncSettings {
     openvpn_ovpn_path: String,
     #[serde(default)]
     boundary_cli_path: String,
+    #[serde(default)]
+    caddy_folder: String,
 }
 
 fn sync_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1856,6 +1860,7 @@ fn save_sync_settings(app: AppHandle, settings: SyncSettings) -> Result<(), Stri
     if !settings.boundary_cli_path.is_empty() {
         merged.boundary_cli_path = settings.boundary_cli_path;
     }
+    merged.caddy_folder = settings.caddy_folder;
     save_sync_settings_to_disk(&app, &merged)
 }
 
@@ -2315,6 +2320,96 @@ fn stop_openvpn_function(
 
         return Ok(());
     }
+}
+
+#[tauri::command]
+fn start_caddy_run(
+    cols: u16,
+    rows: u16,
+    folder: String,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<StartFunctionResult, String> {
+    let folder_trim = folder.trim();
+    if folder_trim.is_empty() {
+        return Err("folder cannot be empty".to_string());
+    }
+    let folder_path = PathBuf::from(folder_trim);
+    if !folder_path.exists() {
+        return Err(format!(
+            "folder does not exist: {}",
+            folder_path.to_string_lossy()
+        ));
+    }
+    let caddyfile = folder_path.join("Caddyfile");
+    if !caddyfile.exists() {
+        return Err(format!(
+            "Caddyfile not found in folder: {}",
+            folder_path.to_string_lossy()
+        ));
+    }
+
+    if let Some(prev) = lock_err(&function_store.statuses)?
+        .get(CADDY_FUNCTION_ID)
+        .and_then(|s| s.session_id.clone())
+    {
+        if let Some(p) = close_pty_internal(&prev, &session_store)? {
+            emit_pty_exit(&app, p);
+        }
+        let _ = update_functions_for_session_exit(&app, &function_store, &prev, None, "replaced");
+    }
+
+    let mut cmd = CommandBuilder::new("caddy");
+    cmd.arg("run");
+    cmd.arg("--config");
+    cmd.arg("Caddyfile");
+    cmd.cwd(folder_path.clone());
+
+    let session_id = open_pty_with_command_builder(cols, rows, cmd, &app, &session_store)?;
+    upsert_function_status(
+        &app,
+        &function_store,
+        CADDY_FUNCTION_ID,
+        "running",
+        &format!("Caddy running in {}", folder_path.to_string_lossy()),
+        Some(session_id.clone()),
+    )?;
+
+    Ok(StartFunctionResult {
+        function_id: CADDY_FUNCTION_ID.to_string(),
+        session_id,
+    })
+}
+
+#[tauri::command]
+fn stop_caddy_run(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<(), String> {
+    let sid = match lock_err(&function_store.statuses)?
+        .get(CADDY_FUNCTION_ID)
+        .and_then(|s| s.session_id.clone())
+    {
+        Some(s) => s,
+        None => {
+            upsert_function_status(
+                &app,
+                &function_store,
+                CADDY_FUNCTION_ID,
+                "idle",
+                "No running session",
+                None,
+            )?;
+            return Ok(());
+        }
+    };
+    if let Some(p) = close_pty_internal(&sid, &session_store)? {
+        emit_pty_exit(&app, p);
+    }
+    upsert_function_status(&app, &function_store, CADDY_FUNCTION_ID, "idle", "Stopped", None)?;
+    Ok(())
 }
 
 #[tauri::command]
@@ -2943,6 +3038,8 @@ fn main() {
             detect_openvpn_executable,
             start_openvpn_function,
             stop_openvpn_function,
+            start_caddy_run,
+            stop_caddy_run,
             list_servers,
             upsert_server,
             delete_server,
