@@ -4,11 +4,11 @@
 use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap,
-    env,
-    fs,
+    env, fs,
     io::{Read, Write},
     path::PathBuf,
     process::Command,
+    sync::atomic::{AtomicBool, Ordering},
     sync::mpsc::{self, Receiver, Sender},
     sync::{Arc, Mutex},
     thread,
@@ -17,8 +17,10 @@ use std::{
 
 use keyring::{Entry, Error as KeyringError};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, Manager, State};
+use serde_json::json;
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use totp_rs::{Algorithm, Secret, TOTP};
 
 mod server_mgmt;
@@ -91,9 +93,17 @@ struct AppConfig {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 enum BoundaryAuthKind {
-    #[default]
     Password,
+    #[default]
     Oidc,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+enum BoundaryOidcLoginMode {
+    #[default]
+    Browser,
+    Automated,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -111,6 +121,14 @@ struct BoundaryConfig {
     password: String,
     #[serde(default)]
     auth_kind: BoundaryAuthKind,
+    #[serde(default)]
+    oidc_login_mode: BoundaryOidcLoginMode,
+    #[serde(default)]
+    oidc_username: String,
+    #[serde(default)]
+    oidc_password: String,
+    #[serde(default)]
+    oidc_otp_secret: String,
     /// Passed to SSH when using boundary connect ssh (after --). e.g. "-o" "MACs=hmac-sha2-256" to fix MAC errors.
     #[serde(default)]
     connect_ssh_options: String,
@@ -125,6 +143,10 @@ impl Default for BoundaryConfig {
             login_name: String::new(),
             password: String::new(),
             auth_kind: BoundaryAuthKind::Oidc,
+            oidc_login_mode: BoundaryOidcLoginMode::Browser,
+            oidc_username: String::new(),
+            oidc_password: String::new(),
+            oidc_otp_secret: String::new(),
             connect_ssh_options: String::new(),
         }
     }
@@ -141,6 +163,10 @@ struct BoundaryConfigForDisk {
     login_name: String,
     #[serde(default)]
     auth_kind: BoundaryAuthKind,
+    #[serde(default)]
+    oidc_login_mode: BoundaryOidcLoginMode,
+    #[serde(default)]
+    oidc_username: String,
     #[serde(default)]
     connect_ssh_options: String,
 }
@@ -231,6 +257,8 @@ impl From<&AppConfig> for AppConfigForDisk {
                 auth_method_id: c.boundary.auth_method_id.clone(),
                 login_name: c.boundary.login_name.clone(),
                 auth_kind: c.boundary.auth_kind,
+                oidc_login_mode: c.boundary.oidc_login_mode,
+                oidc_username: c.boundary.oidc_username.clone(),
                 connect_ssh_options: c.boundary.connect_ssh_options.clone(),
             },
         }
@@ -269,8 +297,12 @@ const KEYRING_SERVICE: &str = "com.example.supercontrolpanel";
 const KEYRING_OPENVPN_PASSWORD: &str = "openvpn_password";
 const KEYRING_OPENVPN_OTP_SECRET: &str = "openvpn_otp_secret";
 const KEYRING_BOUNDARY_PASSWORD: &str = "boundary_password";
+const KEYRING_BOUNDARY_OIDC_PASSWORD: &str = "boundary_oidc_password";
+const KEYRING_BOUNDARY_OIDC_OTP_SECRET: &str = "boundary_oidc_otp_secret";
+const KEYRING_BOUNDARY_APP_TOKEN: &str = "boundary_app_token";
 const OPENVPN_HELPER_SCRIPT_NAME: &str = "openvpn-admin-helper.ps1";
 const BOUNDARY_AUTH_FUNCTION_ID: &str = "boundary-auth";
+const BOUNDARY_OIDC_WINDOW_LABEL: &str = "boundary-oidc-automation";
 
 fn server_tunnel_function_id(server_id: &str) -> String {
     format!("server-tunnel-{server_id}")
@@ -302,9 +334,19 @@ struct OpenVpnAdminSession {
     stop_path: PathBuf,
 }
 
+struct BoundaryAutomationSession {
+    session_id: String,
+    cancel: Arc<AtomicBool>,
+}
+
 #[derive(Default)]
 struct OpenVpnAdminStore {
     session: Mutex<Option<OpenVpnAdminSession>>,
+}
+
+#[derive(Default)]
+struct BoundaryAutomationStore {
+    session: Mutex<Option<BoundaryAutomationSession>>,
 }
 
 impl Default for FunctionStore {
@@ -505,6 +547,91 @@ fn keyring_set_or_delete(account: &str, value: &str) -> Result<(), String> {
     }
 }
 
+fn boundary_addr_base(addr: &str) -> String {
+    addr.trim().trim_end_matches('/').to_string()
+}
+
+fn boundary_cli_path(cfg: &AppConfig) -> String {
+    if cfg.boundary.cli_path.trim().is_empty() {
+        "boundary".to_string()
+    } else {
+        cfg.boundary.cli_path.trim().to_string()
+    }
+}
+
+fn boundary_app_token() -> Result<Option<String>, String> {
+    keyring_get_optional(KEYRING_BOUNDARY_APP_TOKEN)
+}
+
+fn apply_boundary_env(cmd: &mut Command, cfg: &AppConfig) -> Result<(), String> {
+    let addr = cfg.boundary.addr.trim();
+    if !addr.is_empty() {
+        cmd.env("BOUNDARY_ADDR", addr);
+    }
+    if let Some(token) = boundary_app_token()? {
+        if !token.trim().is_empty() {
+            cmd.env("BOUNDARY_TOKEN", token);
+        }
+    }
+    Ok(())
+}
+
+fn apply_boundary_env_builder(cmd: &mut CommandBuilder, cfg: &AppConfig) -> Result<(), String> {
+    let addr = cfg.boundary.addr.trim();
+    if !addr.is_empty() {
+        cmd.env("BOUNDARY_ADDR", addr);
+    }
+    if let Some(token) = boundary_app_token()? {
+        if !token.trim().is_empty() {
+            cmd.env("BOUNDARY_TOKEN", token);
+        }
+    }
+    Ok(())
+}
+
+fn apply_boundary_token_arg(cmd: &mut Command) {
+    cmd.arg("-token");
+    cmd.arg("env://BOUNDARY_TOKEN");
+}
+
+fn apply_boundary_token_arg_builder(cmd: &mut CommandBuilder) {
+    cmd.arg("-token");
+    cmd.arg("env://BOUNDARY_TOKEN");
+}
+
+fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<str>) {
+    let data = format!("{}\r\n", line.as_ref());
+    let _ = app.emit(
+        "pty-output",
+        PtyOutputPayload {
+            id: session_id.to_string(),
+            data: data.clone(),
+        },
+    );
+    let session_state = app.state::<SessionStore>();
+    let _ = broadcast_watchers(&session_state, session_id, &data);
+}
+
+fn passive_pty_command() -> CommandBuilder {
+    #[cfg(target_os = "windows")]
+    {
+        let mut cmd = CommandBuilder::new("powershell.exe");
+        cmd.arg("-NoLogo");
+        cmd.arg("-NoProfile");
+        cmd.arg("-Command");
+        cmd.arg("while ($true) { Start-Sleep -Seconds 3600 }");
+        cmd
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.arg("-c");
+        cmd.arg("while true; do sleep 3600; done");
+        cmd
+    }
+}
+
 fn load_app_config_from_disk(app: &AppHandle) -> Result<AppConfig, String> {
     let path = config_file_path(app)?;
     let mut config = if !path.exists() {
@@ -574,6 +701,32 @@ fn load_app_config_from_disk(app: &AppHandle) -> Result<AppConfig, String> {
         None => {
             if !config.boundary.password.is_empty() {
                 keyring_set_or_delete(KEYRING_BOUNDARY_PASSWORD, &config.boundary.password)?;
+                needs_disk_rewrite = true;
+            }
+        }
+    }
+
+    match keyring_get_optional(KEYRING_BOUNDARY_OIDC_PASSWORD)? {
+        Some(p) => config.boundary.oidc_password = p,
+        None => {
+            if !config.boundary.oidc_password.is_empty() {
+                keyring_set_or_delete(
+                    KEYRING_BOUNDARY_OIDC_PASSWORD,
+                    &config.boundary.oidc_password,
+                )?;
+                needs_disk_rewrite = true;
+            }
+        }
+    }
+
+    match keyring_get_optional(KEYRING_BOUNDARY_OIDC_OTP_SECRET)? {
+        Some(s) => config.boundary.oidc_otp_secret = s,
+        None => {
+            if !config.boundary.oidc_otp_secret.is_empty() {
+                keyring_set_or_delete(
+                    KEYRING_BOUNDARY_OIDC_OTP_SECRET,
+                    &config.boundary.oidc_otp_secret,
+                )?;
                 needs_disk_rewrite = true;
             }
         }
@@ -1029,15 +1182,12 @@ fn update_functions_for_session_exit(
 /// Probes via `boundary config get-token` (HashiCorp-supported; `token read` is not in all CLI versions).
 fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
     let cfg = load_app_config_from_disk(app)?;
-    let exe = if cfg.boundary.cli_path.trim().is_empty() {
-        "boundary".to_string()
-    } else {
-        cfg.boundary.cli_path.trim().to_string()
-    };
-    let addr = cfg.boundary.addr.trim();
+    let exe = boundary_cli_path(&cfg);
+    let _addr = cfg.boundary.addr.trim();
+    let using_app_token = boundary_app_token()?.is_some();
     scp_debug!(
         "boundary_cli_token_summary: exe={exe:?} BOUNDARY_ADDR={}",
-        if addr.is_empty() { "unset" } else { addr }
+        if _addr.is_empty() { "unset" } else { _addr }
     );
     if exe != "boundary" && !PathBuf::from(&exe).exists() {
         return Err(format!("Boundary CLI not found: {exe}"));
@@ -1045,8 +1195,9 @@ fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
     let mut cmd = Command::new(&exe);
     cmd.arg("config");
     cmd.arg("get-token");
-    if !addr.is_empty() {
-        cmd.env("BOUNDARY_ADDR", addr);
+    apply_boundary_env(&mut cmd, &cfg)?;
+    if using_app_token {
+        apply_boundary_token_arg(&mut cmd);
     }
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
@@ -1055,9 +1206,9 @@ fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
         .map_err(|e| format!("failed to run `{exe} config get-token`: {e}"))?;
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        let code = out.status.code().unwrap_or(-1);
+        let _code = out.status.code().unwrap_or(-1);
         scp_debug!(
-            "boundary config get-token failed: exit_code={code} stderr_len={} stderr={:?}",
+            "boundary config get-token failed: exit_code={_code} stderr_len={} stderr={:?}",
             out.stderr.len(),
             if stderr.len() > 400 {
                 format!("{}…", &stderr[..400])
@@ -1078,7 +1229,11 @@ fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
     if token_trimmed.is_empty() {
         return Err("no token".into());
     }
-    Ok("Authenticated — token in CLI keyring (boundary config get-token)".to_string())
+    Ok(if using_app_token {
+        "Authenticated — token managed by SuperControlPanel".to_string()
+    } else {
+        "Authenticated — token in CLI keyring (boundary config get-token)".to_string()
+    })
 }
 
 fn open_pty_internal(
@@ -1285,23 +1440,154 @@ fn adapt_command_for_shell(command: &str) -> String {
     }
 }
 
+fn generate_totp_code(otp_secret: &str) -> Result<String, String> {
+    let secret = otp_secret.trim();
+    if secret.is_empty() {
+        return Err("OTP secret is empty".to_string());
+    }
+    let secret_bytes = Secret::Encoded(secret.to_string())
+        .to_bytes()
+        .map_err(|e| format!("invalid OTP secret: {e}"))?;
+    let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, secret_bytes)
+        .map_err(|e| format!("failed to initialize OTP generator: {e}"))?;
+    totp.generate_current()
+        .map_err(|e| format!("failed to generate OTP: {e}"))
+}
+
 fn generate_openvpn_password(password: &str, otp_secret: &str) -> Result<String, String> {
     let secret = otp_secret.trim();
     if secret.is_empty() {
         return Ok(password.to_string());
     }
-
-    let secret_bytes = Secret::Encoded(secret.to_string())
-        .to_bytes()
-        .map_err(|e| format!("invalid OTP secret: {e}"))?;
-
-    let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, secret_bytes)
-        .map_err(|e| format!("failed to initialize OTP generator: {e}"))?;
-
-    let otp = totp
-        .generate_current()
-        .map_err(|e| format!("failed to generate OTP: {e}"))?;
+    let otp = generate_totp_code(secret)?;
     Ok(format!("{otp}{password}"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct BoundaryApiAuthenticateResponse {
+    #[serde(default)]
+    attributes: BoundaryApiAuthenticateAttributes,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+struct BoundaryApiAuthenticateAttributes {
+    #[serde(default)]
+    auth_url: String,
+    #[serde(default)]
+    token_id: String,
+    #[serde(default)]
+    token: String,
+    #[serde(default)]
+    expiration_time: String,
+}
+
+fn boundary_http_client() -> Result<Client, String> {
+    Client::builder()
+        .cookie_store(true)
+        .redirect(reqwest::redirect::Policy::limited(20))
+        .build()
+        .map_err(|e| format!("failed to build HTTP client: {e}"))
+}
+
+fn boundary_oidc_init_script(cfg: &BoundaryConfig) -> String {
+    let username =
+        serde_json::to_string(cfg.oidc_username.trim()).unwrap_or_else(|_| "\"\"".into());
+    let password = serde_json::to_string(&cfg.oidc_password).unwrap_or_else(|_| "\"\"".into());
+    let otp = match generate_totp_code(&cfg.oidc_otp_secret) {
+        Ok(code) => serde_json::to_string(&code).unwrap_or_else(|_| "\"\"".into()),
+        Err(_) => "\"\"".into(),
+    };
+    format!(
+        r#"
+(() => {{
+  const cfg = {{ username: {username}, password: {password}, otp: {otp} }};
+  const visible = (el) => !!el && !el.disabled && el.type !== "hidden" && el.offsetParent !== null;
+  const findFirst = (selectors) => {{
+    for (const selector of selectors) {{
+      const el = document.querySelector(selector);
+      if (visible(el)) return el;
+    }}
+    return null;
+  }};
+  const setValue = (el, value) => {{
+    if (!el || !value) return false;
+    el.focus();
+    el.value = value;
+    el.dispatchEvent(new Event("input", {{ bubbles: true }}));
+    el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+    return true;
+  }};
+  const submit = (el) => {{
+    if (!el) return false;
+    const form = el.closest("form");
+    if (form) {{
+      if (typeof form.requestSubmit === "function") form.requestSubmit();
+      else form.submit();
+      return true;
+    }}
+    const btn = findFirst([
+      "button[type=submit]",
+      "input[type=submit]",
+      "button[id*=login i]",
+      "button[name*=login i]",
+      "button[id*=verify i]",
+      "button[name*=verify i]",
+      "button"
+    ]);
+    if (btn) {{
+      btn.click();
+      return true;
+    }}
+    return false;
+  }};
+  const tick = () => {{
+    const pwd = findFirst(["input[type=password]", "input[name*=pass i]", "input[id*=pass i]"]);
+    const otpField = findFirst([
+      "input[autocomplete='one-time-code']",
+      "input[name*=otp i]",
+      "input[id*=otp i]",
+      "input[name*=totp i]",
+      "input[id*=totp i]",
+      "input[name*=code i]",
+      "input[id*=code i]"
+    ]);
+    if (otpField && cfg.otp && !otpField.value) {{
+      setValue(otpField, cfg.otp);
+      submit(otpField);
+      return;
+    }}
+    const user = findFirst([
+      "input[autocomplete=username]",
+      "input[type=email]",
+      "input[name*=user i]",
+      "input[id*=user i]",
+      "input[name*=email i]",
+      "input[id*=email i]",
+      "input[type=text]"
+    ]);
+    if (user && cfg.username && !user.value) setValue(user, cfg.username);
+    if (pwd && cfg.password && !pwd.value) {{
+      setValue(pwd, cfg.password);
+      submit(pwd);
+      return;
+    }}
+    if (user && cfg.username && !pwd) {{
+      const next = findFirst([
+        "button[type=submit]",
+        "input[type=submit]",
+        "button[id*=next i]",
+        "button[name*=next i]"
+      ]);
+      if (next) next.click();
+    }}
+  }};
+  tick();
+  setInterval(tick, 900);
+}})();
+"#
+    )
 }
 
 #[cfg(target_os = "windows")]
@@ -1980,9 +2266,17 @@ fn run_git(repo_root: &str, args: &[&str]) -> Result<String, String> {
     let combined = combined.trim().to_string();
 
     if out.status.success() {
-        Ok(if combined.is_empty() { "OK".into() } else { combined })
+        Ok(if combined.is_empty() {
+            "OK".into()
+        } else {
+            combined
+        })
     } else {
-        let code = out.status.code().map(|c| c.to_string()).unwrap_or_else(|| "unknown".into());
+        let code = out
+            .status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "unknown".into());
         Err(if combined.is_empty() {
             format!("git {:?} failed (exit code {code})", args)
         } else {
@@ -2020,11 +2314,11 @@ fn config_git_push(repo_root: String) -> Result<String, String> {
 
 #[tauri::command]
 fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, String> {
-    let incoming_pw_len = config.openvpn.password.len();
-    let incoming_otp_len = config.openvpn.otp_secret.len();
+    let _incoming_pw_len = config.openvpn.password.len();
+    let _incoming_otp_len = config.openvpn.otp_secret.len();
     // Never wipe keyring when the UI sends empty secrets (WebViews often omit password field values).
     if !config.openvpn.password.is_empty() {
-        scp_debug!("save_app_config: writing password to keyring (len={incoming_pw_len})");
+        scp_debug!("save_app_config: writing password to keyring (len={_incoming_pw_len})");
         keyring_set_or_delete(KEYRING_OPENVPN_PASSWORD, &config.openvpn.password)?;
     } else if let Some(p) = keyring_get_optional(KEYRING_OPENVPN_PASSWORD)? {
         scp_debug!(
@@ -2036,7 +2330,7 @@ fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, S
         scp_debug!("save_app_config: password empty from UI, keyring has no entry");
     }
     if !config.openvpn.otp_secret.is_empty() {
-        scp_debug!("save_app_config: writing OTP secret to keyring (len={incoming_otp_len})");
+        scp_debug!("save_app_config: writing OTP secret to keyring (len={_incoming_otp_len})");
         keyring_set_or_delete(KEYRING_OPENVPN_OTP_SECRET, &config.openvpn.otp_secret)?;
     } else if let Some(s) = keyring_get_optional(KEYRING_OPENVPN_OTP_SECRET)? {
         scp_debug!(
@@ -2051,6 +2345,22 @@ fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, S
         keyring_set_or_delete(KEYRING_BOUNDARY_PASSWORD, &config.boundary.password)?;
     } else if let Some(p) = keyring_get_optional(KEYRING_BOUNDARY_PASSWORD)? {
         config.boundary.password = p;
+    }
+    if !config.boundary.oidc_password.is_empty() {
+        keyring_set_or_delete(
+            KEYRING_BOUNDARY_OIDC_PASSWORD,
+            &config.boundary.oidc_password,
+        )?;
+    } else if let Some(p) = keyring_get_optional(KEYRING_BOUNDARY_OIDC_PASSWORD)? {
+        config.boundary.oidc_password = p;
+    }
+    if !config.boundary.oidc_otp_secret.is_empty() {
+        keyring_set_or_delete(
+            KEYRING_BOUNDARY_OIDC_OTP_SECRET,
+            &config.boundary.oidc_otp_secret,
+        )?;
+    } else if let Some(s) = keyring_get_optional(KEYRING_BOUNDARY_OIDC_OTP_SECRET)? {
+        config.boundary.oidc_otp_secret = s;
     }
     save_local_app_settings(&app, &config)?;
     save_app_config_to_disk(&app, &config)?;
@@ -2408,7 +2718,14 @@ fn stop_caddy_run(
     if let Some(p) = close_pty_internal(&sid, &session_store)? {
         emit_pty_exit(&app, p);
     }
-    upsert_function_status(&app, &function_store, CADDY_FUNCTION_ID, "idle", "Stopped", None)?;
+    upsert_function_status(
+        &app,
+        &function_store,
+        CADDY_FUNCTION_ID,
+        "idle",
+        "Stopped",
+        None,
+    )?;
     Ok(())
 }
 
@@ -2447,23 +2764,20 @@ fn search_boundary_targets(
     filter: Option<String>,
 ) -> Result<Vec<BoundaryTargetSummary>, String> {
     let cfg = load_app_config_from_disk(&app)?;
-    let exe = if cfg.boundary.cli_path.trim().is_empty() {
-        "boundary".to_string()
-    } else {
-        cfg.boundary.cli_path.trim().to_string()
-    };
+    let exe = boundary_cli_path(&cfg);
     if exe != "boundary" && !PathBuf::from(&exe).exists() {
         return Err("Boundary CLI not found in config".to_string());
     }
     let mut cmd = Command::new(&exe);
     cmd.arg("targets");
     cmd.arg("list");
+    if boundary_app_token()?.is_some() {
+        apply_boundary_token_arg(&mut cmd);
+    }
     cmd.arg("-recursive");
     cmd.arg("-format");
     cmd.arg("json");
-    if !cfg.boundary.addr.trim().is_empty() {
-        cmd.env("BOUNDARY_ADDR", cfg.boundary.addr.trim());
-    }
+    apply_boundary_env(&mut cmd, &cfg)?;
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let out = cmd
@@ -2578,16 +2892,13 @@ fn start_server_tunnel(
         server.boundary_listen_port
     };
     let cfg = load_app_config_from_disk(&app)?;
-    let exe = if cfg.boundary.cli_path.trim().is_empty() {
-        "boundary"
-    } else {
-        cfg.boundary.cli_path.trim()
-    };
+    let exe = boundary_cli_path(&cfg);
     let mut c = CommandBuilder::new(exe);
-    if !cfg.boundary.addr.trim().is_empty() {
-        c.env("BOUNDARY_ADDR", cfg.boundary.addr.trim());
-    }
     c.arg("connect");
+    if boundary_app_token()?.is_some() {
+        apply_boundary_token_arg_builder(&mut c);
+    }
+    apply_boundary_env_builder(&mut c, &cfg)?;
     c.arg("-target-id");
     c.arg(server.boundary_target_id.trim());
     c.arg("-listen-port");
@@ -2891,6 +3202,260 @@ fn start_server_rdp(app: AppHandle, server_id: String) -> Result<(), String> {
     }
 }
 
+fn stop_boundary_automation_session(
+    app: &AppHandle,
+    automation_store: &BoundaryAutomationStore,
+    session_store: &SessionStore,
+    function_store: &FunctionStore,
+) -> Result<(), String> {
+    let prior = {
+        let mut guard = lock_err(&automation_store.session)?;
+        guard.take()
+    };
+    if let Some(prior) = prior {
+        prior.cancel.store(true, Ordering::SeqCst);
+        if let Some(window) = app.get_webview_window(BOUNDARY_OIDC_WINDOW_LABEL) {
+            let _ = window.close();
+        }
+        if let Some(payload) = close_pty_internal(&prior.session_id, session_store)? {
+            emit_pty_exit(app, payload.clone());
+            let _ = update_functions_for_session_exit(
+                app,
+                function_store,
+                &prior.session_id,
+                payload.exit_code,
+                &payload.reason,
+            );
+        }
+    }
+    Ok(())
+}
+
+fn complete_boundary_automation_session(
+    app: &AppHandle,
+    session_store: &SessionStore,
+    function_store: &FunctionStore,
+    session_id: &str,
+    exit_code: Option<i32>,
+    reason: &str,
+) {
+    if let Ok(Some(payload)) = close_pty_internal(session_id, session_store) {
+        emit_pty_exit(app, payload.clone());
+        let _ = update_functions_for_session_exit(
+            app,
+            function_store,
+            session_id,
+            payload.exit_code,
+            &payload.reason,
+        );
+    } else {
+        let _ =
+            update_functions_for_session_exit(app, function_store, session_id, exit_code, reason);
+    }
+}
+
+fn run_boundary_oidc_automation(
+    app: AppHandle,
+    session_id: String,
+    cfg: BoundaryConfig,
+    cancel: Arc<AtomicBool>,
+) {
+    let function_store = app.state::<FunctionStore>();
+    let session_store = app.state::<SessionStore>();
+    let automation_store = app.state::<BoundaryAutomationStore>();
+
+    let finish = |exit_code: Option<i32>, reason: &str| {
+        if let Ok(mut guard) = automation_store.session.lock() {
+            guard.take();
+        }
+        if let Some(window) = app.get_webview_window(BOUNDARY_OIDC_WINDOW_LABEL) {
+            let _ = window.close();
+        }
+        complete_boundary_automation_session(
+            &app,
+            &session_store,
+            &function_store,
+            &session_id,
+            exit_code,
+            reason,
+        );
+    };
+
+    let addr = boundary_addr_base(&cfg.addr);
+    let auth_endpoint = format!(
+        "{addr}/v1/auth-methods/{}:authenticate",
+        cfg.auth_method_id.trim()
+    );
+    emit_pty_output_line(
+        &app,
+        &session_id,
+        format!("Starting automated OIDC login against {addr}"),
+    );
+
+    let client = match boundary_http_client() {
+        Ok(client) => client,
+        Err(err) => {
+            emit_pty_output_line(&app, &session_id, format!("HTTP client error: {err}"));
+            finish(Some(1), &err);
+            return;
+        }
+    };
+
+    let login_resp = match client
+        .post(&auth_endpoint)
+        .json(&json!({
+            "command": "start"
+        }))
+        .send()
+    {
+        Ok(resp) => resp,
+        Err(err) => {
+            let msg = format!("Boundary login request failed: {err}");
+            emit_pty_output_line(&app, &session_id, &msg);
+            finish(Some(1), &msg);
+            return;
+        }
+    };
+    if !login_resp.status().is_success() {
+        let status = login_resp.status();
+        let body = login_resp.text().unwrap_or_default();
+        let msg = format!(
+            "Boundary login request failed: HTTP {status} {}",
+            body.trim()
+        );
+        emit_pty_output_line(&app, &session_id, &msg);
+        finish(Some(1), &msg);
+        return;
+    }
+    let login_data: BoundaryApiAuthenticateResponse = match login_resp.json() {
+        Ok(data) => data,
+        Err(err) => {
+            let msg = format!("Failed to decode Boundary login response: {err}");
+            emit_pty_output_line(&app, &session_id, &msg);
+            finish(Some(1), &msg);
+            return;
+        }
+    };
+    if login_data.attributes.auth_url.trim().is_empty()
+        || login_data.attributes.token_id.trim().is_empty()
+    {
+        let msg = "Boundary login response did not include auth_url/token_id".to_string();
+        emit_pty_output_line(&app, &session_id, &msg);
+        finish(Some(1), &msg);
+        return;
+    }
+
+    let parsed_auth_url = match login_data.attributes.auth_url.parse() {
+        Ok(url) => url,
+        Err(err) => {
+            let msg = format!("Invalid OIDC auth URL: {err}");
+            emit_pty_output_line(&app, &session_id, &msg);
+            finish(Some(1), &msg);
+            return;
+        }
+    };
+    let builder = WebviewWindowBuilder::new(
+        &app,
+        BOUNDARY_OIDC_WINDOW_LABEL,
+        WebviewUrl::External(parsed_auth_url),
+    )
+    .visible(false)
+    .title("Boundary OIDC Automation")
+    .initialization_script_for_all_frames(boundary_oidc_init_script(&cfg));
+    if let Err(err) = builder.build() {
+        let msg = format!("Failed to open automation webview: {err}");
+        emit_pty_output_line(&app, &session_id, &msg);
+        finish(Some(1), &msg);
+        return;
+    }
+
+    emit_pty_output_line(
+        &app,
+        &session_id,
+        "Hidden OIDC window launched. Waiting for callback and token issuance.",
+    );
+    let token_id = login_data.attributes.token_id;
+    let mut attempts: u32 = 0;
+    loop {
+        if cancel.load(Ordering::SeqCst) {
+            emit_pty_output_line(&app, &session_id, "OIDC automation cancelled.");
+            finish(Some(1), "cancelled");
+            return;
+        }
+        thread::sleep(Duration::from_secs(1));
+        attempts += 1;
+        let token_resp = match client
+            .post(&auth_endpoint)
+            .json(&json!({
+                "command": "token",
+                "token_id": token_id,
+                "attributes": { "token_id": token_id }
+            }))
+            .send()
+        {
+            Ok(resp) => resp,
+            Err(err) => {
+                let msg = format!("Boundary token polling failed: {err}");
+                emit_pty_output_line(&app, &session_id, &msg);
+                finish(Some(1), &msg);
+                return;
+            }
+        };
+        if token_resp.status().is_success() {
+            let token_data: BoundaryApiAuthenticateResponse = match token_resp.json() {
+                Ok(data) => data,
+                Err(err) => {
+                    let msg = format!("Failed to decode token response: {err}");
+                    emit_pty_output_line(&app, &session_id, &msg);
+                    finish(Some(1), &msg);
+                    return;
+                }
+            };
+            if !token_data.attributes.token.trim().is_empty() {
+                if let Err(err) = keyring_set_or_delete(
+                    KEYRING_BOUNDARY_APP_TOKEN,
+                    token_data.attributes.token.trim(),
+                ) {
+                    let msg = format!("Failed to store Boundary token: {err}");
+                    emit_pty_output_line(&app, &session_id, &msg);
+                    finish(Some(1), &msg);
+                    return;
+                }
+                emit_pty_output_line(
+                    &app,
+                    &session_id,
+                    if token_data.attributes.expiration_time.trim().is_empty() {
+                        "OIDC login succeeded. Token stored in the app secure store.".to_string()
+                    } else {
+                        format!(
+                            "OIDC login succeeded. Token expires at {}.",
+                            token_data.attributes.expiration_time.trim()
+                        )
+                    },
+                );
+                finish(Some(0), "automated OIDC login complete");
+                return;
+            }
+        } else if !matches!(token_resp.status().as_u16(), 400 | 404) {
+            let status = token_resp.status();
+            let body = token_resp.text().unwrap_or_default();
+            let msg = format!(
+                "Boundary token polling failed: HTTP {status} {}",
+                body.trim()
+            );
+            emit_pty_output_line(&app, &session_id, &msg);
+            finish(Some(1), &msg);
+            return;
+        } else if attempts % 5 == 0 {
+            emit_pty_output_line(
+                &app,
+                &session_id,
+                "Still waiting for the IdP to complete login and callback.",
+            );
+        }
+    }
+}
+
 #[tauri::command]
 fn start_boundary_auth(
     cols: u16,
@@ -2898,6 +3463,7 @@ fn start_boundary_auth(
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
+    automation_store: State<'_, BoundaryAutomationStore>,
 ) -> Result<StartFunctionResult, String> {
     let cfg = load_app_config_from_disk(&app)?;
     let am = cfg.boundary.auth_method_id.trim();
@@ -2908,6 +3474,14 @@ fn start_boundary_auth(
                 return Err(
                     "OIDC: set Controller URL and OIDC auth method ID (amoidc_…) in Config, then Save."
                         .into(),
+                );
+            }
+            if cfg.boundary.oidc_login_mode == BoundaryOidcLoginMode::Automated
+                && (cfg.boundary.oidc_username.trim().is_empty()
+                    || cfg.boundary.oidc_password.is_empty())
+            {
+                return Err(
+                    "OIDC automation: set OIDC username and password in Config, then Save.".into(),
                 );
             }
         }
@@ -2923,38 +3497,44 @@ fn start_boundary_auth(
             }
         }
     }
+    keyring_set_or_delete(KEYRING_BOUNDARY_APP_TOKEN, "")?;
+    stop_boundary_automation_session(&app, &automation_store, &session_store, &function_store)?;
     if let Some(prev) = lock_err(&function_store.statuses)?
         .get(BOUNDARY_AUTH_FUNCTION_ID)
         .and_then(|s| s.session_id.clone())
     {
         let _ = close_pty_internal(&prev, &session_store);
     }
-    let exe = if cfg.boundary.cli_path.trim().is_empty() {
-        "boundary"
+    let is_oidc_automation = cfg.boundary.auth_kind == BoundaryAuthKind::Oidc
+        && cfg.boundary.oidc_login_mode == BoundaryOidcLoginMode::Automated;
+    let session_id = if is_oidc_automation {
+        open_pty_with_command_builder(cols, rows, passive_pty_command(), &app, &session_store)?
     } else {
-        cfg.boundary.cli_path.trim()
+        let exe = boundary_cli_path(&cfg);
+        let mut cmd = CommandBuilder::new(exe);
+        cmd.arg("authenticate");
+        if boundary_app_token()?.is_some() {
+            apply_boundary_token_arg_builder(&mut cmd);
+        }
+        apply_boundary_env_builder(&mut cmd, &cfg)?;
+        match cfg.boundary.auth_kind {
+            BoundaryAuthKind::Oidc => {
+                cmd.arg("oidc");
+                cmd.arg("-auth-method-id");
+                cmd.arg(am);
+            }
+            BoundaryAuthKind::Password => {
+                cmd.arg("password");
+                cmd.arg("-auth-method-id");
+                cmd.arg(am);
+                cmd.arg("-login-name");
+                cmd.arg(cfg.boundary.login_name.trim());
+            }
+        }
+        open_pty_with_command_builder(cols, rows, cmd, &app, &session_store)?
     };
-    let mut cmd = CommandBuilder::new(exe);
-    if !addr.is_empty() {
-        cmd.env("BOUNDARY_ADDR", addr);
-    }
-    cmd.arg("authenticate");
-    match cfg.boundary.auth_kind {
-        BoundaryAuthKind::Oidc => {
-            cmd.arg("oidc");
-            cmd.arg("-auth-method-id");
-            cmd.arg(am);
-        }
-        BoundaryAuthKind::Password => {
-            cmd.arg("password");
-            cmd.arg("-auth-method-id");
-            cmd.arg(am);
-            cmd.arg("-login-name");
-            cmd.arg(cfg.boundary.login_name.trim());
-        }
-    }
-    let session_id = open_pty_with_command_builder(cols, rows, cmd, &app, &session_store)?;
     let status_label = match cfg.boundary.auth_kind {
+        BoundaryAuthKind::Oidc if is_oidc_automation => "Boundary OIDC (automated)",
         BoundaryAuthKind::Oidc => "Boundary OIDC (browser)",
         BoundaryAuthKind::Password => "Boundary password login",
     };
@@ -2966,7 +3546,20 @@ fn start_boundary_auth(
         status_label,
         Some(session_id.clone()),
     )?;
-    if cfg.boundary.auth_kind == BoundaryAuthKind::Password {
+    if is_oidc_automation {
+        let cancel = Arc::new(AtomicBool::new(false));
+        {
+            let mut guard = lock_err(&automation_store.session)?;
+            *guard = Some(BoundaryAutomationSession {
+                session_id: session_id.clone(),
+                cancel: cancel.clone(),
+            });
+        }
+        let app2 = app.clone();
+        let cfg2 = cfg.boundary.clone();
+        let sid = session_id.clone();
+        thread::spawn(move || run_boundary_oidc_automation(app2, sid, cfg2, cancel));
+    } else if cfg.boundary.auth_kind == BoundaryAuthKind::Password {
         let pass = cfg.boundary.password.clone();
         let sid = session_id.clone();
         let app2 = app.clone();
@@ -2987,7 +3580,9 @@ fn stop_boundary_auth(
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
+    automation_store: State<'_, BoundaryAutomationStore>,
 ) -> Result<(), String> {
+    stop_boundary_automation_session(&app, &automation_store, &session_store, &function_store)?;
     let sid = match lock_err(&function_store.statuses)?
         .get(BOUNDARY_AUTH_FUNCTION_ID)
         .and_then(|s| s.session_id.clone())
@@ -3004,7 +3599,7 @@ fn stop_boundary_auth(
             Ok(m) => ("authenticated", m),
             Err(_) => (
                 "unauthenticated",
-                "Login was stopped; no token in CLI keyring.".to_string(),
+                "Login was stopped; no Boundary token is available.".to_string(),
             ),
         };
         upsert_function_status(
@@ -3024,6 +3619,7 @@ fn main() {
         .manage(SessionStore::default())
         .manage(FunctionStore::default())
         .manage(OpenVpnAdminStore::default())
+        .manage(BoundaryAutomationStore::default())
         .invoke_handler(tauri::generate_handler![
             open_pty,
             write_pty,

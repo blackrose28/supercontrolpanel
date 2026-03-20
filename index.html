@@ -256,9 +256,11 @@
                     <h2>Boundary authentication</h2>
                     <p class="hint">
                         Configure <strong>Config → Boundary</strong> (controller
-                        URL, CLI path, auth type). <strong>OIDC</strong> runs
-                        <code>boundary authenticate oidc</code> and opens your
-                        browser. <strong>Password</strong> runs
+                        URL, CLI path, auth type). <strong>OIDC</strong> can
+                        either run <code>boundary authenticate oidc</code> and
+                        open your browser, or use the app’s hidden automation
+                        window to fill the IdP login form and OTP.
+                        <strong>Password</strong> runs
                         <code>boundary authenticate password</code> and sends
                         the password via the terminal.
                     </p>
@@ -514,6 +516,20 @@
                             <option value="oidc">OIDC (browser login)</option>
                             <option value="password">Password</option>
                         </select>
+                        <label
+                            for="cfg-boundary-oidc-login-mode"
+                            class="cfg-boundary-oidc-only"
+                            >OIDC login mode</label
+                        >
+                        <select
+                            id="cfg-boundary-oidc-login-mode"
+                            class="cfg-boundary-oidc-only"
+                        >
+                            <option value="browser">Browser</option>
+                            <option value="automated">
+                                Automated hidden window
+                            </option>
+                        </select>
                         <label for="cfg-boundary-auth-method"
                             >Auth method ID</label
                         >
@@ -554,6 +570,47 @@
                             autocomplete="off"
                             spellcheck="false"
                         />
+                        <label
+                            for="cfg-boundary-oidc-username"
+                            class="cfg-boundary-oidc-automated-only"
+                            >OIDC site username</label
+                        >
+                        <input
+                            id="cfg-boundary-oidc-username"
+                            class="cfg-boundary-oidc-automated-only"
+                            type="text"
+                            autocomplete="off"
+                        />
+                        <label
+                            for="cfg-boundary-oidc-password"
+                            class="cfg-boundary-oidc-automated-only"
+                            >OIDC site password</label
+                        >
+                        <input
+                            id="cfg-boundary-oidc-password"
+                            class="cfg-boundary-oidc-automated-only masked-secret"
+                            type="text"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                        <label
+                            for="cfg-boundary-oidc-otp-secret"
+                            class="cfg-boundary-oidc-automated-only"
+                            >OIDC OTP secret (base32)</label
+                        >
+                        <input
+                            id="cfg-boundary-oidc-otp-secret"
+                            class="cfg-boundary-oidc-automated-only masked-secret"
+                            type="text"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                        <div class="form-grid-span hint cfg-boundary-oidc-automated-only">
+                            Automation uses a hidden Tauri webview with generic
+                            form detection. It works best for standard
+                            username/password/OTP pages and may need fallback to
+                            browser mode for heavily customized IdP flows.
+                        </div>
                     </div>
 
                     <div class="actions">

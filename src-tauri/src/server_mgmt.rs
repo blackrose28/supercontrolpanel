@@ -75,7 +75,8 @@ pub fn load_servers(app: &AppHandle) -> Result<Vec<Server>, String> {
         return Ok(Vec::new());
     }
     let raw = fs::read_to_string(&path).map_err(|e| format!("read servers: {e}"))?;
-    let file: ServersFile = serde_json::from_str(&raw).map_err(|e| format!("parse servers: {e}"))?;
+    let file: ServersFile =
+        serde_json::from_str(&raw).map_err(|e| format!("parse servers: {e}"))?;
     Ok(file.servers)
 }
 

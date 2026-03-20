@@ -57,9 +57,13 @@ type AppConfig = {
     cliPath: string;
     addr: string;
     authKind?: "password" | "oidc";
+    oidcLoginMode?: "browser" | "automated";
     authMethodId: string;
     loginName: string;
     password: string;
+    oidcUsername?: string;
+    oidcPassword?: string;
+    oidcOtpSecret?: string;
     connectSshOptions?: string;
   };
 };
@@ -167,6 +171,9 @@ const cfgBoundaryAddr = mustElement<HTMLInputElement>("#cfg-boundary-addr");
 const cfgBoundaryAuthKind = mustElement<HTMLSelectElement>(
   "#cfg-boundary-auth-kind",
 );
+const cfgBoundaryOidcLoginMode = mustElement<HTMLSelectElement>(
+  "#cfg-boundary-oidc-login-mode",
+);
 const cfgBoundaryAuthMethod = mustElement<HTMLInputElement>(
   "#cfg-boundary-auth-method",
 );
@@ -177,9 +184,24 @@ const cfgBoundaryLogin = mustElement<HTMLInputElement>("#cfg-boundary-login");
 const cfgBoundaryPassword = mustElement<HTMLInputElement>(
   "#cfg-boundary-password",
 );
+const cfgBoundaryOidcUsername = mustElement<HTMLInputElement>(
+  "#cfg-boundary-oidc-username",
+);
+const cfgBoundaryOidcPassword = mustElement<HTMLInputElement>(
+  "#cfg-boundary-oidc-password",
+);
+const cfgBoundaryOidcOtpSecret = mustElement<HTMLInputElement>(
+  "#cfg-boundary-oidc-otp-secret",
+);
 const cfgBoundaryPasswordOnly = () =>
   Array.from(
     document.querySelectorAll<HTMLElement>(".cfg-boundary-password-only"),
+  );
+const cfgBoundaryOidcOnly = () =>
+  Array.from(document.querySelectorAll<HTMLElement>(".cfg-boundary-oidc-only"));
+const cfgBoundaryOidcAutomatedOnly = () =>
+  Array.from(
+    document.querySelectorAll<HTMLElement>(".cfg-boundary-oidc-automated-only"),
   );
 const cfgSyncRepoRoot = mustElement<HTMLInputElement>("#cfg-sync-repo-root");
 const cfgSyncAppPath = mustElement<HTMLElement>("#cfg-sync-app-path");
@@ -710,18 +732,27 @@ function renderConfigForm() {
     cliPath: "",
     addr: "",
     authKind: "oidc" as const,
+    oidcLoginMode: "browser" as const,
     authMethodId: "",
     loginName: "",
     password: "",
+    oidcUsername: "",
+    oidcPassword: "",
+    oidcOtpSecret: "",
     connectSshOptions: "",
   };
   cfgBoundaryCli.value = b.cliPath;
   cfgBoundaryAddr.value = b.addr;
   cfgBoundaryAuthKind.value = b.authKind === "password" ? "password" : "oidc";
+  cfgBoundaryOidcLoginMode.value =
+    b.oidcLoginMode === "automated" ? "automated" : "browser";
   cfgBoundaryAuthMethod.value = b.authMethodId;
   cfgBoundaryConnectSshOptions.value = b.connectSshOptions ?? "";
   cfgBoundaryLogin.value = b.loginName;
   cfgBoundaryPassword.value = b.password;
+  cfgBoundaryOidcUsername.value = b.oidcUsername ?? "";
+  cfgBoundaryOidcPassword.value = b.oidcPassword ?? "";
+  cfgBoundaryOidcOtpSecret.value = b.oidcOtpSecret ?? "";
   syncBoundaryPasswordFieldsVisibility();
   cfgSyncRepoRoot.value = syncSettings?.repoRoot ?? "";
   cfgCaddyFolder.value = syncSettings?.caddyFolder ?? "";
@@ -729,9 +760,18 @@ function renderConfigForm() {
 }
 
 function syncBoundaryPasswordFieldsVisibility() {
-  const show = cfgBoundaryAuthKind.value === "password";
+  const isPassword = cfgBoundaryAuthKind.value === "password";
+  const isOidc = !isPassword;
+  const isOidcAutomated =
+    isOidc && cfgBoundaryOidcLoginMode.value === "automated";
   for (const el of cfgBoundaryPasswordOnly()) {
-    el.style.display = show ? "" : "none";
+    el.style.display = isPassword ? "" : "none";
+  }
+  for (const el of cfgBoundaryOidcOnly()) {
+    el.style.display = isOidc ? "" : "none";
+  }
+  for (const el of cfgBoundaryOidcAutomatedOnly()) {
+    el.style.display = isOidcAutomated ? "" : "none";
   }
 }
 
@@ -750,6 +790,8 @@ function readConfigForm(): AppConfig | null {
   const pw = cfgOpenvpnPassword.value;
   const otp = cfgOpenvpnOtpSecret.value.trim();
   const bpw = cfgBoundaryPassword.value;
+  const boidcPw = cfgBoundaryOidcPassword.value;
+  const boidcOtp = cfgBoundaryOidcOtpSecret.value.trim();
   return {
     app: {
       defaultTerminalCols: cols,
@@ -768,9 +810,16 @@ function readConfigForm(): AppConfig | null {
       cliPath: cfgBoundaryCli.value.trim(),
       addr: cfgBoundaryAddr.value.trim(),
       authKind: cfgBoundaryAuthKind.value === "password" ? "password" : "oidc",
+      oidcLoginMode:
+        cfgBoundaryOidcLoginMode.value === "automated"
+          ? "automated"
+          : "browser",
       authMethodId: cfgBoundaryAuthMethod.value.trim(),
       loginName: cfgBoundaryLogin.value.trim(),
       password: bpw || appConfig?.boundary?.password || "",
+      oidcUsername: cfgBoundaryOidcUsername.value.trim(),
+      oidcPassword: boidcPw || appConfig?.boundary?.oidcPassword || "",
+      oidcOtpSecret: boidcOtp || appConfig?.boundary?.oidcOtpSecret || "",
       connectSshOptions: cfgBoundaryConnectSshOptions.value.trim(),
     },
   };
@@ -1722,6 +1771,9 @@ serverRdpBtn.addEventListener("click", async () => {
 cfgBoundaryAuthKind.addEventListener("change", () =>
   syncBoundaryPasswordFieldsVisibility(),
 );
+cfgBoundaryOidcLoginMode.addEventListener("change", () =>
+  syncBoundaryPasswordFieldsVisibility(),
+);
 
 boundaryStartBtn.addEventListener("click", async () => {
   const kind = appConfig?.boundary?.authKind ?? cfgBoundaryAuthKind.value;
@@ -1732,6 +1784,20 @@ boundaryStartBtn.addEventListener("click", async () => {
   ) {
     boundaryTerm.writeln(
       "Password auth: set login and password in Config and Save first.",
+    );
+    return;
+  }
+  if (
+    kind === "oidc" &&
+    (appConfig?.boundary?.oidcLoginMode ?? cfgBoundaryOidcLoginMode.value) ===
+      "automated" &&
+    (
+      !(appConfig?.boundary?.oidcUsername || cfgBoundaryOidcUsername.value) ||
+      !(appConfig?.boundary?.oidcPassword || cfgBoundaryOidcPassword.value)
+    )
+  ) {
+    boundaryTerm.writeln(
+      "OIDC automation: set OIDC username and password in Config and Save first.",
     );
     return;
   }

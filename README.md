@@ -110,13 +110,16 @@ npm run tauri build
 - Boundary config (on Config page):
   - CLI executable path (or `boundary` on `PATH`).
   - controller URL (`BOUNDARY_ADDR`).
-  - auth type: `oidc` (browser login) or `password`.
+  - auth type: `oidc` or `password`.
+  - OIDC login mode: browser or automated hidden window.
   - auth method id, login name, password (password stored in OS keyring).
+  - optional OIDC-site username, password, and OTP secret for automated OIDC; the OIDC password and OTP secret are also stored in the OS keyring.
   - optional extra SSH options for `boundary connect ssh`.
 - Boundary auth page:
-  - Runs `boundary authenticate oidc` or `boundary authenticate password` in a PTY.
+  - Runs `boundary authenticate oidc`, `boundary authenticate password`, or an app-managed automated OIDC flow.
+  - Automated OIDC uses Boundary's HTTP auth API plus a hidden Tauri webview to fill common username/password/OTP forms, then stores the resulting token in the app secure store and injects it into later Boundary CLI commands via `BOUNDARY_TOKEN`.
   - Shows a compact live login terminal intended for status/output, not long interactive work.
-  - Status page reflects CLI token state via `boundary config get-token` (`boundary-auth` function card with “Token active” pill).
+  - Status page reflects the current Boundary token via `boundary config get-token`, using either the CLI keyring token or the app-managed automation token.
 - Boundary target search:
   - Lives on the Boundary page next to the auth terminal.
   - Searches Boundary targets via CLI.

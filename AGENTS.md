@@ -80,8 +80,10 @@ Config behavior:
   - CLI path (device-local in `sync-local.json`, not synced)
   - controller URL (`BOUNDARY_ADDR`)
   - auth kind (`oidc` or `password`)
+  - OIDC login mode (`browser` or `automated`)
   - auth method id
   - login + password (password stored in OS keyring)
+  - optional OIDC site username, password, and OTP secret for automated OIDC (password + OTP secret stored in OS keyring)
   - extra SSH options for `boundary connect ssh`
 - `save_app_config` writes secrets to keyring and never writes them to disk; legacy plaintext in JSON is migrated on load.
 - When password prompt appears (non-Windows PTY path), backend sends `TOTP(otpSecret, 6 digits) + password`.
@@ -138,8 +140,8 @@ Do not break these names unless updating both frontend and backend in the same c
   - Each server maintains its own PTY session IDs (tunnel + ssh) and buffered terminal output so switching rows restores that server's scrollback instead of clearing it.
   - Servers view includes a "Show tunnel panel" checkbox that toggles visibility of the tunnel PTY panel so the SSH terminal can use more space when tunnel output is not needed.
 - Boundary page:
-  - Runs `boundary authenticate` in a PTY (OIDC or password mode).
-  - Shows a compact live login PTY and updates `boundary-auth` function status based on CLI token.
+  - Runs `boundary authenticate` in a PTY for browser/password mode, or an app-managed automated OIDC flow using Boundary's HTTP auth API plus a hidden Tauri webview.
+  - Shows a compact live login PTY and updates `boundary-auth` function status based on the active Boundary token (CLI keyring or app-managed automation token).
   - Owns the Boundary target search UI; search results can be added into the Servers list.
   - Boundary target search filter matches target name, target ID, and description text.
 
