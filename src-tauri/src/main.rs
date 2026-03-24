@@ -438,6 +438,21 @@ struct SyncSettings {
     caddy_folder: String,
 }
 
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct SyncSettingsPatch {
+    #[serde(default)]
+    repo_root: Option<String>,
+    #[serde(default)]
+    openvpn_executable_path: Option<String>,
+    #[serde(default)]
+    openvpn_ovpn_path: Option<String>,
+    #[serde(default)]
+    boundary_cli_path: Option<String>,
+    #[serde(default)]
+    caddy_folder: Option<String>,
+}
+
 fn sync_settings_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
@@ -2134,19 +2149,29 @@ fn get_sync_settings(app: AppHandle) -> Result<SyncSettings, String> {
 }
 
 #[tauri::command]
-fn save_sync_settings(app: AppHandle, settings: SyncSettings) -> Result<(), String> {
+fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch) -> Result<(), String> {
     let mut merged = load_sync_settings_from_disk(&app)?;
-    merged.repo_root = settings.repo_root;
-    if !settings.openvpn_executable_path.is_empty() {
-        merged.openvpn_executable_path = settings.openvpn_executable_path;
+    if let Some(repo_root) = settings.repo_root {
+        merged.repo_root = repo_root;
     }
-    if !settings.openvpn_ovpn_path.is_empty() {
-        merged.openvpn_ovpn_path = settings.openvpn_ovpn_path;
+    if let Some(openvpn_executable_path) = settings.openvpn_executable_path {
+        if !openvpn_executable_path.is_empty() {
+            merged.openvpn_executable_path = openvpn_executable_path;
+        }
     }
-    if !settings.boundary_cli_path.is_empty() {
-        merged.boundary_cli_path = settings.boundary_cli_path;
+    if let Some(openvpn_ovpn_path) = settings.openvpn_ovpn_path {
+        if !openvpn_ovpn_path.is_empty() {
+            merged.openvpn_ovpn_path = openvpn_ovpn_path;
+        }
     }
-    merged.caddy_folder = settings.caddy_folder;
+    if let Some(boundary_cli_path) = settings.boundary_cli_path {
+        if !boundary_cli_path.is_empty() {
+            merged.boundary_cli_path = boundary_cli_path;
+        }
+    }
+    if let Some(caddy_folder) = settings.caddy_folder {
+        merged.caddy_folder = caddy_folder;
+    }
     save_sync_settings_to_disk(&app, &merged)
 }
 
