@@ -1,6 +1,6 @@
 [package]
 name = "super-control-panel"
-version = "0.1.5"
+version = "0.1.6"
 description = "Minimal Tauri + xterm.js + PTY prototype"
 edition = "2021"
 
@@ -26,3 +26,4 @@ windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+

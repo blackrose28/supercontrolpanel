@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   open as openDialog,
@@ -123,6 +124,7 @@ const viewServers = mustElement<HTMLElement>("#view-servers");
 const viewBoundary = mustElement<HTMLElement>("#view-boundary");
 const viewConfig = mustElement<HTMLElement>("#view-config");
 const statusList = mustElement<HTMLElement>("#status-list");
+const statusAppVersion = mustElement<HTMLElement>("#status-app-version");
 const openvpnConfigPreview = mustElement<HTMLElement>(
   "#openvpn-config-preview",
 );
@@ -830,6 +832,15 @@ async function loadConfig() {
   renderConfigForm();
   cfgStatus.textContent = "Config loaded.";
   void refreshConfigPaths();
+}
+
+async function loadAppVersion() {
+  try {
+    const version = await getVersion();
+    statusAppVersion.textContent = version;
+  } catch {
+    statusAppVersion.textContent = "unknown";
+  }
 }
 
 async function saveConfig() {
@@ -1952,6 +1963,7 @@ cfgCaddyFolder.addEventListener("change", () => {
 
 void attachListeners();
 void refreshStatuses();
+void loadAppVersion();
 void loadConfig();
 void loadSyncSettings();
 setActiveView("status");
