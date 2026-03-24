@@ -1,6 +1,6 @@
 [package]
 name = "super-control-panel"
-version = "0.1.4"
+version = "0.1.5"
 description = "Minimal Tauri + xterm.js + PTY prototype"
 edition = "2021"
 

@@ -89,7 +89,9 @@ Config behavior:
 - When password prompt appears (non-Windows PTY path), backend sends `TOTP(otpSecret, 6 digits) + password`.
 - On Windows, OpenVPN uses an elevated helper (UAC) instead of the normal PTY flow.
 - On Linux/macOS, OpenVPN runs in PTY via `sudo`.
-- Config sync helpers (`sync_config_pull` / `sync_config_push`) copy only the shared `config.json` and `servers.json` between the app config directory and `app-config/config.json` / `app-config/servers.json` inside a Git-managed repo. Device-local settings such as OpenVPN executable/OVPN paths, Boundary CLI path, and sync repo root stay in `sync-local.json`. The repo root path is configured via the Config page “Config sync (Git repo)” section, which is the recommended way to sync config across machines (optionally inside a Google Drive/OneDrive/Dropbox folder).
+- Config sync helpers (`sync_config_pull` / `sync_config_push`) copy only the shared `config.json` and `servers.json` between the app config directory and `app-config/config.json` / `app-config/servers.json` inside a Git-managed repo. Device-local settings such as OpenVPN executable/OVPN paths, Boundary CLI path, Caddy folder, and sync repo root stay in `sync-local.json`. The repo root path is configured via the Config page “Config sync (Git repo)” section, which is the recommended way to sync config across machines (optionally inside a Google Drive/OneDrive/Dropbox folder).
+
+- `save_sync_settings` uses partial-patch semantics: only fields explicitly provided by the caller are updated on disk, so unrelated device-local settings (e.g. `caddyFolder`) are not accidentally cleared.
 
 Do not break these names unless updating both frontend and backend in the same change.
 
