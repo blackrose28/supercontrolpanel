@@ -50,6 +50,7 @@ This prototype provides a basic function-runner shell where each feature functio
 ### Status page behavior
 
 - Shows a card for each function runtime (OpenVPN, Boundary auth, server tunnels/SSH).
+- Each card includes a `Dismiss` action that hides just that current status entry for the rest of the app session. If that function later reports a different status, its card automatically reappears.
 - Cards are **clickable shortcuts**:
   - OpenVPN card: navigates to the OpenVPN page, focuses the start button, and scrolls the VPN terminal into view.
   - Boundary auth card: navigates to the Boundary page, focuses the login button, and scrolls the Boundary terminal into view.

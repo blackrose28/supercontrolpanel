@@ -331,6 +331,7 @@ const CADDY_FUNCTION_ID = "caddy-run";
 const SERVER_TUNNEL_PREFIX = "server-tunnel-";
 const SERVER_SSH_PREFIX = "server-ssh-";
 const statusMap = new Map<string, FunctionStatus>();
+const dismissedStatusKeys = new Map<string, string>();
 let openvpnSessionId: string | null = null;
 let caddySessionId: string | null = null;
 const serverTunnelSessions: Record<string, string> = {};
@@ -436,7 +437,7 @@ async function attachListeners() {
   unlistenFunctionStatus = await listen<FunctionStatus>(
     "function-status",
     (event) => {
-      statusMap.set(event.payload.functionId, event.payload);
+      storeStatus(event.payload);
       renderStatusList();
       if (event.payload.functionId === OPENVPN_FUNCTION_ID) {
         openvpnSessionId = event.payload.sessionId;
@@ -557,10 +558,30 @@ function formatDate(ms: number): string {
   return new Date(ms).toLocaleTimeString();
 }
 
+function statusDismissKey(status: FunctionStatus): string {
+  return [
+    status.state,
+    status.message,
+    status.sessionId ?? "",
+    String(status.updatedAtMs),
+  ].join("\u0000");
+}
+
+function storeStatus(status: FunctionStatus) {
+  statusMap.set(status.functionId, status);
+  const dismissedKey = dismissedStatusKeys.get(status.functionId);
+  if (dismissedKey && dismissedKey !== statusDismissKey(status)) {
+    dismissedStatusKeys.delete(status.functionId);
+  }
+}
+
 function renderStatusList() {
   const serverIds = new Set(serversList.map((s) => s.id));
   const statuses = [...statusMap.values()]
     .filter((s) => {
+      if (dismissedStatusKeys.get(s.functionId) === statusDismissKey(s)) {
+        return false;
+      }
       if (
         s.functionId.startsWith(SERVER_TUNNEL_PREFIX) ||
         s.functionId.startsWith(SERVER_SSH_PREFIX)
@@ -622,7 +643,10 @@ function renderStatusList() {
       return `<article class="status-card${isBoundary ? ` status-card-boundary status-boundary-${escapeHtml(status.state)}` : ""}" data-function-id="${escapeHtml(status.functionId)}">
         <div class="status-card-head">
           <div class="status-title">${escapeHtml(title)}</div>
-          ${pill}
+          <div class="status-card-actions">
+            ${pill}
+            <button class="status-dismiss-btn" type="button" data-action="dismiss-status" aria-label="Dismiss ${escapeHtml(title)}" title="Dismiss until this status changes">Dismiss</button>
+          </div>
         </div>
         ${stateLine}
         <div class="status-body">${escapeHtml(status.message)}</div>
@@ -630,6 +654,10 @@ function renderStatusList() {
       </article>`;
     })
     .join("");
+  if (!statuses.length) {
+    statusList.innerHTML =
+      '<div class="status-empty">No visible status items. Dismissed cards will reappear when their status changes.</div>';
+  }
 }
 
 async function navigateFromStatusCard(functionId: string) {
@@ -1038,7 +1066,7 @@ async function autoDetectOpenvpnExecutable() {
 async function refreshStatuses() {
   const statuses = await invoke<FunctionStatus[]>("list_function_statuses");
   for (const status of statuses) {
-    statusMap.set(status.functionId, status);
+    storeStatus(status);
     if (status.functionId === OPENVPN_FUNCTION_ID) {
       openvpnSessionId = status.sessionId;
     }
@@ -1863,6 +1891,23 @@ navStatus.addEventListener("click", () => {
 });
 
 statusList.addEventListener("click", (event) => {
+  const dismissBtn = (event.target as HTMLElement).closest<HTMLButtonElement>(
+    'button[data-action="dismiss-status"]',
+  );
+  if (dismissBtn) {
+    const card = dismissBtn.closest<HTMLElement>(".status-card[data-function-id]");
+    const functionId = card?.dataset.functionId;
+    if (!functionId) {
+      return;
+    }
+    const status = statusMap.get(functionId);
+    if (!status) {
+      return;
+    }
+    dismissedStatusKeys.set(functionId, statusDismissKey(status));
+    renderStatusList();
+    return;
+  }
   const card = (event.target as HTMLElement).closest<HTMLElement>(
     ".status-card[data-function-id]",
   );
