@@ -578,6 +578,10 @@ fn boundary_app_token() -> Result<Option<String>, String> {
     keyring_get_optional(KEYRING_BOUNDARY_APP_TOKEN)
 }
 
+struct BoundaryTokenSummary {
+    message: String,
+}
+
 fn apply_boundary_env(cmd: &mut Command, cfg: &AppConfig) -> Result<(), String> {
     let addr = cfg.boundary.addr.trim();
     if !addr.is_empty() {
@@ -604,14 +608,24 @@ fn apply_boundary_env_builder(cmd: &mut CommandBuilder, cfg: &AppConfig) -> Resu
     Ok(())
 }
 
-fn apply_boundary_token_arg(cmd: &mut Command) {
-    cmd.arg("-token");
-    cmd.arg("env://BOUNDARY_TOKEN");
+fn apply_boundary_token_arg_if_present(cmd: &mut Command) -> Result<(), String> {
+    if let Some(token) = boundary_app_token()? {
+        if !token.trim().is_empty() {
+            cmd.arg("-token");
+            cmd.arg("env://BOUNDARY_TOKEN");
+        }
+    }
+    Ok(())
 }
 
-fn apply_boundary_token_arg_builder(cmd: &mut CommandBuilder) {
-    cmd.arg("-token");
-    cmd.arg("env://BOUNDARY_TOKEN");
+fn apply_boundary_token_arg_if_present_builder(cmd: &mut CommandBuilder) -> Result<(), String> {
+    if let Some(token) = boundary_app_token()? {
+        if !token.trim().is_empty() {
+            cmd.arg("-token");
+            cmd.arg("env://BOUNDARY_TOKEN");
+        }
+    }
+    Ok(())
 }
 
 fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<str>) {
@@ -1138,13 +1152,13 @@ fn update_functions_for_session_exit(
             if status.function_id == BOUNDARY_AUTH_FUNCTION_ID {
                 status.session_id = None;
                 status.updated_at_ms = now_ms();
-                let (state, message) = match boundary_cli_token_summary(app) {
-                    Ok(msg) => ("authenticated".to_string(), msg),
+                let (state, message) = match boundary_token_summary(app) {
+                    Ok(summary) => ("authenticated".to_string(), summary.message),
                     Err(_) => {
                         if exit_code == Some(0) {
                             (
                                 "authenticated".to_string(),
-                                "Token saved to CLI keyring (could not re-read token; try Status refresh)."
+                                "Login completed, but the saved Boundary token could not be verified yet. Refresh Status or retry login."
                                     .to_string(),
                             )
                         } else {
@@ -1193,15 +1207,17 @@ fn update_functions_for_session_exit(
     Ok(())
 }
 
-/// Uses the same token the Boundary CLI stores in the OS keyring after `boundary authenticate`.
-/// Probes via `boundary config get-token` (HashiCorp-supported; `token read` is not in all CLI versions).
-fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
+/// Probes the currently active Boundary token via `boundary config get-token`.
+/// This supports both the CLI-managed keyring token and the app-managed token injected through `BOUNDARY_TOKEN`.
+fn boundary_token_summary(app: &AppHandle) -> Result<BoundaryTokenSummary, String> {
     let cfg = load_app_config_from_disk(app)?;
     let exe = boundary_cli_path(&cfg);
     let _addr = cfg.boundary.addr.trim();
-    let using_app_token = boundary_app_token()?.is_some();
+    let using_app_token = boundary_app_token()?
+        .map(|token| !token.trim().is_empty())
+        .unwrap_or(false);
     scp_debug!(
-        "boundary_cli_token_summary: exe={exe:?} BOUNDARY_ADDR={}",
+        "boundary_token_summary: exe={exe:?} BOUNDARY_ADDR={}",
         if _addr.is_empty() { "unset" } else { _addr }
     );
     if exe != "boundary" && !PathBuf::from(&exe).exists() {
@@ -1211,9 +1227,6 @@ fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
     cmd.arg("config");
     cmd.arg("get-token");
     apply_boundary_env(&mut cmd, &cfg)?;
-    if using_app_token {
-        apply_boundary_token_arg(&mut cmd);
-    }
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
     let out = cmd
@@ -1244,10 +1257,13 @@ fn boundary_cli_token_summary(app: &AppHandle) -> Result<String, String> {
     if token_trimmed.is_empty() {
         return Err("no token".into());
     }
-    Ok(if using_app_token {
-        "Authenticated — token managed by SuperControlPanel".to_string()
-    } else {
-        "Authenticated — token in CLI keyring (boundary config get-token)".to_string()
+    Ok(BoundaryTokenSummary {
+        message: if using_app_token {
+            "Authenticated via hidden OIDC window. Token is stored by SuperControlPanel and injected into Boundary commands."
+                .to_string()
+        } else {
+            "Authenticated via Boundary CLI. Token is stored in the CLI keyring.".to_string()
+        },
     })
 }
 
@@ -2089,10 +2105,10 @@ fn list_function_statuses(
                 "Logging in — finish in the Boundary tab (browser or terminal).".to_string();
             continue;
         }
-        match boundary_cli_token_summary(&app) {
-            Ok(msg) => {
+        match boundary_token_summary(&app) {
+            Ok(summary) => {
                 s.state = "authenticated".to_string();
-                s.message = msg;
+                s.message = summary.message;
             }
             Err(e) => {
                 s.state = "unauthenticated".to_string();
@@ -2111,7 +2127,7 @@ fn list_function_statuses(
                     e
                 };
                 s.message = format!(
-                    "No active Boundary CLI token — open Boundary tab and log in. [{err_short}]{addr_hint}"
+                    "No active Boundary token — open Boundary tab and log in. [{err_short}]{addr_hint}"
                 );
             }
         }
@@ -2796,9 +2812,7 @@ fn search_boundary_targets(
     let mut cmd = Command::new(&exe);
     cmd.arg("targets");
     cmd.arg("list");
-    if boundary_app_token()?.is_some() {
-        apply_boundary_token_arg(&mut cmd);
-    }
+    apply_boundary_token_arg_if_present(&mut cmd)?;
     cmd.arg("-recursive");
     cmd.arg("-format");
     cmd.arg("json");
@@ -2920,9 +2934,7 @@ fn start_server_tunnel(
     let exe = boundary_cli_path(&cfg);
     let mut c = CommandBuilder::new(exe);
     c.arg("connect");
-    if boundary_app_token()?.is_some() {
-        apply_boundary_token_arg_builder(&mut c);
-    }
+    apply_boundary_token_arg_if_present_builder(&mut c)?;
     apply_boundary_env_builder(&mut c, &cfg)?;
     c.arg("-target-id");
     c.arg(server.boundary_target_id.trim());
@@ -3538,9 +3550,7 @@ fn start_boundary_auth(
         let exe = boundary_cli_path(&cfg);
         let mut cmd = CommandBuilder::new(exe);
         cmd.arg("authenticate");
-        if boundary_app_token()?.is_some() {
-            apply_boundary_token_arg_builder(&mut cmd);
-        }
+        apply_boundary_token_arg_if_present_builder(&mut cmd)?;
         apply_boundary_env_builder(&mut cmd, &cfg)?;
         match cfg.boundary.auth_kind {
             BoundaryAuthKind::Oidc => {
@@ -3620,8 +3630,8 @@ fn stop_boundary_auth(
         let _ =
             update_functions_for_session_exit(&app, &function_store, &sid, p.exit_code, &p.reason);
     } else {
-        let (state, msg) = match boundary_cli_token_summary(&app) {
-            Ok(m) => ("authenticated", m),
+        let (state, msg) = match boundary_token_summary(&app) {
+            Ok(summary) => ("authenticated", summary.message),
             Err(_) => (
                 "unauthenticated",
                 "Login was stopped; no Boundary token is available.".to_string(),

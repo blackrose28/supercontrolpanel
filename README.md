@@ -119,7 +119,7 @@ npm run tauri build
   - Runs `boundary authenticate oidc`, `boundary authenticate password`, or an app-managed automated OIDC flow.
   - Automated OIDC uses Boundary's HTTP auth API plus a hidden Tauri webview to fill common username/password/OTP forms, then stores the resulting token in the app secure store and injects it into later Boundary CLI commands via `BOUNDARY_TOKEN`.
   - Shows a compact live login terminal intended for status/output, not long interactive work.
-  - Status page reflects the current Boundary token via `boundary config get-token`, using either the CLI keyring token or the app-managed automation token.
+- Status page reflects the current Boundary token via `boundary config get-token`, using either the CLI keyring token or the app-managed automation token, and labels the auth card based on which token source is active.
 - Boundary target search:
   - Lives on the Boundary page next to the auth terminal.
   - Searches Boundary targets via CLI.

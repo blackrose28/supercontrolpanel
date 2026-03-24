@@ -599,14 +599,23 @@ function renderStatusList() {
         }
       }
       const isBoundary = status.functionId === BOUNDARY_AUTH_FUNCTION_ID;
-      const pill =
+      const boundarySourcePill =
         isBoundary && status.state === "authenticated"
-          ? '<span class="status-pill status-pill-ok">Token active</span>'
+          ? status.message.includes("stored by SuperControlPanel")
+            ? '<span class="status-pill status-pill-ok">App token</span>'
+            : status.message.includes("CLI keyring")
+              ? '<span class="status-pill status-pill-ok">CLI token</span>'
+              : '<span class="status-pill status-pill-ok">Authenticated</span>'
+          : "";
+      const pill =
+        boundarySourcePill ||
+        (isBoundary && status.state === "authenticated"
+          ? '<span class="status-pill status-pill-ok">Authenticated</span>'
           : isBoundary && status.state === "authenticating"
             ? '<span class="status-pill status-pill-warn">Logging in…</span>'
             : isBoundary && status.state === "unauthenticated"
               ? '<span class="status-pill status-pill-muted">No token</span>'
-              : "";
+              : "");
       const stateLine = isBoundary
         ? ""
         : `<div class="status-row">state=<b>${escapeHtml(status.state)}</b></div>`;
