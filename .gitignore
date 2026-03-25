@@ -40,3 +40,6 @@ src-tauri/Cargo.lock
 # Device/local generated files
 package-lock.json
 src-tauri/gen/
+
+# Docker Linux build output
+dist-linux/
