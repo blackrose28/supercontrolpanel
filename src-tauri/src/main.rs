@@ -1509,6 +1509,47 @@ fn adapt_command_for_shell(command: &str) -> String {
     }
 }
 
+/// Cached clock offset (seconds) = remote_epoch − local_epoch.
+/// Positive means local clock is behind; negative means ahead.
+static NTP_OFFSET: std::sync::OnceLock<i64> = std::sync::OnceLock::new();
+
+/// Fetch clock offset by comparing local time with a remote HTTP Date header.
+fn fetch_time_offset() -> i64 {
+    *NTP_OFFSET.get_or_init(|| {
+        let offset = (|| -> Result<i64, String> {
+            let client = reqwest::blocking::Client::builder()
+                .timeout(std::time::Duration::from_secs(5))
+                .build()
+                .map_err(|e| format!("{e}"))?;
+            let resp = client
+                .head("https://www.google.com")
+                .send()
+                .map_err(|e| format!("{e}"))?;
+            let date_str = resp
+                .headers()
+                .get("date")
+                .and_then(|v| v.to_str().ok())
+                .ok_or("no Date header")?;
+            // Parse HTTP date: "Wed, 26 Mar 2026 16:45:00 GMT"
+            let remote = httpdate::parse_http_date(date_str)
+                .map_err(|e| format!("{e}"))?;
+            let remote_epoch = remote
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| format!("{e}"))?
+                .as_secs() as i64;
+            let local_epoch = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|e| format!("{e}"))?
+                .as_secs() as i64;
+            Ok(remote_epoch - local_epoch)
+        })();
+        match offset {
+            Ok(d) => d,
+            Err(_) => 0
+        }
+    })
+}
+
 fn generate_totp_code(otp_secret: &str) -> Result<String, String> {
     let secret = otp_secret.trim();
     if secret.is_empty() {
@@ -1517,10 +1558,15 @@ fn generate_totp_code(otp_secret: &str) -> Result<String, String> {
     let secret_bytes = Secret::Encoded(secret.to_string())
         .to_bytes()
         .map_err(|e| format!("invalid OTP secret: {e}"))?;
+    let local_epoch = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("system time error: {e}"))?
+        .as_secs();
+    let offset = fetch_time_offset();
+    let corrected = (local_epoch as i64 + offset) as u64;
     let totp = TOTP::new(Algorithm::SHA1, 6, 1, 30, secret_bytes)
         .map_err(|e| format!("failed to initialize OTP generator: {e}"))?;
-    totp.generate_current()
-        .map_err(|e| format!("failed to generate OTP: {e}"))
+    Ok(totp.generate(corrected))
 }
 
 fn generate_openvpn_password(password: &str, otp_secret: &str) -> Result<String, String> {
