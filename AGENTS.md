@@ -46,7 +46,7 @@ Function runtime contract:
  - `sync_config_pull({ repoRoot }) -> void`
  - `sync_config_push({ repoRoot }) -> void`
 - `function-status` event with:
-  - `{ functionId, state, message, sessionId, updatedAtMs }`
+  - `{ functionId, state, message, boundaryTokenSource?, sessionId, updatedAtMs }`
 
 Additional commands/events added in this iteration:
 
@@ -123,7 +123,7 @@ Do not break these names unless updating both frontend and backend in the same c
 - Status page:
   - Renders from `function-status` events plus initial `list_function_statuses`.
   - Each status card is clickable and navigates to the owning page (OpenVPN, Servers, Boundary) while focusing the relevant control or server row.
-  - Special card for Boundary auth (`boundary-auth`) with token status pill.
+  - Special card for Boundary auth (`boundary-auth`) with a source-aware token status pill (`App token` or `CLI token` when authenticated).
   - Server tunnel/SSH statuses are titled as `Tunnel – {serverName}` / `SSH – {serverName}`; orphan statuses for deleted servers are filtered out, and stopped tunnel/SSH entries (idle state with no session) are hidden once their PTY has been torn down.
 - OpenVPN page:
   - May run without PTY input when elevated helper mode is active.

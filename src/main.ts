@@ -30,6 +30,7 @@ type FunctionStatus = {
   functionId: string;
   state: string;
   message: string;
+  boundaryTokenSource?: "app" | "cli" | null;
   sessionId: string | null;
   updatedAtMs: number;
 };
@@ -543,7 +544,7 @@ function setActiveView(
 const STATUS_CARD_TITLE: Record<string, string> = {
   [OPENVPN_FUNCTION_ID]: "OpenVPN",
   [CADDY_FUNCTION_ID]: "Caddy",
-  [BOUNDARY_AUTH_FUNCTION_ID]: "Boundary CLI",
+  [BOUNDARY_AUTH_FUNCTION_ID]: "Boundary Auth",
 };
 
 function escapeHtml(s: string): string {
@@ -622,9 +623,9 @@ function renderStatusList() {
       const isBoundary = status.functionId === BOUNDARY_AUTH_FUNCTION_ID;
       const boundarySourcePill =
         isBoundary && status.state === "authenticated"
-          ? status.message.includes("stored by SuperControlPanel")
+          ? status.boundaryTokenSource === "app"
             ? '<span class="status-pill status-pill-ok">App token</span>'
-            : status.message.includes("CLI keyring")
+            : status.boundaryTokenSource === "cli"
               ? '<span class="status-pill status-pill-ok">CLI token</span>'
               : '<span class="status-pill status-pill-ok">Authenticated</span>'
           : "";

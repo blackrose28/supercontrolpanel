@@ -61,6 +61,7 @@ struct FunctionStatus {
     function_id: String,
     state: String,
     message: String,
+    boundary_token_source: Option<String>,
     session_id: Option<String>,
     updated_at_ms: u64,
 }
@@ -363,6 +364,7 @@ impl Default for FunctionStore {
                     function_id: id.to_string(),
                     state: "idle".to_string(),
                     message: msg.to_string(),
+                    boundary_token_source: None,
                     session_id: None,
                     updated_at_ms: now_ms(),
                 },
@@ -579,6 +581,7 @@ fn boundary_app_token() -> Result<Option<String>, String> {
 }
 
 struct BoundaryTokenSummary {
+    source: &'static str,
     message: String,
 }
 
@@ -1122,6 +1125,7 @@ fn upsert_function_status(
         function_id: function_id.to_string(),
         state: state.to_string(),
         message: message.to_string(),
+        boundary_token_source: None,
         session_id,
         updated_at_ms: now_ms(),
     };
@@ -1129,6 +1133,32 @@ fn upsert_function_status(
     {
         let mut statuses = lock_err(&function_store.statuses)?;
         statuses.insert(function_id.to_string(), status.clone());
+    }
+
+    let _ = app.emit("function-status", status);
+    Ok(())
+}
+
+fn upsert_boundary_status(
+    app: &AppHandle,
+    function_store: &FunctionStore,
+    state: &str,
+    message: &str,
+    boundary_token_source: Option<&str>,
+    session_id: Option<String>,
+) -> Result<(), String> {
+    let status = FunctionStatus {
+        function_id: BOUNDARY_AUTH_FUNCTION_ID.to_string(),
+        state: state.to_string(),
+        message: message.to_string(),
+        boundary_token_source: boundary_token_source.map(|s| s.to_string()),
+        session_id,
+        updated_at_ms: now_ms(),
+    };
+
+    {
+        let mut statuses = lock_err(&function_store.statuses)?;
+        statuses.insert(BOUNDARY_AUTH_FUNCTION_ID.to_string(), status.clone());
     }
 
     let _ = app.emit("function-status", status);
@@ -1152,14 +1182,19 @@ fn update_functions_for_session_exit(
             if status.function_id == BOUNDARY_AUTH_FUNCTION_ID {
                 status.session_id = None;
                 status.updated_at_ms = now_ms();
-                let (state, message) = match boundary_token_summary(app) {
-                    Ok(summary) => ("authenticated".to_string(), summary.message),
+                let (state, message, source) = match boundary_token_summary(app) {
+                    Ok(summary) => (
+                        "authenticated".to_string(),
+                        summary.message,
+                        Some(summary.source.to_string()),
+                    ),
                     Err(_) => {
                         if exit_code == Some(0) {
                             (
                                 "authenticated".to_string(),
                                 "Login completed, but the saved Boundary token could not be verified yet. Refresh Status or retry login."
                                     .to_string(),
+                                None,
                             )
                         } else {
                             (
@@ -1175,12 +1210,14 @@ fn update_functions_for_session_exit(
                                         reason.to_string()
                                     }
                                 ),
+                                None,
                             )
                         }
                     }
                 };
                 status.state = state;
                 status.message = message;
+                status.boundary_token_source = source;
                 changed.push(status.clone());
                 continue;
             }
@@ -1258,6 +1295,7 @@ fn boundary_token_summary(app: &AppHandle) -> Result<BoundaryTokenSummary, Strin
         return Err("no token".into());
     }
     Ok(BoundaryTokenSummary {
+        source: if using_app_token { "app" } else { "cli" },
         message: if using_app_token {
             "Authenticated via hidden OIDC window. Token is stored by SuperControlPanel and injected into Boundary commands."
                 .to_string()
@@ -2103,15 +2141,18 @@ fn list_function_statuses(
             s.state = "authenticating".to_string();
             s.message =
                 "Logging in — finish in the Boundary tab (browser or terminal).".to_string();
+            s.boundary_token_source = None;
             continue;
         }
         match boundary_token_summary(&app) {
             Ok(summary) => {
                 s.state = "authenticated".to_string();
                 s.message = summary.message;
+                s.boundary_token_source = Some(summary.source.to_string());
             }
             Err(e) => {
                 s.state = "unauthenticated".to_string();
+                s.boundary_token_source = None;
                 let addr_hint = load_app_config_from_disk(&app)
                     .map(|c| {
                         if c.boundary.addr.trim().is_empty() {
@@ -3630,19 +3671,20 @@ fn stop_boundary_auth(
         let _ =
             update_functions_for_session_exit(&app, &function_store, &sid, p.exit_code, &p.reason);
     } else {
-        let (state, msg) = match boundary_token_summary(&app) {
-            Ok(summary) => ("authenticated", summary.message),
+        let (state, msg, source) = match boundary_token_summary(&app) {
+            Ok(summary) => ("authenticated", summary.message, Some(summary.source)),
             Err(_) => (
                 "unauthenticated",
                 "Login was stopped; no Boundary token is available.".to_string(),
+                None,
             ),
         };
-        upsert_function_status(
+        upsert_boundary_status(
             &app,
             &function_store,
-            BOUNDARY_AUTH_FUNCTION_ID,
             state,
             &msg,
+            source,
             None,
         )?;
     }

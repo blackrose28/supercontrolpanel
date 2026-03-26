@@ -44,7 +44,7 @@ This prototype provides a basic function-runner shell where each feature functio
 - Event bridge from Rust -> frontend:
   - `pty-output`
   - `pty-exit` with exit code + reason
-  - `function-status`
+  - `function-status` (`boundaryTokenSource` is included for Boundary auth status updates)
   - `openvpn-log` (elevated helper log stream)
 
 ### Status page behavior
@@ -120,7 +120,7 @@ npm run tauri build
   - Runs `boundary authenticate oidc`, `boundary authenticate password`, or an app-managed automated OIDC flow.
   - Automated OIDC uses Boundary's HTTP auth API plus a hidden Tauri webview to fill common username/password/OTP forms, then stores the resulting token in the app secure store and injects it into later Boundary CLI commands via `BOUNDARY_TOKEN`.
   - Shows a compact live login terminal intended for status/output, not long interactive work.
-- Status page reflects the current Boundary token via `boundary config get-token`, using either the CLI keyring token or the app-managed automation token, and labels the auth card based on which token source is active.
+- Status page reflects the current Boundary token via `boundary config get-token`, using either the CLI keyring token or the app-managed automation token, and labels the auth card as `App token` or `CLI token` based on an explicit backend status field.
 - Boundary target search:
   - Lives on the Boundary page next to the auth terminal.
   - Searches Boundary targets via CLI.
