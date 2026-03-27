@@ -81,6 +81,45 @@ struct OpenVpnLogPayload {
     data: String,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "lowercase")]
+enum RemotePathKind {
+    File,
+    Directory,
+    Symlink,
+    Other,
+    Missing,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RemotePathEntry {
+    name: String,
+    kind: RemotePathKind,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RemotePathListing {
+    path: String,
+    entries: Vec<RemotePathEntry>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RemotePathInfo {
+    path: String,
+    kind: RemotePathKind,
+    exists: bool,
+}
+
+#[derive(Clone)]
+struct SshEndpoint {
+    user: String,
+    host: String,
+    port: u16,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct AppConfig {
@@ -3179,40 +3218,191 @@ fn stop_server_ssh(
     Ok(())
 }
 
+fn load_server_by_id(app: &AppHandle, server_id: &str) -> Result<Server, String> {
+    load_servers(app)?
+        .into_iter()
+        .find(|s| s.id == server_id)
+        .ok_or_else(|| "server not found".to_string())
+}
+
+fn resolve_server_ssh_endpoint(server: &Server, operation: &str) -> Result<SshEndpoint, String> {
+    if server.ssh_user.trim().is_empty() {
+        return Err(format!("SSH user is required for {operation}"));
+    }
+    match &server.connection_method {
+        ConnectionMethod::Ssh => {
+            if server.host.trim().is_empty() {
+                return Err(format!("Host is required for {operation}"));
+            }
+            Ok(SshEndpoint {
+                user: server.ssh_user.trim().to_string(),
+                host: server.host.trim().to_string(),
+                port: server.ssh_port,
+            })
+        }
+        ConnectionMethod::Boundary => Ok(SshEndpoint {
+            user: server.ssh_user.trim().to_string(),
+            host: "127.0.0.1".to_string(),
+            port: if server.boundary_listen_port == 0 {
+                6222
+            } else {
+                server.boundary_listen_port
+            },
+        }),
+    }
+}
+
+fn add_common_ssh_options(cmd: &mut Command, port_flag: &str, port: u16) {
+    cmd.arg(port_flag)
+        .arg(port.to_string())
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg("MACs=hmac-sha2-512");
+}
+
+fn ssh_target(endpoint: &SshEndpoint) -> String {
+    format!("{}@{}", endpoint.user, endpoint.host)
+}
+
+fn shell_quote(input: &str) -> String {
+    format!("'{}'", input.replace('\'', "'\"'\"'"))
+}
+
+fn run_ssh_command(endpoint: &SshEndpoint, remote_script: &str) -> Result<String, String> {
+    let mut cmd = Command::new("ssh");
+    add_common_ssh_options(&mut cmd, "-p", endpoint.port);
+    cmd.arg(ssh_target(endpoint)).arg(remote_script);
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let out = cmd
+        .output()
+        .map_err(|e| format!("ssh failed to run: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "ssh command failed".to_string()
+        } else {
+            stderr
+        });
+    }
+    String::from_utf8(out.stdout).map_err(|e| format!("ssh output was not valid UTF-8: {e}"))
+}
+
+fn parse_remote_ls_entry(raw: &str) -> RemotePathEntry {
+    if let Some(name) = raw.strip_suffix('/') {
+        return RemotePathEntry {
+            name: name.to_string(),
+            kind: RemotePathKind::Directory,
+        };
+    }
+    RemotePathEntry {
+        name: raw.to_string(),
+        kind: RemotePathKind::File,
+    }
+}
+
+#[tauri::command]
+fn get_remote_home(app: AppHandle, server_id: String) -> Result<String, String> {
+    let server = load_server_by_id(&app, &server_id)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "remote browse")?;
+    let output = run_ssh_command(&endpoint, "cd && pwd -P")?;
+    output
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "remote home path was empty".to_string())
+}
+
+#[tauri::command]
+fn stat_remote_path(
+    app: AppHandle,
+    server_id: String,
+    path: String,
+) -> Result<RemotePathInfo, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Path is required".to_string());
+    }
+    let server = load_server_by_id(&app, &server_id)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "remote path inspection")?;
+    let quoted = shell_quote(trimmed);
+    let script = format!(
+        "p={quoted}; if [ -d \"$p\" ]; then printf 'directory'; \
+         elif [ -f \"$p\" ]; then printf 'file'; \
+         elif [ -L \"$p\" ]; then printf 'symlink'; \
+         elif [ -e \"$p\" ]; then printf 'other'; \
+         else printf 'missing'; fi"
+    );
+    let raw_kind = run_ssh_command(&endpoint, &script)?;
+    let kind = match raw_kind.trim() {
+        "directory" => RemotePathKind::Directory,
+        "file" => RemotePathKind::File,
+        "symlink" => RemotePathKind::Symlink,
+        "other" => RemotePathKind::Other,
+        _ => RemotePathKind::Missing,
+    };
+    Ok(RemotePathInfo {
+        path: trimmed.to_string(),
+        exists: !matches!(kind, RemotePathKind::Missing),
+        kind,
+    })
+}
+
+#[tauri::command]
+fn list_remote_path(
+    app: AppHandle,
+    server_id: String,
+    path: Option<String>,
+) -> Result<RemotePathListing, String> {
+    const SPLIT_MARKER: &str = "__SCP_REMOTE_LISTING__";
+
+    let server = load_server_by_id(&app, &server_id)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "remote directory listing")?;
+    let target = path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let cd_clause = match target {
+        Some(value) => format!("cd {}", shell_quote(value)),
+        None => "cd".to_string(),
+    };
+    let script =
+        format!("{cd_clause} && pwd -P && printf '\\n{SPLIT_MARKER}\\n' && LC_ALL=C ls -A1p");
+    let output = run_ssh_command(&endpoint, &script)?;
+    let (resolved_path, raw_entries) = output
+        .split_once(&format!("\n{SPLIT_MARKER}\n"))
+        .ok_or_else(|| "remote listing output was not recognized".to_string())?;
+    let entries = raw_entries
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(parse_remote_ls_entry)
+        .collect::<Vec<_>>();
+    Ok(RemotePathListing {
+        path: resolved_path.trim().to_string(),
+        entries,
+    })
+}
+
 #[tauri::command]
 fn scp_upload(
     app: AppHandle,
     server_id: String,
     local_path: String,
     remote_path: String,
+    recursive: Option<bool>,
 ) -> Result<String, String> {
-    let servers = load_servers(&app)?;
-    let server = servers
-        .into_iter()
-        .find(|s| s.id == server_id)
-        .ok_or_else(|| "server not found".to_string())?;
-    let (port, host) = match &server.connection_method {
-        ConnectionMethod::Ssh => (server.ssh_port, server.host.clone()),
-        ConnectionMethod::Boundary => {
-            let port = if server.boundary_listen_port == 0 {
-                6222u16
-            } else {
-                server.boundary_listen_port
-            };
-            (port, "127.0.0.1".to_string())
-        }
-    };
-    if server.ssh_user.trim().is_empty() {
-        return Err("SSH user is required for SCP".to_string());
-    }
-    let remote_spec = format!("{}@{}:{}", server.ssh_user.trim(), host, remote_path);
+    let server = load_server_by_id(&app, &server_id)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
+    let remote_spec = format!("{}:{}", ssh_target(&endpoint), remote_path);
     let mut scp = Command::new("scp");
-    scp.arg("-P")
-        .arg(port.to_string())
-        .arg("-o")
-        .arg("StrictHostKeyChecking=accept-new")
-        .arg("-o")
-        .arg("MACs=hmac-sha2-512");
+    add_common_ssh_options(&mut scp, "-P", endpoint.port);
+    if recursive.unwrap_or(false) {
+        scp.arg("-r");
+    }
     let o = scp
         .arg(&local_path)
         .arg(&remote_spec)
@@ -3230,34 +3420,16 @@ fn scp_download(
     server_id: String,
     remote_path: String,
     local_path: String,
+    recursive: Option<bool>,
 ) -> Result<String, String> {
-    let servers = load_servers(&app)?;
-    let server = servers
-        .into_iter()
-        .find(|s| s.id == server_id)
-        .ok_or_else(|| "server not found".to_string())?;
-    let (port, host) = match &server.connection_method {
-        ConnectionMethod::Ssh => (server.ssh_port, server.host.clone()),
-        ConnectionMethod::Boundary => {
-            let port = if server.boundary_listen_port == 0 {
-                6222u16
-            } else {
-                server.boundary_listen_port
-            };
-            (port, "127.0.0.1".to_string())
-        }
-    };
-    if server.ssh_user.trim().is_empty() {
-        return Err("SSH user is required for SCP".to_string());
-    }
-    let remote_spec = format!("{}@{}:{}", server.ssh_user.trim(), host, remote_path);
+    let server = load_server_by_id(&app, &server_id)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
+    let remote_spec = format!("{}:{}", ssh_target(&endpoint), remote_path);
     let mut scp = Command::new("scp");
-    scp.arg("-P")
-        .arg(port.to_string())
-        .arg("-o")
-        .arg("StrictHostKeyChecking=accept-new")
-        .arg("-o")
-        .arg("MACs=hmac-sha2-512");
+    add_common_ssh_options(&mut scp, "-P", endpoint.port);
+    if recursive.unwrap_or(false) {
+        scp.arg("-r");
+    }
     let o = scp
         .arg(&remote_spec)
         .arg(&local_path)
@@ -3725,14 +3897,7 @@ fn stop_boundary_auth(
                 None,
             ),
         };
-        upsert_boundary_status(
-            &app,
-            &function_store,
-            state,
-            &msg,
-            source,
-            None,
-        )?;
+        upsert_boundary_status(&app, &function_store, state, &msg, source, None)?;
     }
     Ok(())
 }
@@ -3767,6 +3932,9 @@ fn main() {
             stop_server_tunnel,
             start_server_ssh,
             stop_server_ssh,
+            get_remote_home,
+            stat_remote_path,
+            list_remote_path,
             scp_upload,
             scp_download,
             start_server_rdp,

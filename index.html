@@ -65,8 +65,9 @@
                     <h2>Server management</h2>
                     <p class="hint">
                         Metadata, SSH (direct or via Boundary
-                        <code>boundary connect ssh</code>), and SCP for direct
-                        SSH only.
+                        <code>boundary connect ssh</code>), and SCP with a
+                        remote path picker for both direct SSH and Boundary
+                        tunnel targets.
                     </p>
                     <div class="servers-toolbar">
                         <button type="button" id="server-add">
@@ -126,10 +127,24 @@
                             Stop SSH
                         </button>
                         <button type="button" id="server-upload-btn" disabled>
-                            Upload (SCP)…
+                            Upload file…
+                        </button>
+                        <button
+                            type="button"
+                            id="server-upload-folder-btn"
+                            disabled
+                        >
+                            Upload folder…
                         </button>
                         <button type="button" id="server-download-btn" disabled>
-                            Download (SCP)…
+                            Download file…
+                        </button>
+                        <button
+                            type="button"
+                            id="server-download-folder-btn"
+                            disabled
+                        >
+                            Download folder…
                         </button>
                         <label class="server-tunnel-visibility">
                             <input
@@ -140,9 +155,15 @@
                             <span>Show tunnel panel</span>
                         </label>
                     </div>
+                    <div class="scp-history-head">
+                        <div class="server-terminal-label">Recent transfers</div>
+                        <button type="button" id="scp-clear-history-btn">
+                            Clear
+                        </button>
+                    </div>
                     <div
                         id="scp-result"
-                        class="scp-result"
+                        class="scp-history"
                         aria-live="polite"
                     ></div>
                     <div class="server-terminals">
@@ -250,6 +271,84 @@
                                     Cancel
                                 </button>
                                 <button type="button" id="se-save">Save</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        id="scp-picker-overlay"
+                        class="modal-overlay hidden"
+                        aria-hidden="true"
+                    >
+                        <div
+                            class="modal-panel modal-panel-wide"
+                            role="dialog"
+                            aria-labelledby="scp-picker-title"
+                        >
+                            <h3 id="scp-picker-title">Remote picker</h3>
+                            <p id="scp-picker-hint" class="hint"></p>
+                            <div class="scp-picker-toolbar">
+                                <button
+                                    type="button"
+                                    id="scp-picker-up-btn"
+                                    class="link-btn"
+                                >
+                                    Up
+                                </button>
+                                <button
+                                    type="button"
+                                    id="scp-picker-refresh-btn"
+                                    class="link-btn"
+                                >
+                                    Refresh
+                                </button>
+                                <span
+                                    id="scp-picker-current-path"
+                                    class="scp-picker-current-path"
+                                ></span>
+                            </div>
+                            <div id="scp-picker-status" class="hint"></div>
+                            <div class="scp-picker-manual">
+                                <label for="scp-picker-manual-path">
+                                    Manual path
+                                </label>
+                                <div class="scp-picker-manual-row">
+                                    <input
+                                        id="scp-picker-manual-path"
+                                        type="text"
+                                        autocomplete="off"
+                                        placeholder="/home/user"
+                                    />
+                                    <button
+                                        type="button"
+                                        id="scp-picker-go-btn"
+                                    >
+                                        Go
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="scp-picker-list-wrap">
+                                <table class="scp-picker-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Type</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="scp-picker-tbody"></tbody>
+                                </table>
+                            </div>
+                            <div class="modal-actions">
+                                <button type="button" id="scp-picker-cancel">
+                                    Cancel
+                                </button>
+                                <button
+                                    type="button"
+                                    id="scp-picker-select-btn"
+                                >
+                                    Select
+                                </button>
                             </div>
                         </div>
                     </div>

@@ -38,7 +38,8 @@ This prototype provides a basic function-runner shell where each feature functio
     - `start_server_tunnel` / `stop_server_tunnel`
     - `start_server_ssh` / `stop_server_ssh`
     - `start_server_rdp`
-    - `scp_upload` / `scp_download`
+    - `get_remote_home`, `stat_remote_path`, `list_remote_path`
+    - `scp_upload` / `scp_download` (`recursive` supported for folder copy)
   - Boundary target discovery:
     - `boundary_search_targets`
 - Event bridge from Rust -> frontend:
@@ -173,7 +174,13 @@ npm run tauri build
     - Launches the OS-native Remote Desktop client (e.g. `mstsc.exe` on Windows; `rdp://` URL via `open`/`xdg-open` elsewhere) targeting the server `host`.
   - **SCP Upload / Download**:
     - Works for direct SSH and for Boundary servers over the tunnel (connecting to `127.0.0.1` and the listen port).
-    - Shows a dedicated SCP result indicator below the buttons with clear success/error states.
+    - Opens a remote path picker modal for browsing folders, moving up the tree, refreshing the current directory, and falling back to manual path entry when needed.
+    - Supports explicit file and folder actions; folder transfers use recursive SCP.
+    - Shows an in-session transfer history below the buttons with running, success, and error states plus source/destination summaries.
+    - For Boundary servers, the app now checks that the tunnel is running before browse/transfer actions and shows a clearer error if it is not.
+    - Upload flows normalize remote paths and confirm before overwriting known remote targets.
+  - Remote browse groundwork:
+    - Backend commands now expose remote home lookup, path inspection, and directory listing so the frontend can build a remote picker without relying on raw path prompts.
 
 ## Notes and limitations
 
