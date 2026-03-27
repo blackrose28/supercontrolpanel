@@ -3961,6 +3961,55 @@ fn scp_upload(
     Ok("Upload finished.".into())
 }
 
+fn build_scp_command(
+    endpoint: &SshEndpoint,
+    local_path: &str,
+    remote_path: &str,
+    recursive: bool,
+    download: bool,
+) -> CommandBuilder {
+    let remote_spec = format!("{}:{}", ssh_target(endpoint), remote_path);
+    let mut cmd = CommandBuilder::new("scp");
+    cmd.arg("-P");
+    cmd.arg(endpoint.port.to_string());
+    cmd.arg("-o");
+    cmd.arg("StrictHostKeyChecking=accept-new");
+    cmd.arg("-o");
+    cmd.arg("MACs=hmac-sha2-512");
+    if recursive {
+        cmd.arg("-r");
+    }
+    if download {
+        cmd.arg(remote_spec);
+        cmd.arg(local_path);
+    } else {
+        cmd.arg(local_path);
+        cmd.arg(remote_spec);
+    }
+    cmd
+}
+
+#[tauri::command]
+fn start_scp_upload(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    server_id: String,
+    local_path: String,
+    remote_path: String,
+    recursive: Option<bool>,
+) -> Result<String, String> {
+    let server = load_server_by_id(&app, &server_id)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
+    let cmd = build_scp_command(
+        &endpoint,
+        &local_path,
+        &remote_path,
+        recursive.unwrap_or(false),
+        false,
+    );
+    open_pty_with_command_builder(120, 24, cmd, &app, &session_store)
+}
+
 #[tauri::command]
 fn scp_download(
     app: AppHandle,
@@ -3986,6 +4035,27 @@ fn scp_download(
         return Err(String::from_utf8_lossy(&o.stderr).trim().to_string());
     }
     Ok("Download finished.".into())
+}
+
+#[tauri::command]
+fn start_scp_download(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    server_id: String,
+    remote_path: String,
+    local_path: String,
+    recursive: Option<bool>,
+) -> Result<String, String> {
+    let server = load_server_by_id(&app, &server_id)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
+    let cmd = build_scp_command(
+        &endpoint,
+        &local_path,
+        &remote_path,
+        recursive.unwrap_or(false),
+        true,
+    );
+    open_pty_with_command_builder(120, 24, cmd, &app, &session_store)
 }
 
 #[tauri::command]
@@ -4485,7 +4555,9 @@ fn main() {
             list_remote_browser_children,
             stat_remote_browser_path,
             stat_remote_path,
+            start_scp_upload,
             scp_upload,
+            start_scp_download,
             scp_download,
             start_server_rdp,
             start_boundary_auth,

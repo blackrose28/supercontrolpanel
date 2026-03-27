@@ -155,6 +155,7 @@ type ScpTransferEntry = {
   detail: string;
   state: ScpTransferState;
   createdAtMs: number;
+  progressPercent: number | null;
   source?: string;
   destination?: string;
 };
@@ -443,6 +444,8 @@ let scpPickerResolver: ((selection: ScpPickerSelection | null) => void) | null =
   null;
 let scpTransferCounter = 0;
 let scpTransferHistory: ScpTransferEntry[] = [];
+let scpTransferSessionIds: Record<string, string> = {};
+let scpTransferSessionOutput: Record<string, string> = {};
 let unlistenOutput: UnlistenFn | null = null;
 let unlistenExit: UnlistenFn | null = null;
 let unlistenFunctionStatus: UnlistenFn | null = null;
@@ -451,6 +454,18 @@ let unlistenOpenVpnLog: UnlistenFn | null = null;
 async function attachListeners() {
   unlistenOutput = await listen<PtyOutputPayload>("pty-output", (event) => {
     const { id, data } = event.payload;
+    const scpTransferId = scpTransferSessionIds[id];
+    if (scpTransferId) {
+      const nextOutput = `${scpTransferSessionOutput[id] ?? ""}${data}`.slice(-8000);
+      scpTransferSessionOutput[id] = nextOutput;
+      const percent = parseScpProgressPercent(nextOutput);
+      if (percent !== null) {
+        updateScpTransferEntry(scpTransferId, "pending", `Transferring… ${percent}%`, {
+          progressPercent: percent,
+        });
+      }
+      return;
+    }
     if (id === openvpnSessionId) {
       term.write(data);
       return;
@@ -490,6 +505,25 @@ async function attachListeners() {
     const codePart =
       exitCode === null ? "unknown code" : `exit code ${exitCode}`;
     const line = `\r\n[PTY exited: ${codePart}, reason=${reason}]\r\n`;
+    const scpTransferId = scpTransferSessionIds[id];
+    if (scpTransferId) {
+      const output = stripAnsi(scpTransferSessionOutput[id] ?? "").trim();
+      const summary =
+        output
+          .split(/[\r\n]+/)
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .pop() ?? reason;
+      updateScpTransferEntry(
+        scpTransferId,
+        exitCode === 0 ? "success" : "error",
+        exitCode === 0 ? "Transfer finished." : summary,
+        { progressPercent: exitCode === 0 ? 100 : null },
+      );
+      delete scpTransferSessionIds[id];
+      delete scpTransferSessionOutput[id];
+      return;
+    }
     if (id === openvpnSessionId) {
       term.write(line);
       openvpnSessionId = null;
@@ -1410,6 +1444,11 @@ function renderScpHistory() {
         </div>
         <div class="scp-entry-body">${escapeHtml(entry.detail)}</div>
         ${
+          entry.progressPercent !== null
+            ? `<div class="scp-entry-progress"><div class="scp-entry-progress-bar"><div class="scp-entry-progress-fill" style="width:${entry.progressPercent}%"></div></div><div class="scp-entry-progress-label">${entry.progressPercent}%</div></div>`
+            : ""
+        }
+        ${
           metaParts.length
             ? `<div class="scp-entry-meta">${escapeHtml(metaParts.join(" -> "))}</div>`
             : ""
@@ -1430,6 +1469,7 @@ function createScpTransferEntry(
     detail,
     state: "pending",
     createdAtMs: Date.now(),
+    progressPercent: 0,
     source: options?.source,
     destination: options?.destination,
   };
@@ -1451,11 +1491,41 @@ function updateScpTransferEntry(
   id: string,
   state: ScpTransferState,
   detail: string,
+  options?: { progressPercent?: number | null },
 ) {
   scpTransferHistory = scpTransferHistory.map((entry) =>
-    entry.id === id ? { ...entry, state, detail } : entry,
+    entry.id === id
+      ? {
+          ...entry,
+          state,
+          detail,
+          progressPercent:
+            options && "progressPercent" in options
+              ? options.progressPercent ?? null
+              : state === "pending"
+                ? entry.progressPercent
+                : null,
+        }
+      : entry,
   );
   renderScpHistory();
+}
+
+function stripAnsi(value: string): string {
+  return value.replace(/\x1B\[[0-9;?]*[ -/]*[@-~]/g, "");
+}
+
+function parseScpProgressPercent(output: string): number | null {
+  const clean = stripAnsi(output);
+  const matches = [...clean.matchAll(/(^|[\r\n])(?:[^\r\n]*?\s)?(\d{1,3})%\s+/gm)];
+  if (matches.length === 0) {
+    return null;
+  }
+  const value = Number(matches[matches.length - 1][2]);
+  if (!Number.isFinite(value)) {
+    return null;
+  }
+  return Math.max(0, Math.min(100, value));
 }
 
 function localBasename(path: string): string {
@@ -2748,13 +2818,14 @@ serverUploadBtn.addEventListener("click", async () => {
     destination: remote,
   });
   try {
-    const msg = await invoke<string>("scp_upload", {
+    const sessionId = await invoke<string>("start_scp_upload", {
       serverId: selectedServerId,
       localPath: local,
       remotePath: remote,
       recursive: false,
     });
-    updateScpTransferEntry(transferId, "success", msg);
+    scpTransferSessionIds[sessionId] = transferId;
+    scpTransferSessionOutput[sessionId] = "";
   } catch (e) {
     updateScpTransferEntry(transferId, "error", String(e));
   }
@@ -2806,13 +2877,14 @@ serverUploadFolderBtn.addEventListener("click", async () => {
     destination: remote,
   });
   try {
-    const msg = await invoke<string>("scp_upload", {
+    const sessionId = await invoke<string>("start_scp_upload", {
       serverId: selectedServerId,
       localPath: local,
       remotePath: remote,
       recursive: true,
     });
-    updateScpTransferEntry(transferId, "success", msg);
+    scpTransferSessionIds[sessionId] = transferId;
+    scpTransferSessionOutput[sessionId] = "";
   } catch (e) {
     updateScpTransferEntry(transferId, "error", String(e));
   }
@@ -2851,13 +2923,14 @@ serverDownloadBtn.addEventListener("click", async () => {
     destination: local,
   });
   try {
-    const msg = await invoke<string>("scp_download", {
+    const sessionId = await invoke<string>("start_scp_download", {
       serverId: selectedServerId,
       remotePath: remote,
       localPath: local,
       recursive: false,
     });
-    updateScpTransferEntry(transferId, "success", msg);
+    scpTransferSessionIds[sessionId] = transferId;
+    scpTransferSessionOutput[sessionId] = "";
   } catch (e) {
     updateScpTransferEntry(transferId, "error", String(e));
   }
@@ -2897,13 +2970,14 @@ serverDownloadFolderBtn.addEventListener("click", async () => {
     destination: local,
   });
   try {
-    const msg = await invoke<string>("scp_download", {
+    const sessionId = await invoke<string>("start_scp_download", {
       serverId: selectedServerId,
       remotePath: remote,
       localPath: local,
       recursive: true,
     });
-    updateScpTransferEntry(transferId, "success", msg);
+    scpTransferSessionIds[sessionId] = transferId;
+    scpTransferSessionOutput[sessionId] = "";
   } catch (e) {
     updateScpTransferEntry(transferId, "error", String(e));
   }

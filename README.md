@@ -41,6 +41,7 @@ This prototype provides a basic function-runner shell where each feature functio
     - `open_remote_browser`, `close_remote_browser`
     - `list_remote_browser_children`, `stat_remote_browser_path`
     - `stat_remote_path`
+    - `start_scp_upload` / `start_scp_download`
     - `scp_upload` / `scp_download` (`recursive` supported for folder copy)
   - Boundary target discovery:
     - `boundary_search_targets`
@@ -187,6 +188,7 @@ npm run tauri build
     - Single-click selects valid items; double-click opens folders for deeper browsing.
     - Supports explicit file and folder actions; folder transfers use recursive SCP.
     - Shows an in-session transfer history below the buttons with running, success, and error states plus source/destination summaries.
+    - Transfer history now includes a progress bar and percentage when SCP reports progress through the PTY-backed transfer path.
     - For Boundary servers, the app now checks that the tunnel is running before browse/transfer actions and shows a clearer error if it is not.
     - Upload flows normalize remote paths and confirm before overwriting known remote targets.
   - Remote browse groundwork:

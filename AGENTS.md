@@ -72,6 +72,8 @@ Additional commands/events added in this iteration:
   - `stat_remote_path({ serverId, path }) -> RemotePathInfo`
   - `scp_upload({ serverId, localPath, remotePath, recursive? }) -> string`
   - `scp_download({ serverId, remotePath, localPath, recursive? }) -> string`
+  - `start_scp_upload({ serverId, localPath, remotePath, recursive? }) -> string` (PTY-backed session id for progress-aware transfers)
+  - `start_scp_download({ serverId, remotePath, localPath, recursive? }) -> string` (PTY-backed session id for progress-aware transfers)
   - Function IDs:
     - OpenVPN: `openvpn-connect`
     - Boundary auth: `boundary-auth`
@@ -154,6 +156,7 @@ Do not break these names unless updating both frontend and backend in the same c
     - The picker now opens one backend remote-browser session per modal instance and reuses it for repeated navigation until the modal closes, the selected server changes, or the user navigates away from Servers.
     - Picker mode is transfer-aware: upload flows accept destination folders only, download-file accepts remote files only, and download-folder accepts remote folders only; valid items are single-click selectable and folders support double-click open.
     - SCP feedback is shown as a short in-session transfer history with running, success, and error entries instead of a single transient line.
+    - SCP transfers can now run through PTY-backed execution so the transfer history can show progress bars and reported percentages.
     - Boundary-backed SCP actions require the tunnel to be running first; upload flows normalize remote paths and confirm before overwriting known remote targets.
   - Each server maintains its own PTY session IDs (tunnel + ssh) and buffered terminal output so switching rows restores that server's scrollback instead of clearing it.
   - Servers view includes a "Show tunnel panel" checkbox that toggles visibility of the tunnel PTY panel so the SSH terminal can use more space when tunnel output is not needed.
