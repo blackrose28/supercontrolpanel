@@ -432,6 +432,7 @@ let syncSettings: SyncSettings | null = null;
 let scpPickerMode: ScpPickerMode | null = null;
 let scpPickerServerId: string | null = null;
 let scpPickerBrowserId: string | null = null;
+let scpPickerRootPath = "";
 let scpPickerCurrentListingPath = "";
 let scpPickerEntries: RemoteBrowseEntry[] = [];
 let scpPickerTreeNodes = new Map<string, ScpTreeNode>();
@@ -1515,11 +1516,23 @@ function remotePathName(path: string): string {
   return parts[parts.length - 1] ?? normalized;
 }
 
+function scpTreeRootPath(): string {
+  return (
+    normalizeRemotePath(scpPickerRootPath) ||
+    normalizeRemotePath(scpPickerCurrentListingPath) ||
+    "/"
+  );
+}
+
 function ensureScpTreeNode(path: string, parentPath: string | null): ScpTreeNode {
-  const normalized = normalizeRemotePath(path) || "/";
+  const normalized = normalizeRemotePath(path) || scpTreeRootPath();
   const existing = scpPickerTreeNodes.get(normalized);
   if (existing) {
-    if (parentPath !== null && existing.parentPath === null && normalized !== "/") {
+    if (
+      parentPath !== null &&
+      existing.parentPath === null &&
+      normalized !== scpTreeRootPath()
+    ) {
       existing.parentPath = parentPath;
     }
     return existing;
@@ -1531,7 +1544,7 @@ function ensureScpTreeNode(path: string, parentPath: string | null): ScpTreeNode
     children: [],
     loaded: false,
     loading: false,
-    expanded: normalized === "/",
+    expanded: false,
     error: null,
   };
   scpPickerTreeNodes.set(normalized, node);
@@ -1547,14 +1560,26 @@ function linkScpTreeChild(parentPath: string, childPath: string) {
 }
 
 function ensureScpTreePath(path: string) {
-  const normalized = normalizeRemotePath(path) || "/";
-  ensureScpTreeNode("/", null);
-  if (normalized === "/") {
+  const rootPath = scpTreeRootPath();
+  const normalized = normalizeRemotePath(path) || rootPath;
+  ensureScpTreeNode(rootPath, null);
+  if (normalized === rootPath) {
     return;
   }
-  const parts = normalized.split("/").filter(Boolean);
-  let currentPath = "";
-  let parentPath = "/";
+  const rootPrefix = rootPath === "/" ? "/" : `${rootPath}/`;
+  if (rootPath !== "/" && !normalized.startsWith(rootPrefix)) {
+    return;
+  }
+  const relativePath =
+    rootPath === "/"
+      ? normalized.slice(1)
+      : normalized.slice(rootPath.length).replace(/^\/+/, "");
+  if (!relativePath) {
+    return;
+  }
+  const parts = relativePath.split("/").filter(Boolean);
+  let currentPath = rootPath === "/" ? "" : rootPath;
+  let parentPath = rootPath;
   for (const part of parts) {
     currentPath = `${currentPath}/${part}`;
     const normalizedCurrent = normalizeRemotePath(currentPath);
@@ -1565,10 +1590,14 @@ function ensureScpTreePath(path: string) {
 }
 
 function expandScpTreeAncestors(path: string) {
-  let cursor = normalizeRemotePath(path) || "/";
+  const rootPath = scpTreeRootPath();
+  let cursor = parentRemotePath(normalizeRemotePath(path) || rootPath);
   while (cursor) {
     const node = ensureScpTreeNode(cursor, parentRemotePath(cursor));
     node.expanded = true;
+    if (cursor === rootPath) {
+      break;
+    }
     const parent = parentRemotePath(cursor);
     if (!parent) {
       break;
@@ -1579,13 +1608,12 @@ function expandScpTreeAncestors(path: string) {
 }
 
 function syncScpTreeDirectory(path: string, entries: RemoteBrowseEntry[]) {
-  const normalized = normalizeRemotePath(path) || "/";
+  const normalized = normalizeRemotePath(path) || scpTreeRootPath();
   ensureScpTreePath(normalized);
   const node = ensureScpTreeNode(normalized, parentRemotePath(normalized));
   node.loaded = true;
   node.loading = false;
   node.error = null;
-  node.expanded = true;
   node.children = entries
     .filter((entry) => entry.kind === "directory")
     .map((entry) => {
@@ -1635,7 +1663,7 @@ function renderScpTreeNode(path: string, depth: number): string {
       ? '<span class="scp-picker-tree-state">Open</span>'
       : "";
   const childrenMarkup =
-    node.expanded && node.loaded
+    node.expanded
       ? node.children.map((childPath) => renderScpTreeNode(childPath, depth + 1)).join("")
       : "";
   const metaMarkup = node.expanded
@@ -1643,6 +1671,8 @@ function renderScpTreeNode(path: string, depth: number): string {
       ? `<div class="scp-picker-tree-meta">Loading…</div>`
       : node.error
         ? `<div class="scp-picker-tree-meta">${escapeHtml(node.error)}</div>`
+        : !node.loaded && node.children.length === 0
+          ? `<div class="scp-picker-tree-meta">Open this folder to load its subfolders.</div>`
         : node.loaded && node.children.length === 0
           ? `<div class="scp-picker-tree-meta">No subfolders</div>`
           : ""
@@ -1743,7 +1773,11 @@ function renderScpPicker() {
   scpPickerTitle.textContent = pickerModeTitle(mode);
   scpPickerHint.textContent = pickerModeHint(mode);
   scpPickerSelectBtn.textContent = pickerModeSelectLabel(mode);
-  scpPickerUpBtn.disabled = scpPickerBusy || !parentRemotePath(scpPickerCurrentListingPath);
+  const treeRootPath = scpTreeRootPath();
+  scpPickerUpBtn.disabled =
+    scpPickerBusy ||
+    !parentRemotePath(scpPickerCurrentListingPath) ||
+    scpPickerCurrentListingPath === treeRootPath;
   scpPickerRefreshBtn.disabled = scpPickerBusy;
   scpPickerGoBtn.disabled = scpPickerBusy;
   scpPickerCancelBtn.disabled = scpPickerBusy;
@@ -1778,12 +1812,12 @@ function renderScpPicker() {
       });
     });
 
-  ensureScpTreeNode("/", null);
-  scpPickerTree.innerHTML = renderScpTreeNode("/", 0);
+  ensureScpTreeNode(treeRootPath, null);
+  scpPickerTree.innerHTML = renderScpTreeNode(treeRootPath, 0);
   scpPickerTree
     .querySelectorAll<HTMLButtonElement>("[data-scp-tree-toggle]")
     .forEach((btn) => {
-      btn.addEventListener("click", async () => {
+      btn.addEventListener("click", () => {
         const path = btn.dataset.scpTreeToggle;
         if (!path) {
           return;
@@ -1791,9 +1825,6 @@ function renderScpPicker() {
         const node = ensureScpTreeNode(path, parentRemotePath(path));
         node.expanded = !node.expanded;
         renderScpPicker();
-        if (node.expanded && !node.loaded && !node.loading) {
-          await loadScpPickerTreeChildren(path);
-        }
       });
     });
   scpPickerTree
@@ -1921,8 +1952,8 @@ function closeScpPicker(selection: ScpPickerSelection | null) {
   scpPickerBrowserId = null;
   scpPickerCurrentListingPath = "";
   scpPickerEntries = [];
+  scpPickerRootPath = "";
   scpPickerTreeNodes = new Map<string, ScpTreeNode>();
-  ensureScpTreeNode("/", null);
   scpPickerSelectedPath = "";
   scpPickerSelectedKind = null;
   scpPickerBusy = false;
@@ -1960,44 +1991,13 @@ function handleScpPickerSessionError(error: unknown) {
   return true;
 }
 
-async function loadScpPickerTreeChildren(path: string) {
-  if (!scpPickerBrowserId || !scpPickerMode) {
-    return;
-  }
-  const normalized = normalizeRemotePath(path) || "/";
-  ensureScpTreePath(normalized);
-  const node = ensureScpTreeNode(normalized, parentRemotePath(normalized));
-  node.loading = true;
-  node.error = null;
-  renderScpPicker();
-  try {
-    const entries = await invoke<RemoteBrowseEntry[]>(
-      "list_remote_browser_children",
-      {
-        browserId: scpPickerBrowserId,
-        path: normalized,
-      },
-    );
-    syncScpTreeDirectory(normalized, entries);
-  } catch (error) {
-    if (handleScpPickerSessionError(error)) {
-      return;
-    }
-    node.loading = false;
-    node.error = String(error);
-  } finally {
-    node.loading = false;
-    renderScpPicker();
-  }
-}
-
 async function loadScpPickerPath(path?: string | null) {
   if (!scpPickerBrowserId || !scpPickerMode) {
     return;
   }
   scpPickerBusy = true;
   scpPickerStatus.textContent = "Loading remote path…";
-  const rawPath = normalizeRemotePath(path ?? "") || "/";
+  const rawPath = normalizeRemotePath(path ?? "") || scpTreeRootPath();
   const node = ensureScpTreeNode(rawPath, parentRemotePath(rawPath));
   node.loading = true;
   node.error = null;
@@ -2097,6 +2097,7 @@ async function openScpPicker(
   scpPickerMode = mode;
   scpPickerServerId = serverId;
   scpPickerBrowserId = null;
+  scpPickerRootPath = "";
   scpPickerCurrentListingPath = "";
   scpPickerEntries = [];
   scpPickerTreeNodes = new Map<string, ScpTreeNode>();
@@ -2116,6 +2117,7 @@ async function openScpPicker(
       serverId,
     });
     scpPickerBrowserId = session.browserId;
+    scpPickerRootPath = normalizeRemotePath(session.rootPath) || "/";
     await loadScpPickerPath(session.rootPath);
   } catch (error) {
     closeScpPicker(null);
@@ -2557,6 +2559,9 @@ scpPickerGoBtn.addEventListener("click", async () => {
   }
 });
 scpPickerUpBtn.addEventListener("click", async () => {
+  if (scpPickerCurrentListingPath === scpTreeRootPath()) {
+    return;
+  }
   const parent = parentRemotePath(scpPickerCurrentListingPath);
   if (!parent) {
     return;
