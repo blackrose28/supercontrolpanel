@@ -95,14 +95,6 @@ enum RemotePathKind {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct RemotePathInfo {
-    path: String,
-    kind: RemotePathKind,
-    exists: bool,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
 struct RemoteBrowseSession {
     browser_id: String,
     root_path: String,
@@ -3717,6 +3709,57 @@ fn stat_remote_browser_path_via_cli_session(
     })
 }
 
+fn create_remote_browser_directory_via_cli_session(
+    session: &CliRemoteBrowserSession,
+    path: &str,
+) -> Result<(), String> {
+    let script = format!("mkdir -p -- {}", shell_quote(path));
+    run_cli_remote_browser_command(session, &script).map(|_| ())
+}
+
+fn delete_remote_browser_path_via_cli_session(
+    session: &CliRemoteBrowserSession,
+    path: &str,
+    recursive: bool,
+) -> Result<(), String> {
+    let script = if recursive {
+        format!("rm -rf -- {}", shell_quote(path))
+    } else {
+        format!(
+            "if [ -d {p} ]; then rmdir -- {p}; else rm -f -- {p}; fi",
+            p = shell_quote(path)
+        )
+    };
+    run_cli_remote_browser_command(session, &script).map(|_| ())
+}
+
+fn remove_remote_sftp_path_recursive(sftp: &ssh2::Sftp, path: &std::path::Path) -> Result<(), String> {
+    let stat = sftp
+        .lstat(path)
+        .map_err(|e| format!("failed to inspect remote path: {e}"))?;
+    if matches!(remote_kind_from_file_stat(&stat), RemotePathKind::Directory) {
+        for (child_path, _) in sftp
+            .readdir(path)
+            .map_err(|e| format!("failed to list remote directory: {e}"))?
+        {
+            let name = child_path
+                .file_name()
+                .map(|value| value.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if name.is_empty() || name == "." || name == ".." {
+                continue;
+            }
+            remove_remote_sftp_path_recursive(sftp, &child_path)?;
+        }
+        sftp.rmdir(path)
+            .map_err(|e| format!("failed to remove remote directory: {e}"))?;
+    } else {
+        sftp.unlink(path)
+            .map_err(|e| format!("failed to remove remote file: {e}"))?;
+    }
+    Ok(())
+}
+
 fn open_remote_sftp_session(
     endpoint: &SshEndpoint,
     via_boundary_tunnel: bool,
@@ -3900,38 +3943,64 @@ fn stat_remote_browser_path(
 }
 
 #[tauri::command]
-fn stat_remote_path(
-    app: AppHandle,
-    server_id: String,
+fn create_remote_browser_directory(
+    browser_id: String,
     path: String,
-) -> Result<RemotePathInfo, String> {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        return Err("Path is required".to_string());
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<(), String> {
+    let browser = remote_browser_state(&browser_id, &browser_store)?;
+    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    match &browser.transport {
+        RemoteBrowserTransport::Sftp(session) => {
+            let sftp = session
+                .sftp()
+                .map_err(|e| format!("failed to open sftp session: {e}"))?;
+            sftp.mkdir(std::path::Path::new(&target_path), 0o755)
+                .map_err(|e| format!("failed to create remote directory: {e}"))?;
+            Ok(())
+        }
+        RemoteBrowserTransport::Cli(session) => {
+            create_remote_browser_directory_via_cli_session(session, &target_path)
+        }
     }
-    let server = load_server_by_id(&app, &server_id)?;
-    let endpoint = resolve_server_ssh_endpoint(&server, "remote path inspection")?;
-    let quoted = shell_quote(trimmed);
-    let script = format!(
-        "p={quoted}; if [ -d \"$p\" ]; then printf 'directory'; \
-         elif [ -f \"$p\" ]; then printf 'file'; \
-         elif [ -L \"$p\" ]; then printf 'symlink'; \
-         elif [ -e \"$p\" ]; then printf 'other'; \
-         else printf 'missing'; fi"
-    );
-    let raw_kind = run_ssh_command(&endpoint, &script)?;
-    let kind = match raw_kind.trim() {
-        "directory" => RemotePathKind::Directory,
-        "file" => RemotePathKind::File,
-        "symlink" => RemotePathKind::Symlink,
-        "other" => RemotePathKind::Other,
-        _ => RemotePathKind::Missing,
-    };
-    Ok(RemotePathInfo {
-        path: trimmed.to_string(),
-        exists: !matches!(kind, RemotePathKind::Missing),
-        kind,
-    })
+}
+
+#[tauri::command]
+fn delete_remote_browser_path(
+    browser_id: String,
+    path: String,
+    recursive: Option<bool>,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<(), String> {
+    let browser = remote_browser_state(&browser_id, &browser_store)?;
+    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    match &browser.transport {
+        RemoteBrowserTransport::Sftp(session) => {
+            let sftp = session
+                .sftp()
+                .map_err(|e| format!("failed to open sftp session: {e}"))?;
+            if recursive.unwrap_or(false) {
+                remove_remote_sftp_path_recursive(&sftp, std::path::Path::new(&target_path))
+            } else {
+                let stat = sftp
+                    .lstat(std::path::Path::new(&target_path))
+                    .map_err(|e| format!("failed to inspect remote path: {e}"))?;
+                if matches!(remote_kind_from_file_stat(&stat), RemotePathKind::Directory) {
+                    sftp.rmdir(std::path::Path::new(&target_path))
+                        .map_err(|e| format!("failed to remove remote directory: {e}"))?;
+                } else {
+                    sftp.unlink(std::path::Path::new(&target_path))
+                        .map_err(|e| format!("failed to remove remote file: {e}"))?;
+                }
+                Ok(())
+            }
+        }
+        RemoteBrowserTransport::Cli(session) => delete_remote_browser_path_via_cli_session(
+            session,
+            &target_path,
+            recursive.unwrap_or(false),
+        ),
+    }
 }
 
 #[tauri::command]
@@ -4554,7 +4623,8 @@ fn main() {
             close_remote_browser,
             list_remote_browser_children,
             stat_remote_browser_path,
-            stat_remote_path,
+            create_remote_browser_directory,
+            delete_remote_browser_path,
             start_scp_upload,
             scp_upload,
             start_scp_download,

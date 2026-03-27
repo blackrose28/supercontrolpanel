@@ -6,9 +6,9 @@ Finish the post-refactor cleanup and polish work after the SCP remote browser ro
 
 ## Phase H: Retire Remaining Legacy Browse Helper
 
-- [ ] Decide whether `stat_remote_path` should be removed or kept as a narrow utility.
-- [ ] If removed, route overwrite checks through the active remote browser session flow instead.
-- [ ] Remove transitional docs if `stat_remote_path` is retired.
+- [x] Decide whether `stat_remote_path` should be removed or kept as a narrow utility.
+- [x] If removed, route overwrite checks through the active remote browser session flow instead.
+- [x] Remove transitional docs if `stat_remote_path` is retired.
 
 ## Phase I: Browser UX Polish
 
@@ -18,6 +18,16 @@ Finish the post-refactor cleanup and polish work after the SCP remote browser ro
 - [x] Expand a tree folder when the user clicks it in the left tree.
 - [ ] Improve keyboard navigation and focus behavior.
 - [ ] Refine empty/loading/error states after testing feedback.
+
+## Phase K: Remote File Operations In Browser Modal
+
+- [x] Add **Create folder** action in the remote browser modal.
+- [x] Add **Delete file** action in the remote browser modal.
+- [x] Add **Delete folder** action in the remote browser modal.
+- [x] Decide confirmation UX for destructive actions.
+- [x] Refresh the current folder/tree state after remote mutations.
+- [ ] Ensure direct SSH and Boundary-backed servers both support these operations.
+- [x] Match the existing browser session model so remote actions reuse the active session, similar to WinSCP.
 
 ## Phase J: SCP Transfer Progress
 

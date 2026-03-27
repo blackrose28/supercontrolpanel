@@ -102,12 +102,6 @@ type BoundaryTargetSummary = {
 
 type RemotePathKind = "file" | "directory" | "symlink" | "other" | "missing";
 
-type RemotePathInfo = {
-  path: string;
-  kind: RemotePathKind;
-  exists: boolean;
-};
-
 type RemoteBrowseSession = {
   browserId: string;
   rootPath: string;
@@ -331,6 +325,12 @@ const scpPickerGoBtn = mustElement<HTMLButtonElement>("#scp-picker-go-btn");
 const scpPickerUpBtn = mustElement<HTMLButtonElement>("#scp-picker-up-btn");
 const scpPickerRefreshBtn = mustElement<HTMLButtonElement>(
   "#scp-picker-refresh-btn",
+);
+const scpPickerNewFolderBtn = mustElement<HTMLButtonElement>(
+  "#scp-picker-new-folder-btn",
+);
+const scpPickerDeleteBtn = mustElement<HTMLButtonElement>(
+  "#scp-picker-delete-btn",
 );
 const scpPickerTbody = mustElement<HTMLElement>("#scp-picker-tbody");
 const scpPickerCancelBtn = mustElement<HTMLButtonElement>("#scp-picker-cancel");
@@ -1829,10 +1829,12 @@ function renderScpPicker() {
     scpPickerTitle.textContent = "Remote browser";
     scpPickerHint.textContent = "";
     scpPickerSelectBtn.textContent = "Select";
-    scpPickerUpBtn.disabled = true;
-    scpPickerRefreshBtn.disabled = true;
-    scpPickerGoBtn.disabled = true;
-    scpPickerCancelBtn.disabled = false;
+  scpPickerUpBtn.disabled = true;
+  scpPickerRefreshBtn.disabled = true;
+  scpPickerGoBtn.disabled = true;
+  scpPickerNewFolderBtn.disabled = true;
+  scpPickerDeleteBtn.disabled = true;
+  scpPickerCancelBtn.disabled = false;
     scpPickerManualPath.disabled = true;
     scpPickerSelectBtn.disabled = true;
     scpPickerCurrentPath.innerHTML = '<span class="scp-picker-crumb-current">—</span>';
@@ -1850,6 +1852,11 @@ function renderScpPicker() {
     scpPickerCurrentListingPath === treeRootPath;
   scpPickerRefreshBtn.disabled = scpPickerBusy;
   scpPickerGoBtn.disabled = scpPickerBusy;
+  scpPickerNewFolderBtn.disabled = scpPickerBusy || !scpPickerCurrentListingPath;
+  scpPickerDeleteBtn.disabled =
+    scpPickerBusy ||
+    !scpPickerSelectedPath ||
+    scpPickerSelectedPath === treeRootPath;
   scpPickerCancelBtn.disabled = scpPickerBusy;
   scpPickerManualPath.disabled = scpPickerBusy;
   scpPickerSelectBtn.disabled = scpPickerBusy || !scpPickerManualPath.value.trim();
@@ -1907,12 +1914,10 @@ function renderScpPicker() {
         }
         const node = ensureScpTreeNode(path, parentRemotePath(path));
         node.expanded = true;
-        if (pickerModePrefersDirectorySelection(mode)) {
-          scpPickerSelectedPath = path;
-          scpPickerSelectedKind = "directory";
-          scpPickerManualPath.value = path;
-          scpPickerStatus.textContent = "";
-        }
+        scpPickerSelectedPath = path;
+        scpPickerSelectedKind = "directory";
+        scpPickerManualPath.value = path;
+        scpPickerStatus.textContent = "";
         if (path !== scpPickerCurrentListingPath) {
           await loadScpPickerPath(path);
           return;
@@ -1950,11 +1955,6 @@ function renderScpPicker() {
       }
       const entry = scpPickerEntries.find((candidate) => candidate.path === path);
       if (!entry) {
-        return;
-      }
-      if (!pickerModeAllowsKind(mode, entry.kind)) {
-        scpPickerStatus.textContent = pickerModeSelectionError(mode, entry.kind);
-        renderScpPicker();
         return;
       }
       scpPickerSelectedPath = path;
@@ -1997,11 +1997,6 @@ function renderScpPicker() {
         ensureScpTreePath(path);
         expandScpTreeAncestors(path);
         await loadScpPickerPath(path);
-        return;
-      }
-      if (!pickerModeAllowsKind(mode, kind)) {
-        scpPickerStatus.textContent = pickerModeSelectionError(mode, kind);
-        renderScpPicker();
         return;
       }
       scpPickerSelectedPath = path;
@@ -2159,6 +2154,106 @@ async function resolveScpPickerSelection() {
   }
 }
 
+async function createRemoteBrowserFolder() {
+  if (!scpPickerBrowserId || !scpPickerCurrentListingPath || scpPickerBusy) {
+    return;
+  }
+  const folderName = prompt("New folder name");
+  const trimmed = folderName?.trim();
+  if (!trimmed) {
+    return;
+  }
+  const targetPath = normalizeRemotePath(
+    joinRemotePath(scpPickerCurrentListingPath, trimmed),
+  );
+  scpPickerBusy = true;
+  scpPickerStatus.textContent = "Creating remote folder…";
+  renderScpPicker();
+  try {
+    await invoke("create_remote_browser_directory", {
+      browserId: scpPickerBrowserId,
+      path: targetPath,
+    });
+    await loadScpPickerPath(scpPickerCurrentListingPath);
+    scpPickerSelectedPath = targetPath;
+    scpPickerSelectedKind = "directory";
+    scpPickerManualPath.value = targetPath;
+    scpPickerStatus.textContent = "Folder created.";
+  } catch (error) {
+    if (handleScpPickerSessionError(error)) {
+      return;
+    }
+    scpPickerStatus.textContent = String(error);
+  } finally {
+    scpPickerBusy = false;
+    renderScpPicker();
+  }
+}
+
+async function deleteRemoteBrowserSelection() {
+  if (!scpPickerBrowserId || !scpPickerSelectedPath || scpPickerBusy) {
+    return;
+  }
+  let infoKind = scpPickerSelectedKind;
+  if (!infoKind) {
+    try {
+      const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
+        browserId: scpPickerBrowserId,
+        path: scpPickerSelectedPath,
+      });
+      if (!info.exists) {
+        scpPickerStatus.textContent = "Selected remote path no longer exists.";
+        renderScpPicker();
+        return;
+      }
+      infoKind = info.kind;
+    } catch (error) {
+      if (handleScpPickerSessionError(error)) {
+        return;
+      }
+      scpPickerStatus.textContent = String(error);
+      renderScpPicker();
+      return;
+    }
+  }
+  const noun = infoKind === "directory" ? "folder" : "file";
+  const dangerText =
+    infoKind === "directory"
+      ? `Delete this remote folder and its contents?\n\n${scpPickerSelectedPath}`
+      : `Delete this remote file?\n\n${scpPickerSelectedPath}`;
+  if (!confirm(dangerText)) {
+    return;
+  }
+  const refreshPath =
+    scpPickerSelectedKind === "directory" &&
+    scpPickerSelectedPath === scpPickerCurrentListingPath
+      ? parentRemotePath(scpPickerCurrentListingPath) || scpTreeRootPath()
+      : scpPickerCurrentListingPath;
+  scpPickerBusy = true;
+  scpPickerStatus.textContent = `Deleting remote ${noun}…`;
+  renderScpPicker();
+  try {
+    await invoke("delete_remote_browser_path", {
+      browserId: scpPickerBrowserId,
+      path: scpPickerSelectedPath,
+      recursive: infoKind === "directory",
+    });
+    scpPickerSelectedPath = "";
+    scpPickerSelectedKind = null;
+    scpPickerManualPath.value = "";
+    await loadScpPickerPath(refreshPath);
+    scpPickerStatus.textContent = `${noun[0].toUpperCase()}${noun.slice(1)} deleted.`;
+  } catch (error) {
+    if (handleScpPickerSessionError(error)) {
+      return;
+    }
+    scpPickerStatus.textContent = String(error);
+  } finally {
+    scpPickerBusy = false;
+    renderScpPicker();
+  }
+}
+
 async function openScpPicker(
   mode: ScpPickerMode,
   serverId: string,
@@ -2229,16 +2324,29 @@ async function confirmRemoteOverwrite(
   remotePath: string,
   promptLabel: string,
 ) {
+  let session: RemoteBrowseSession | null = null;
   try {
-    const info = await invoke<RemotePathInfo>("stat_remote_path", {
+    session = await invoke<RemoteBrowseSession>("open_remote_browser", {
       serverId,
+    });
+    const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
+      browserId: session.browserId,
       path: remotePath,
     });
+    void invoke("close_remote_browser", { browserId: session.browserId }).catch(
+      () => {},
+    );
+    session = null;
     if (!info.exists) {
       return true;
     }
     return confirm(`${promptLabel}\n\nRemote path already exists:\n${info.path}`);
   } catch {
+    if (session) {
+      void invoke("close_remote_browser", { browserId: session.browserId }).catch(
+        () => {},
+      );
+    }
     return true;
   }
 }
@@ -2642,6 +2750,12 @@ scpPickerUpBtn.addEventListener("click", async () => {
 });
 scpPickerRefreshBtn.addEventListener("click", async () => {
   await loadScpPickerPath(scpPickerCurrentListingPath || null);
+});
+scpPickerNewFolderBtn.addEventListener("click", async () => {
+  await createRemoteBrowserFolder();
+});
+scpPickerDeleteBtn.addEventListener("click", async () => {
+  await deleteRemoteBrowserSelection();
 });
 scpPickerSelectBtn.addEventListener("click", async () => {
   await resolveScpPickerSelection();

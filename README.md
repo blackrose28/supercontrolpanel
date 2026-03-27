@@ -40,7 +40,7 @@ This prototype provides a basic function-runner shell where each feature functio
     - `start_server_rdp`
     - `open_remote_browser`, `close_remote_browser`
     - `list_remote_browser_children`, `stat_remote_browser_path`
-    - `stat_remote_path`
+    - `create_remote_browser_directory`, `delete_remote_browser_path`
     - `start_scp_upload` / `start_scp_download`
     - `scp_upload` / `scp_download` (`recursive` supported for folder copy)
   - Boundary target discovery:
@@ -178,6 +178,7 @@ npm run tauri build
   - **SCP Upload / Download**:
     - Works for direct SSH and for Boundary servers over the tunnel (connecting to `127.0.0.1` and the listen port).
     - Opens a two-pane remote browser modal: a lazy folder tree on the left and the current folder contents on the right.
+    - The browser toolbar can now create remote folders and delete the currently selected remote file/folder using the active browser session.
     - The remote browser keeps a persistent backend remote-browser session open while the modal is visible, so repeated navigation reuses the same remote connection instead of reconnecting per click.
     - On Windows, the browser uses one persistent OpenSSH-backed shell session for navigation while the modal is open, so repeated browse commands reuse the same SSH connection.
     - Lifecycle safety is enforced on both sides: leaving the Servers view, changing the selected server, editing/deleting that server, or restarting/stopping its tunnel will close the active remote-browser session instead of leaving stale connections behind.
@@ -193,7 +194,6 @@ npm run tauri build
     - Upload flows normalize remote paths and confirm before overwriting known remote targets.
   - Remote browse groundwork:
     - Backend commands now expose the persistent browser session API (`open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`).
-    - `stat_remote_path` remains temporarily for SCP overwrite checks outside the browser session flow.
     - The persistent browser layer is SFTP-backed and is the path the remote browser now uses for repeated browse operations.
 
 ## Notes and limitations

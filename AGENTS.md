@@ -64,12 +64,13 @@ Additional commands/events added in this iteration:
     - `close_remote_browser({ browserId }) -> void`
     - `list_remote_browser_children({ browserId, path }) -> RemoteBrowseEntry[]`
     - `stat_remote_browser_path({ browserId, path }) -> RemoteBrowseNodeInfo`
+    - `create_remote_browser_directory({ browserId, path }) -> void`
+    - `delete_remote_browser_path({ browserId, path, recursive? }) -> void`
     - Backed by a persistent SFTP session while the modal is open.
     - Backend cleanup rules:
       - opening a new browser session closes any previously leaked browser session
       - stopping/restarting a server tunnel closes browser sessions for that server
       - editing or deleting a server closes browser sessions for that server
-  - `stat_remote_path({ serverId, path }) -> RemotePathInfo`
   - `scp_upload({ serverId, localPath, remotePath, recursive? }) -> string`
   - `scp_download({ serverId, remotePath, localPath, recursive? }) -> string`
   - `start_scp_upload({ serverId, localPath, remotePath, recursive? }) -> string` (PTY-backed session id for progress-aware transfers)
@@ -153,6 +154,7 @@ Do not break these names unless updating both frontend and backend in the same c
   - **RDP** launch for Windows servers (fires `start_server_rdp` and opens the OS-native RDP client based on server `host`).
     - SCP Upload/Download, including recursive folder copy with `scp -r` (works for both direct SSH and Boundary via the tunnel).
     - SCP path selection now uses a two-pane remote browser modal with a lazy folder tree, current-folder contents, breadcrumb navigation, parent navigation, refresh, and manual path fallback.
+    - The browser toolbar supports creating remote folders and deleting the currently selected remote file/folder through the active browser session.
     - The picker now opens one backend remote-browser session per modal instance and reuses it for repeated navigation until the modal closes, the selected server changes, or the user navigates away from Servers.
     - Picker mode is transfer-aware: upload flows accept destination folders only, download-file accepts remote files only, and download-folder accepts remote folders only; valid items are single-click selectable and folders support double-click open.
     - SCP feedback is shown as a short in-session transfer history with running, success, and error entries instead of a single transient line.
