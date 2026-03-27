@@ -2975,7 +2975,10 @@ fn close_remote_browser_sessions_for_server(
 fn close_all_remote_browser_sessions(browser_store: &RemoteBrowserStore) -> Result<(), String> {
     let removed = {
         let mut sessions = lock_err(&browser_store.sessions)?;
-        sessions.drain().map(|(_, session)| session).collect::<Vec<_>>()
+        sessions
+            .drain()
+            .map(|(_, session)| session)
+            .collect::<Vec<_>>()
     };
     drop(removed);
     Ok(())
@@ -3450,6 +3453,39 @@ fn normalize_remote_browser_path(path: &str, fallback: &str) -> String {
     }
 }
 
+fn home_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        env::var_os("USERPROFILE")
+            .map(PathBuf::from)
+            .or_else(|| env::var_os("HOME").map(PathBuf::from))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+fn common_ssh_private_keys() -> Vec<PathBuf> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+    let ssh_dir = home.join(".ssh");
+    [
+        "id_ed25519",
+        "id_ecdsa",
+        "id_ecdsa_sk",
+        "id_rsa",
+        "id_dsa",
+        "id_xmss",
+    ]
+    .into_iter()
+    .map(|name| ssh_dir.join(name))
+    .filter(|path| path.is_file())
+    .collect()
+}
+
 fn open_remote_sftp_session(
     endpoint: &SshEndpoint,
     via_boundary_tunnel: bool,
@@ -3473,9 +3509,34 @@ fn open_remote_sftp_session(
     session
         .handshake()
         .map_err(|e| format!("ssh handshake failed: {e}"))?;
-    session
-        .userauth_agent(&endpoint.user)
-        .map_err(|e| format!("ssh agent auth failed: {e}"))?;
+    let mut auth_attempts = Vec::new();
+    match session.userauth_agent(&endpoint.user) {
+        Ok(_) => {}
+        Err(agent_err) => {
+            auth_attempts.push(format!("ssh agent auth failed: {agent_err}"));
+            let mut authed = false;
+            for private_key in common_ssh_private_keys() {
+                match session.userauth_pubkey_file(&endpoint.user, None, &private_key, None) {
+                    Ok(_) => {
+                        authed = true;
+                        break;
+                    }
+                    Err(key_err) => auth_attempts.push(format!(
+                        "key auth failed for {}: {key_err}",
+                        private_key.display()
+                    )),
+                }
+            }
+            if !authed && !session.authenticated() {
+                if auth_attempts.len() == 1 {
+                    auth_attempts.push(
+                        "no usable private key found in ~/.ssh for fallback auth".to_string(),
+                    );
+                }
+                return Err(auth_attempts.join("; "));
+            }
+        }
+    }
     if !session.authenticated() {
         return Err("ssh authentication did not succeed".to_string());
     }
