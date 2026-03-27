@@ -338,10 +338,15 @@ impl Default for SessionStore {
     }
 }
 
+enum RemoteBrowserTransport {
+    Sftp(SshSession),
+    Cli(SshEndpoint),
+}
+
 struct RemoteBrowserSessionState {
     server_id: String,
     root_path: String,
-    session: SshSession,
+    transport: RemoteBrowserTransport,
 }
 
 struct RemoteBrowserStore {
@@ -3453,6 +3458,32 @@ fn normalize_remote_browser_path(path: &str, fallback: &str) -> String {
     }
 }
 
+fn parse_remote_browser_ls_entry(base_path: &str, raw: &str) -> Option<RemoteBrowseEntry> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed == "." || trimmed == ".." {
+        return None;
+    }
+    let (name, kind) = if let Some(name) = trimmed.strip_suffix('/') {
+        (name.to_string(), RemotePathKind::Directory)
+    } else {
+        (trimmed.to_string(), RemotePathKind::File)
+    };
+    Some(RemoteBrowseEntry {
+        path: join_remote_path(base_path, &name),
+        name,
+        kind,
+    })
+}
+
+fn join_remote_path(base: &str, name: &str) -> String {
+    let clean_name = name.trim_start_matches('/');
+    if base == "/" {
+        format!("/{clean_name}")
+    } else {
+        format!("{}/{}", base.trim_end_matches('/'), clean_name)
+    }
+}
+
 fn home_dir() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -3484,6 +3515,64 @@ fn common_ssh_private_keys() -> Vec<PathBuf> {
     .map(|name| ssh_dir.join(name))
     .filter(|path| path.is_file())
     .collect()
+}
+
+fn remote_browser_root_path_via_cli(endpoint: &SshEndpoint) -> Result<String, String> {
+    let output = run_ssh_command(endpoint, "cd && pwd -P")?;
+    output
+        .lines()
+        .next()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| "remote browser root path was empty".to_string())
+}
+
+fn list_remote_browser_children_via_cli(
+    endpoint: &SshEndpoint,
+    path: &str,
+) -> Result<Vec<RemoteBrowseEntry>, String> {
+    const SPLIT_MARKER: &str = "__SCP_REMOTE_BROWSER_LISTING__";
+    let script = format!(
+        "cd {} && pwd -P && printf '\\n{SPLIT_MARKER}\\n' && LC_ALL=C ls -A1p",
+        shell_quote(path)
+    );
+    let output = run_ssh_command(endpoint, &script)?;
+    let (resolved_path, raw_entries) = output
+        .split_once(&format!("\n{SPLIT_MARKER}\n"))
+        .ok_or_else(|| "remote browser listing output was not recognized".to_string())?;
+    let resolved_path = normalize_remote_browser_path(resolved_path.trim(), path);
+    Ok(raw_entries
+        .lines()
+        .filter_map(|line| parse_remote_browser_ls_entry(&resolved_path, line))
+        .collect())
+}
+
+fn stat_remote_browser_path_via_cli(
+    endpoint: &SshEndpoint,
+    path: &str,
+) -> Result<RemoteBrowseNodeInfo, String> {
+    let quoted = shell_quote(path);
+    let script = format!(
+        "p={quoted}; if [ -d \"$p\" ]; then printf 'directory'; \
+         elif [ -f \"$p\" ]; then printf 'file'; \
+         elif [ -L \"$p\" ]; then printf 'symlink'; \
+         elif [ -e \"$p\" ]; then printf 'other'; \
+         else printf 'missing'; fi"
+    );
+    let raw_kind = run_ssh_command(endpoint, &script)?;
+    let kind = match raw_kind.trim() {
+        "directory" => RemotePathKind::Directory,
+        "file" => RemotePathKind::File,
+        "symlink" => RemotePathKind::Symlink,
+        "other" => RemotePathKind::Other,
+        _ => RemotePathKind::Missing,
+    };
+    Ok(RemoteBrowseNodeInfo {
+        path: path.to_string(),
+        exists: !matches!(kind, RemotePathKind::Missing),
+        kind,
+    })
 }
 
 fn open_remote_sftp_session(
@@ -3554,23 +3643,32 @@ fn open_remote_browser(
     let server = load_server_by_id(&app, &server_id)?;
     ensure_boundary_tunnel_running(&function_store, &server)?;
     let endpoint = resolve_server_ssh_endpoint(&server, "remote browser")?;
-    let session = open_remote_sftp_session(
-        &endpoint,
-        server.connection_method == ConnectionMethod::Boundary,
-    )?;
-    let sftp = session
-        .sftp()
-        .map_err(|e| format!("failed to open sftp session: {e}"))?;
-    let root_path = sftp
-        .realpath(std::path::Path::new("."))
-        .or_else(|_| sftp.realpath(std::path::Path::new("/")))
-        .map(|path| path_buf_to_remote_string(&path))
-        .map_err(|e| format!("failed to resolve remote root path: {e}"))?;
+    #[cfg(target_os = "windows")]
+    let (root_path, transport) = {
+        let root_path = remote_browser_root_path_via_cli(&endpoint)?;
+        (root_path, RemoteBrowserTransport::Cli(endpoint))
+    };
+    #[cfg(not(target_os = "windows"))]
+    let (root_path, transport) = {
+        let session = open_remote_sftp_session(
+            &endpoint,
+            server.connection_method == ConnectionMethod::Boundary,
+        )?;
+        let sftp = session
+            .sftp()
+            .map_err(|e| format!("failed to open sftp session: {e}"))?;
+        let root_path = sftp
+            .realpath(std::path::Path::new("."))
+            .or_else(|_| sftp.realpath(std::path::Path::new("/")))
+            .map(|path| path_buf_to_remote_string(&path))
+            .map_err(|e| format!("failed to resolve remote root path: {e}"))?;
+        (root_path, RemoteBrowserTransport::Sftp(session))
+    };
     let browser_id = next_remote_browser_id(&browser_store)?;
     let state = Arc::new(RemoteBrowserSessionState {
         server_id,
         root_path: root_path.clone(),
-        session,
+        transport,
     });
     lock_err(&browser_store.sessions)?.insert(browser_id.clone(), state);
     Ok(RemoteBrowseSession {
@@ -3595,29 +3693,35 @@ fn list_remote_browser_children(
 ) -> Result<Vec<RemoteBrowseEntry>, String> {
     let browser = remote_browser_state(&browser_id, &browser_store)?;
     let target_path = normalize_remote_browser_path(&path, &browser.root_path);
-    let sftp = browser
-        .session
-        .sftp()
-        .map_err(|e| format!("failed to open sftp session: {e}"))?;
-    let mut entries = Vec::new();
-    for (child_path, stat) in sftp
-        .readdir(std::path::Path::new(&target_path))
-        .map_err(|e| format!("failed to list remote path: {e}"))?
-    {
-        let name = child_path
-            .file_name()
-            .map(|value| value.to_string_lossy().to_string())
-            .unwrap_or_default();
-        if name.is_empty() || name == "." || name == ".." {
-            continue;
+    match &browser.transport {
+        RemoteBrowserTransport::Sftp(session) => {
+            let sftp = session
+                .sftp()
+                .map_err(|e| format!("failed to open sftp session: {e}"))?;
+            let mut entries = Vec::new();
+            for (child_path, stat) in sftp
+                .readdir(std::path::Path::new(&target_path))
+                .map_err(|e| format!("failed to list remote path: {e}"))?
+            {
+                let name = child_path
+                    .file_name()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if name.is_empty() || name == "." || name == ".." {
+                    continue;
+                }
+                entries.push(RemoteBrowseEntry {
+                    name,
+                    path: path_buf_to_remote_string(&child_path),
+                    kind: remote_kind_from_file_stat(&stat),
+                });
+            }
+            Ok(entries)
         }
-        entries.push(RemoteBrowseEntry {
-            name,
-            path: path_buf_to_remote_string(&child_path),
-            kind: remote_kind_from_file_stat(&stat),
-        });
+        RemoteBrowserTransport::Cli(endpoint) => {
+            list_remote_browser_children_via_cli(endpoint, &target_path)
+        }
     }
-    Ok(entries)
 }
 
 #[tauri::command]
@@ -3628,21 +3732,27 @@ fn stat_remote_browser_path(
 ) -> Result<RemoteBrowseNodeInfo, String> {
     let browser = remote_browser_state(&browser_id, &browser_store)?;
     let target_path = normalize_remote_browser_path(&path, &browser.root_path);
-    let sftp = browser
-        .session
-        .sftp()
-        .map_err(|e| format!("failed to open sftp session: {e}"))?;
-    match sftp.lstat(std::path::Path::new(&target_path)) {
-        Ok(stat) => Ok(RemoteBrowseNodeInfo {
-            path: target_path,
-            kind: remote_kind_from_file_stat(&stat),
-            exists: true,
-        }),
-        Err(_) => Ok(RemoteBrowseNodeInfo {
-            path: target_path,
-            kind: RemotePathKind::Missing,
-            exists: false,
-        }),
+    match &browser.transport {
+        RemoteBrowserTransport::Sftp(session) => {
+            let sftp = session
+                .sftp()
+                .map_err(|e| format!("failed to open sftp session: {e}"))?;
+            match sftp.lstat(std::path::Path::new(&target_path)) {
+                Ok(stat) => Ok(RemoteBrowseNodeInfo {
+                    path: target_path,
+                    kind: remote_kind_from_file_stat(&stat),
+                    exists: true,
+                }),
+                Err(_) => Ok(RemoteBrowseNodeInfo {
+                    path: target_path,
+                    kind: RemotePathKind::Missing,
+                    exists: false,
+                }),
+            }
+        }
+        RemoteBrowserTransport::Cli(endpoint) => {
+            stat_remote_browser_path_via_cli(endpoint, &target_path)
+        }
     }
 }
 
