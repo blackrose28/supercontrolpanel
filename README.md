@@ -38,7 +38,9 @@ This prototype provides a basic function-runner shell where each feature functio
     - `start_server_tunnel` / `stop_server_tunnel`
     - `start_server_ssh` / `stop_server_ssh`
     - `start_server_rdp`
-    - `get_remote_home`, `stat_remote_path`, `list_remote_path`
+    - `open_remote_browser`, `close_remote_browser`
+    - `list_remote_browser_children`, `stat_remote_browser_path`
+    - `stat_remote_path`
     - `scp_upload` / `scp_download` (`recursive` supported for folder copy)
   - Boundary target discovery:
     - `boundary_search_targets`
@@ -174,13 +176,20 @@ npm run tauri build
     - Launches the OS-native Remote Desktop client (e.g. `mstsc.exe` on Windows; `rdp://` URL via `open`/`xdg-open` elsewhere) targeting the server `host`.
   - **SCP Upload / Download**:
     - Works for direct SSH and for Boundary servers over the tunnel (connecting to `127.0.0.1` and the listen port).
-    - Opens a remote path picker modal for browsing folders, moving up the tree, refreshing the current directory, and falling back to manual path entry when needed.
+    - Opens a two-pane remote browser modal: a lazy folder tree on the left and the current folder contents on the right.
+    - The remote browser keeps a persistent backend remote-browser session open while the modal is visible, so repeated navigation reuses the same remote connection instead of reconnecting per click.
+    - Lifecycle safety is enforced on both sides: leaving the Servers view, changing the selected server, editing/deleting that server, or restarting/stopping its tunnel will close the active remote-browser session instead of leaving stale connections behind.
+    - Breadcrumbs above the contents pane let you jump back up the active path, while manual path entry remains available as a fallback instead of the primary flow.
+    - Picker behavior is mode-aware: upload flows only accept destination folders, download-file only accepts remote files, and download-folder only accepts remote folders.
+    - Single-click selects valid items; double-click opens folders for deeper browsing.
     - Supports explicit file and folder actions; folder transfers use recursive SCP.
     - Shows an in-session transfer history below the buttons with running, success, and error states plus source/destination summaries.
     - For Boundary servers, the app now checks that the tunnel is running before browse/transfer actions and shows a clearer error if it is not.
     - Upload flows normalize remote paths and confirm before overwriting known remote targets.
   - Remote browse groundwork:
-    - Backend commands now expose remote home lookup, path inspection, and directory listing so the frontend can build a remote picker without relying on raw path prompts.
+    - Backend commands now expose the persistent browser session API (`open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`).
+    - `stat_remote_path` remains temporarily for SCP overwrite checks outside the browser session flow.
+    - The persistent browser layer is SFTP-backed and is the path the remote browser now uses for repeated browse operations.
 
 ## Notes and limitations
 

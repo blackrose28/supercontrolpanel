@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     env, fs,
     io::{Read, Write},
+    net::TcpStream,
     path::PathBuf,
     process::Command,
     sync::atomic::{AtomicBool, Ordering},
@@ -20,6 +21,7 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use ssh2::{FileStat, Session as SshSession};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use totp_rs::{Algorithm, Secret, TOTP};
 
@@ -93,21 +95,30 @@ enum RemotePathKind {
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct RemotePathEntry {
+struct RemotePathInfo {
+    path: String,
+    kind: RemotePathKind,
+    exists: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RemoteBrowseSession {
+    browser_id: String,
+    root_path: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RemoteBrowseEntry {
     name: String,
+    path: String,
     kind: RemotePathKind,
 }
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
-struct RemotePathListing {
-    path: String,
-    entries: Vec<RemotePathEntry>,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct RemotePathInfo {
+struct RemoteBrowseNodeInfo {
     path: String,
     kind: RemotePathKind,
     exists: bool,
@@ -322,6 +333,26 @@ impl Default for SessionStore {
         Self {
             sessions: Mutex::new(HashMap::new()),
             watchers: Mutex::new(HashMap::new()),
+            next_id: Mutex::new(1),
+        }
+    }
+}
+
+struct RemoteBrowserSessionState {
+    server_id: String,
+    root_path: String,
+    session: SshSession,
+}
+
+struct RemoteBrowserStore {
+    sessions: Mutex<HashMap<String, Arc<RemoteBrowserSessionState>>>,
+    next_id: Mutex<u64>,
+}
+
+impl Default for RemoteBrowserStore {
+    fn default() -> Self {
+        Self {
+            sessions: Mutex::new(HashMap::new()),
             next_id: Mutex::new(1),
         }
     }
@@ -1570,8 +1601,7 @@ fn fetch_time_offset() -> i64 {
                 .and_then(|v| v.to_str().ok())
                 .ok_or("no Date header")?;
             // Parse HTTP date: "Wed, 26 Mar 2026 16:45:00 GMT"
-            let remote = httpdate::parse_http_date(date_str)
-                .map_err(|e| format!("{e}"))?;
+            let remote = httpdate::parse_http_date(date_str).map_err(|e| format!("{e}"))?;
             let remote_epoch = remote
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|e| format!("{e}"))?
@@ -1584,7 +1614,7 @@ fn fetch_time_offset() -> i64 {
         })();
         match offset {
             Ok(d) => d,
-            Err(_) => 0
+            Err(_) => 0,
         }
     })
 }
@@ -2901,13 +2931,68 @@ fn list_servers(app: AppHandle) -> Result<Vec<Server>, String> {
     load_servers(&app)
 }
 
+fn close_remote_browser_session_internal(
+    browser_id: &str,
+    browser_store: &RemoteBrowserStore,
+) -> Result<(), String> {
+    let removed = {
+        let mut sessions = lock_err(&browser_store.sessions)?;
+        sessions.remove(browser_id)
+    };
+    drop(removed);
+    Ok(())
+}
+
+fn close_remote_browser_sessions_for_server(
+    server_id: &str,
+    browser_store: &RemoteBrowserStore,
+) -> Result<usize, String> {
+    let removed = {
+        let mut sessions = lock_err(&browser_store.sessions)?;
+        let ids = sessions
+            .iter()
+            .filter_map(|(browser_id, session)| {
+                if session.server_id == server_id {
+                    Some(browser_id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        let mut removed = Vec::with_capacity(ids.len());
+        for browser_id in ids {
+            if let Some(session) = sessions.remove(&browser_id) {
+                removed.push(session);
+            }
+        }
+        removed
+    };
+    let count = removed.len();
+    drop(removed);
+    Ok(count)
+}
+
+fn close_all_remote_browser_sessions(browser_store: &RemoteBrowserStore) -> Result<(), String> {
+    let removed = {
+        let mut sessions = lock_err(&browser_store.sessions)?;
+        sessions.drain().map(|(_, session)| session).collect::<Vec<_>>()
+    };
+    drop(removed);
+    Ok(())
+}
+
 #[tauri::command]
-fn upsert_server(app: AppHandle, mut server: Server) -> Result<Vec<Server>, String> {
+fn upsert_server(
+    app: AppHandle,
+    mut server: Server,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<Vec<Server>, String> {
     let mut list = load_servers(&app)?;
     if server.id.is_empty() {
         server.id = new_server_id();
         list.push(server);
     } else if let Some(i) = list.iter().position(|s| s.id == server.id) {
+        close_remote_browser_sessions_for_server(&server.id, &browser_store)?;
         list[i] = server;
     } else {
         list.push(server);
@@ -2917,7 +3002,12 @@ fn upsert_server(app: AppHandle, mut server: Server) -> Result<Vec<Server>, Stri
 }
 
 #[tauri::command]
-fn delete_server(app: AppHandle, id: String) -> Result<Vec<Server>, String> {
+fn delete_server(
+    app: AppHandle,
+    id: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<Vec<Server>, String> {
+    close_remote_browser_sessions_for_server(&id, &browser_store)?;
     let mut list = load_servers(&app)?;
     list.retain(|s| s.id != id);
     save_servers(&app, &list)?;
@@ -3029,7 +3119,9 @@ fn start_server_tunnel(
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
+    browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<StartFunctionResult, String> {
+    close_remote_browser_sessions_for_server(&server_id, &browser_store)?;
     let servers = load_servers(&app)?;
     let server = servers
         .into_iter()
@@ -3087,7 +3179,9 @@ fn stop_server_tunnel(
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
+    browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<(), String> {
+    close_remote_browser_sessions_for_server(&server_id, &browser_store)?;
     let fid = server_tunnel_function_id(&server_id);
     let sid = match lock_err(&function_store.statuses)?
         .get(&fid)
@@ -3269,6 +3363,26 @@ fn shell_quote(input: &str) -> String {
     format!("'{}'", input.replace('\'', "'\"'\"'"))
 }
 
+fn ensure_boundary_tunnel_running(
+    function_store: &FunctionStore,
+    server: &Server,
+) -> Result<(), String> {
+    if server.connection_method != ConnectionMethod::Boundary {
+        return Ok(());
+    }
+    let tunnel_id = server_tunnel_function_id(&server.id);
+    let statuses = lock_err(&function_store.statuses)?;
+    let running = statuses
+        .get(&tunnel_id)
+        .map(|status| status.state == "running" && status.session_id.is_some())
+        .unwrap_or(false);
+    if running {
+        Ok(())
+    } else {
+        Err("Boundary tunnel is not running for this server.".to_string())
+    }
+}
+
 fn run_ssh_command(endpoint: &SshEndpoint, remote_script: &str) -> Result<String, String> {
     let mut cmd = Command::new("ssh");
     add_common_ssh_options(&mut cmd, "-p", endpoint.port);
@@ -3289,31 +3403,186 @@ fn run_ssh_command(endpoint: &SshEndpoint, remote_script: &str) -> Result<String
     String::from_utf8(out.stdout).map_err(|e| format!("ssh output was not valid UTF-8: {e}"))
 }
 
-fn parse_remote_ls_entry(raw: &str) -> RemotePathEntry {
-    if let Some(name) = raw.strip_suffix('/') {
-        return RemotePathEntry {
-            name: name.to_string(),
-            kind: RemotePathKind::Directory,
-        };
-    }
-    RemotePathEntry {
-        name: raw.to_string(),
-        kind: RemotePathKind::File,
+fn next_remote_browser_id(store: &RemoteBrowserStore) -> Result<String, String> {
+    let mut next = lock_err(&store.next_id)?;
+    let id = format!("browser-{}", *next);
+    *next += 1;
+    Ok(id)
+}
+
+fn remote_browser_state(
+    browser_id: &str,
+    store: &RemoteBrowserStore,
+) -> Result<Arc<RemoteBrowserSessionState>, String> {
+    lock_err(&store.sessions)?
+        .get(browser_id)
+        .cloned()
+        .ok_or_else(|| "remote browser session not found".to_string())
+}
+
+fn remote_kind_from_file_stat(stat: &FileStat) -> RemotePathKind {
+    const S_IFMT: u32 = 0o170000;
+    const S_IFDIR: u32 = 0o040000;
+    const S_IFREG: u32 = 0o100000;
+    const S_IFLNK: u32 = 0o120000;
+
+    match stat.perm.map(|perm| perm & S_IFMT) {
+        Some(S_IFDIR) => RemotePathKind::Directory,
+        Some(S_IFREG) => RemotePathKind::File,
+        Some(S_IFLNK) => RemotePathKind::Symlink,
+        Some(_) => RemotePathKind::Other,
+        None => RemotePathKind::Other,
     }
 }
 
+fn path_buf_to_remote_string(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn normalize_remote_browser_path(path: &str, fallback: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else if trimmed == "/" {
+        "/".to_string()
+    } else {
+        trimmed.trim_end_matches('/').to_string()
+    }
+}
+
+fn open_remote_sftp_session(
+    endpoint: &SshEndpoint,
+    via_boundary_tunnel: bool,
+) -> Result<SshSession, String> {
+    let tcp = TcpStream::connect((endpoint.host.as_str(), endpoint.port)).map_err(|e| {
+        if via_boundary_tunnel {
+            format!(
+                "failed to connect to Boundary tunnel at {}:{}: {e}",
+                endpoint.host, endpoint.port
+            )
+        } else {
+            format!(
+                "failed to connect to {}:{}: {e}",
+                endpoint.host, endpoint.port
+            )
+        }
+    })?;
+    let mut session = SshSession::new().map_err(|e| format!("ssh session init failed: {e}"))?;
+    session.set_timeout(15_000);
+    session.set_tcp_stream(tcp);
+    session
+        .handshake()
+        .map_err(|e| format!("ssh handshake failed: {e}"))?;
+    session
+        .userauth_agent(&endpoint.user)
+        .map_err(|e| format!("ssh agent auth failed: {e}"))?;
+    if !session.authenticated() {
+        return Err("ssh authentication did not succeed".to_string());
+    }
+    Ok(session)
+}
+
 #[tauri::command]
-fn get_remote_home(app: AppHandle, server_id: String) -> Result<String, String> {
+fn open_remote_browser(
+    app: AppHandle,
+    server_id: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<RemoteBrowseSession, String> {
+    close_all_remote_browser_sessions(&browser_store)?;
     let server = load_server_by_id(&app, &server_id)?;
-    let endpoint = resolve_server_ssh_endpoint(&server, "remote browse")?;
-    let output = run_ssh_command(&endpoint, "cd && pwd -P")?;
-    output
-        .lines()
-        .next()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(str::to_string)
-        .ok_or_else(|| "remote home path was empty".to_string())
+    ensure_boundary_tunnel_running(&function_store, &server)?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "remote browser")?;
+    let session = open_remote_sftp_session(
+        &endpoint,
+        server.connection_method == ConnectionMethod::Boundary,
+    )?;
+    let sftp = session
+        .sftp()
+        .map_err(|e| format!("failed to open sftp session: {e}"))?;
+    let root_path = sftp
+        .realpath(std::path::Path::new("."))
+        .or_else(|_| sftp.realpath(std::path::Path::new("/")))
+        .map(|path| path_buf_to_remote_string(&path))
+        .map_err(|e| format!("failed to resolve remote root path: {e}"))?;
+    let browser_id = next_remote_browser_id(&browser_store)?;
+    let state = Arc::new(RemoteBrowserSessionState {
+        server_id,
+        root_path: root_path.clone(),
+        session,
+    });
+    lock_err(&browser_store.sessions)?.insert(browser_id.clone(), state);
+    Ok(RemoteBrowseSession {
+        browser_id,
+        root_path,
+    })
+}
+
+#[tauri::command]
+fn close_remote_browser(
+    browser_id: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<(), String> {
+    close_remote_browser_session_internal(&browser_id, &browser_store)
+}
+
+#[tauri::command]
+fn list_remote_browser_children(
+    browser_id: String,
+    path: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<Vec<RemoteBrowseEntry>, String> {
+    let browser = remote_browser_state(&browser_id, &browser_store)?;
+    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    let sftp = browser
+        .session
+        .sftp()
+        .map_err(|e| format!("failed to open sftp session: {e}"))?;
+    let mut entries = Vec::new();
+    for (child_path, stat) in sftp
+        .readdir(std::path::Path::new(&target_path))
+        .map_err(|e| format!("failed to list remote path: {e}"))?
+    {
+        let name = child_path
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if name.is_empty() || name == "." || name == ".." {
+            continue;
+        }
+        entries.push(RemoteBrowseEntry {
+            name,
+            path: path_buf_to_remote_string(&child_path),
+            kind: remote_kind_from_file_stat(&stat),
+        });
+    }
+    Ok(entries)
+}
+
+#[tauri::command]
+fn stat_remote_browser_path(
+    browser_id: String,
+    path: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<RemoteBrowseNodeInfo, String> {
+    let browser = remote_browser_state(&browser_id, &browser_store)?;
+    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    let sftp = browser
+        .session
+        .sftp()
+        .map_err(|e| format!("failed to open sftp session: {e}"))?;
+    match sftp.lstat(std::path::Path::new(&target_path)) {
+        Ok(stat) => Ok(RemoteBrowseNodeInfo {
+            path: target_path,
+            kind: remote_kind_from_file_stat(&stat),
+            exists: true,
+        }),
+        Err(_) => Ok(RemoteBrowseNodeInfo {
+            path: target_path,
+            kind: RemotePathKind::Missing,
+            exists: false,
+        }),
+    }
 }
 
 #[tauri::command]
@@ -3348,42 +3617,6 @@ fn stat_remote_path(
         path: trimmed.to_string(),
         exists: !matches!(kind, RemotePathKind::Missing),
         kind,
-    })
-}
-
-#[tauri::command]
-fn list_remote_path(
-    app: AppHandle,
-    server_id: String,
-    path: Option<String>,
-) -> Result<RemotePathListing, String> {
-    const SPLIT_MARKER: &str = "__SCP_REMOTE_LISTING__";
-
-    let server = load_server_by_id(&app, &server_id)?;
-    let endpoint = resolve_server_ssh_endpoint(&server, "remote directory listing")?;
-    let target = path
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let cd_clause = match target {
-        Some(value) => format!("cd {}", shell_quote(value)),
-        None => "cd".to_string(),
-    };
-    let script =
-        format!("{cd_clause} && pwd -P && printf '\\n{SPLIT_MARKER}\\n' && LC_ALL=C ls -A1p");
-    let output = run_ssh_command(&endpoint, &script)?;
-    let (resolved_path, raw_entries) = output
-        .split_once(&format!("\n{SPLIT_MARKER}\n"))
-        .ok_or_else(|| "remote listing output was not recognized".to_string())?;
-    let entries = raw_entries
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .map(parse_remote_ls_entry)
-        .collect::<Vec<_>>();
-    Ok(RemotePathListing {
-        path: resolved_path.trim().to_string(),
-        entries,
     })
 }
 
@@ -3908,6 +4141,7 @@ fn main() {
         .manage(FunctionStore::default())
         .manage(OpenVpnAdminStore::default())
         .manage(BoundaryAutomationStore::default())
+        .manage(RemoteBrowserStore::default())
         .invoke_handler(tauri::generate_handler![
             open_pty,
             write_pty,
@@ -3932,9 +4166,11 @@ fn main() {
             stop_server_tunnel,
             start_server_ssh,
             stop_server_ssh,
-            get_remote_home,
+            open_remote_browser,
+            close_remote_browser,
+            list_remote_browser_children,
+            stat_remote_browser_path,
             stat_remote_path,
-            list_remote_path,
             scp_upload,
             scp_download,
             start_server_rdp,

@@ -59,9 +59,17 @@ Additional commands/events added in this iteration:
   - `start_server_ssh({ serverId, cols, rows }) -> { functionId, sessionId }`
   - `stop_server_ssh({ serverId })`
   - `start_server_rdp({ serverId }) -> void`
-  - `get_remote_home({ serverId }) -> string`
+  - New remote browser contract used by the picker:
+    - `open_remote_browser({ serverId }) -> { browserId, rootPath }`
+    - `close_remote_browser({ browserId }) -> void`
+    - `list_remote_browser_children({ browserId, path }) -> RemoteBrowseEntry[]`
+    - `stat_remote_browser_path({ browserId, path }) -> RemoteBrowseNodeInfo`
+    - Backed by a persistent SFTP session while the modal is open.
+    - Backend cleanup rules:
+      - opening a new browser session closes any previously leaked browser session
+      - stopping/restarting a server tunnel closes browser sessions for that server
+      - editing or deleting a server closes browser sessions for that server
   - `stat_remote_path({ serverId, path }) -> RemotePathInfo`
-  - `list_remote_path({ serverId, path? }) -> { path, entries }`
   - `scp_upload({ serverId, localPath, remotePath, recursive? }) -> string`
   - `scp_download({ serverId, remotePath, localPath, recursive? }) -> string`
   - Function IDs:
@@ -142,7 +150,9 @@ Do not break these names unless updating both frontend and backend in the same c
     - Start/stop **SSH** (either direct or via localhost + listen port).
   - **RDP** launch for Windows servers (fires `start_server_rdp` and opens the OS-native RDP client based on server `host`).
     - SCP Upload/Download, including recursive folder copy with `scp -r` (works for both direct SSH and Boundary via the tunnel).
-    - SCP path selection uses a remote picker modal with folder browsing, parent navigation, refresh, and manual path fallback.
+    - SCP path selection now uses a two-pane remote browser modal with a lazy folder tree, current-folder contents, breadcrumb navigation, parent navigation, refresh, and manual path fallback.
+    - The picker now opens one backend remote-browser session per modal instance and reuses it for repeated navigation until the modal closes, the selected server changes, or the user navigates away from Servers.
+    - Picker mode is transfer-aware: upload flows accept destination folders only, download-file accepts remote files only, and download-folder accepts remote folders only; valid items are single-click selectable and folders support double-click open.
     - SCP feedback is shown as a short in-session transfer history with running, success, and error entries instead of a single transient line.
     - Boundary-backed SCP actions require the tunnel to be running first; upload flows normalize remote paths and confirm before overwriting known remote targets.
   - Each server maintains its own PTY session IDs (tunnel + ssh) and buffered terminal output so switching rows restores that server's scrollback instead of clearing it.

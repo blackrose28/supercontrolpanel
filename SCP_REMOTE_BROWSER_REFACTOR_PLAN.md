@@ -50,83 +50,83 @@ Replace the current SCP picker with a real remote file browser that:
 
 ### Phase A: Replace The Browse Backend Contract
 
-- [ ] Define new backend browse-session types:
-  - [ ] `RemoteBrowseSession`
-  - [ ] `RemoteBrowseEntry`
-  - [ ] `RemoteBrowseNodeInfo`
-- [ ] Add commands to manage a persistent browse session:
-  - [ ] `open_remote_browser({ serverId }) -> { browserId, rootPath }`
-  - [ ] `close_remote_browser({ browserId }) -> void`
-  - [ ] `list_remote_browser_children({ browserId, path }) -> RemoteBrowseEntry[]`
-  - [ ] `stat_remote_browser_path({ browserId, path }) -> RemoteBrowseNodeInfo`
+- [x] Define new backend browse-session types:
+  - [x] `RemoteBrowseSession`
+  - [x] `RemoteBrowseEntry`
+  - [x] `RemoteBrowseNodeInfo`
+- [x] Add commands to manage a persistent browse session:
+  - [x] `open_remote_browser({ serverId }) -> { browserId, rootPath }`
+  - [x] `close_remote_browser({ browserId }) -> void`
+  - [x] `list_remote_browser_children({ browserId, path }) -> RemoteBrowseEntry[]`
+  - [x] `stat_remote_browser_path({ browserId, path }) -> RemoteBrowseNodeInfo`
 - [ ] Ensure the session abstraction works for:
   - [ ] direct SSH servers
   - [ ] Boundary servers through the active tunnel
-- [ ] Decide the transport layer:
-  - [ ] preferred: persistent SFTP/session-backed listing
+- [x] Decide the transport layer:
+  - [x] preferred: persistent SFTP/session-backed listing
   - [ ] fallback only if necessary: persistent shell process with command multiplexing
 - [ ] Fail fast with explicit errors when:
-  - [ ] Boundary tunnel is not running
+  - [x] Boundary tunnel is not running
   - [ ] auth fails
   - [ ] remote session drops
   - [ ] path lookup fails
 
 ### Phase B: Add Session Lifecycle And Safety Rules
 
-- [ ] Tie remote browser session ownership to the currently open modal.
-- [ ] Prevent multiple simultaneous browser sessions for the same modal state.
-- [ ] Close stale browser sessions when:
-  - [ ] modal closes
-  - [ ] selected server changes
-  - [ ] page navigation invalidates the current context
-- [ ] Add defensive cleanup on app-side errors so leaked browser sessions do not accumulate.
-- [ ] Confirm the implementation keeps locks short-lived and does not hold broad locks across I/O.
+- [x] Tie remote browser session ownership to the currently open modal.
+- [x] Prevent multiple simultaneous browser sessions for the same modal state.
+- [x] Close stale browser sessions when:
+  - [x] modal closes
+  - [x] selected server changes
+  - [x] page navigation invalidates the current context
+- [x] Add defensive cleanup on app-side errors so leaked browser sessions do not accumulate.
+- [x] Confirm the implementation keeps locks short-lived and does not hold broad locks across I/O.
 
 ### Phase C: Build A Real Tree UI
 
-- [ ] Replace the current SCP picker table with a two-part browser:
-  - [ ] left: folder tree
-  - [ ] right or center: contents of selected folder
-- [ ] Add lazy-expand folder nodes.
-- [ ] Add explicit loading states per folder node.
-- [ ] Add breadcrumb navigation for the active folder.
-- [ ] Preserve manual path entry as a fallback section, not the primary flow.
-- [ ] Make the tree usable for deep navigation without losing state on each click.
-- [ ] Ensure switching between folders does not clear already-loaded tree state unnecessarily.
+- [x] Replace the current SCP picker table with a two-part browser:
+  - [x] left: folder tree
+  - [x] right or center: contents of selected folder
+- [x] Add lazy-expand folder nodes.
+- [x] Add explicit loading states per folder node.
+- [x] Add breadcrumb navigation for the active folder.
+- [x] Preserve manual path entry as a fallback section, not the primary flow.
+- [x] Make the tree usable for deep navigation without losing state on each click.
+- [x] Ensure switching between folders does not clear already-loaded tree state unnecessarily.
 
 ### Phase D: Selection Model And UX Rules
 
-- [ ] Define browser mode behavior precisely:
-  - [ ] upload file: select destination folder only
-  - [ ] upload folder: select destination folder only
-  - [ ] download file: select remote file
-  - [ ] download folder: select remote folder
-- [ ] Add clear visual distinction between selected node and expanded node.
-- [ ] Support double-click/open for folders and single-click selection.
-- [ ] Keep a confirm/select action at the bottom of the modal.
-- [ ] Prevent invalid selections by mode instead of letting invalid paths flow into transfer commands.
-- [ ] Keep local file/folder dialogs separate from remote browser responsibilities.
+- [x] Define browser mode behavior precisely:
+  - [x] upload file: select destination folder only
+  - [x] upload folder: select destination folder only
+  - [x] download file: select remote file
+  - [x] download folder: select remote folder
+- [x] Add clear visual distinction between selected node and expanded node.
+- [x] Support double-click/open for folders and single-click selection.
+- [x] Keep a confirm/select action at the bottom of the modal.
+- [x] Prevent invalid selections by mode instead of letting invalid paths flow into transfer commands.
+- [x] Keep local file/folder dialogs separate from remote browser responsibilities.
 
 ### Phase E: Rewire Existing Transfer Flows
 
-- [ ] Replace current picker integration with the new browser session API.
-- [ ] Remove code paths that rely on repeated `get_remote_home` / `list_remote_path` round-trips for each navigation step.
-- [ ] Keep SCP transfer commands unchanged where possible, except for any path normalization adjustments needed by the new browser.
-- [ ] Ensure the new browser still feeds:
-  - [ ] upload file
-  - [ ] upload folder
-  - [ ] download file
-  - [ ] download folder
+- [x] Replace current picker integration with the new browser session API.
+- [x] Remove code paths that rely on repeated `get_remote_home` / `list_remote_path` round-trips for each navigation step.
+- [x] Keep SCP transfer commands unchanged where possible, except for any path normalization adjustments needed by the new browser.
+- [x] Ensure the new browser still feeds:
+  - [x] upload file
+  - [x] upload folder
+  - [x] download file
+  - [x] download folder
 
 ### Phase F: Cleanup And Retirement Of Old Picker
 
-- [ ] Remove obsolete frontend state and handlers for the current flat picker.
+- [x] Remove obsolete frontend state and handlers for the current flat picker.
 - [ ] Remove obsolete backend commands if they are no longer needed:
-  - [ ] `get_remote_home`
-  - [ ] `list_remote_path`
+  - [x] `get_remote_home`
+  - [x] `list_remote_path`
   - [ ] `stat_remote_path`
-- [ ] If any old commands are kept temporarily, mark them as transitional in docs.
-- [ ] Update all user-facing copy to refer to the remote browser/tree instead of the remote picker.
+- [x] If any old commands are kept temporarily, mark them as transitional in docs.
+- [x] Update all user-facing copy to refer to the remote browser/tree instead of the remote picker.
 
 ### Phase G: Verification
 
@@ -141,11 +141,11 @@ Replace the current SCP picker with a real remote file browser that:
 
 ## Recommended Execution Order
 
-- [ ] Phase A: Replace the browse backend contract
-- [ ] Phase B: Add session lifecycle and safety rules
-- [ ] Phase C: Build a real tree UI
-- [ ] Phase D: Selection model and UX rules
-- [ ] Phase E: Rewire existing transfer flows
+- [x] Phase A: Replace the browse backend contract
+- [x] Phase B: Add session lifecycle and safety rules
+- [x] Phase C: Build a real tree UI
+- [x] Phase D: Selection model and UX rules
+- [x] Phase E: Rewire existing transfer flows
 - [ ] Phase F: Cleanup and retirement of old picker
 - [ ] Phase G: Verification
 
@@ -161,8 +161,8 @@ Replace the current SCP picker with a real remote file browser that:
 
 Start with Phase A only:
 
-- [ ] choose the backend browse transport
-- [ ] define the new Tauri command shapes
-- [ ] implement persistent browser session open/close
-- [ ] implement child listing on an existing browser session
+- [x] choose the backend browse transport
+- [x] define the new Tauri command shapes
+- [x] implement persistent browser session open/close
+- [x] implement child listing on an existing browser session
 - [ ] verify one browser session can serve repeated folder navigation requests without reconnecting each time
