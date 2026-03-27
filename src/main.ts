@@ -1835,6 +1835,8 @@ function renderScpPicker() {
         if (!path) {
           return;
         }
+        const node = ensureScpTreeNode(path, parentRemotePath(path));
+        node.expanded = true;
         if (pickerModePrefersDirectorySelection(mode)) {
           scpPickerSelectedPath = path;
           scpPickerSelectedKind = "directory";
