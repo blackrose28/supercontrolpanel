@@ -5,10 +5,10 @@ use std::os::windows::process::CommandExt;
 use std::{
     collections::HashMap,
     env, fs,
-    io::{Read, Write},
+    io::{BufRead, BufReader, Read, Write},
     net::TcpStream,
     path::PathBuf,
-    process::Command,
+    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     sync::mpsc::{self, Receiver, Sender},
     sync::{Arc, Mutex},
@@ -340,7 +340,19 @@ impl Default for SessionStore {
 
 enum RemoteBrowserTransport {
     Sftp(SshSession),
-    Cli(SshEndpoint),
+    Cli(CliRemoteBrowserSession),
+}
+
+struct CliRemoteBrowserSession {
+    io: Mutex<CliRemoteBrowserIo>,
+}
+
+struct CliRemoteBrowserIo {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    stderr: ChildStderr,
+    next_marker_id: u64,
 }
 
 struct RemoteBrowserSessionState {
@@ -2936,6 +2948,19 @@ fn list_servers(app: AppHandle) -> Result<Vec<Server>, String> {
     load_servers(&app)
 }
 
+fn shutdown_remote_browser_session_state(state: &RemoteBrowserSessionState) {
+    match &state.transport {
+        RemoteBrowserTransport::Sftp(_) => {}
+        RemoteBrowserTransport::Cli(session) => {
+            if let Ok(mut io) = lock_err(&session.io) {
+                let _ = io.stdin.flush();
+                let _ = io.child.kill();
+                let _ = io.child.wait();
+            }
+        }
+    }
+}
+
 fn close_remote_browser_session_internal(
     browser_id: &str,
     browser_store: &RemoteBrowserStore,
@@ -2944,7 +2969,9 @@ fn close_remote_browser_session_internal(
         let mut sessions = lock_err(&browser_store.sessions)?;
         sessions.remove(browser_id)
     };
-    drop(removed);
+    if let Some(state) = removed {
+        shutdown_remote_browser_session_state(&state);
+    }
     Ok(())
 }
 
@@ -2973,7 +3000,9 @@ fn close_remote_browser_sessions_for_server(
         removed
     };
     let count = removed.len();
-    drop(removed);
+    for state in removed {
+        shutdown_remote_browser_session_state(&state);
+    }
     Ok(count)
 }
 
@@ -2985,7 +3014,9 @@ fn close_all_remote_browser_sessions(browser_store: &RemoteBrowserStore) -> Resu
             .map(|(_, session)| session)
             .collect::<Vec<_>>()
     };
-    drop(removed);
+    for state in removed {
+        shutdown_remote_browser_session_state(&state);
+    }
     Ok(())
 }
 
@@ -3517,8 +3548,119 @@ fn common_ssh_private_keys() -> Vec<PathBuf> {
     .collect()
 }
 
-fn remote_browser_root_path_via_cli(endpoint: &SshEndpoint) -> Result<String, String> {
-    let output = run_ssh_command(endpoint, "cd && pwd -P")?;
+fn spawn_cli_remote_browser_session(
+    endpoint: &SshEndpoint,
+) -> Result<CliRemoteBrowserSession, String> {
+    let mut cmd = Command::new("ssh");
+    add_common_ssh_options(&mut cmd, "-p", endpoint.port);
+    cmd.arg("-T")
+        .arg(ssh_target(endpoint))
+        .arg("sh")
+        .arg("-s")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to start persistent remote browser shell: {e}"))?;
+    let stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "failed to open remote browser shell stdin".to_string())?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to open remote browser shell stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "failed to open remote browser shell stderr".to_string())?;
+    Ok(CliRemoteBrowserSession {
+        io: Mutex::new(CliRemoteBrowserIo {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+            stderr,
+            next_marker_id: 1,
+        }),
+    })
+}
+
+fn read_cli_browser_stderr(stderr: &mut ChildStderr) -> String {
+    let mut buf = String::new();
+    let _ = stderr.read_to_string(&mut buf);
+    buf.trim().to_string()
+}
+
+fn run_cli_remote_browser_command(
+    session: &CliRemoteBrowserSession,
+    script_body: &str,
+) -> Result<String, String> {
+    let mut io = lock_err(&session.io)?;
+    if let Some(status) = io
+        .child
+        .try_wait()
+        .map_err(|e| format!("failed to query remote browser shell status: {e}"))?
+    {
+        let stderr = read_cli_browser_stderr(&mut io.stderr);
+        let base = format!("remote browser shell exited unexpectedly: {status}");
+        return Err(if stderr.is_empty() {
+            base
+        } else {
+            format!("{base}; {stderr}")
+        });
+    }
+    let marker = format!("__SCP_REMOTE_BROWSER_DONE_{}__", io.next_marker_id);
+    io.next_marker_id += 1;
+    let script = format!(
+        "exec 2>&1\n{{\n{script_body}\n}}\n__scp_status=$?\nprintf '\\n{marker} %s\\n' \"$__scp_status\"\n"
+    );
+    io.stdin
+        .write_all(script.as_bytes())
+        .and_then(|_| io.stdin.flush())
+        .map_err(|e| format!("failed to send remote browser command: {e}"))?;
+
+    let mut output = String::new();
+    loop {
+        let mut line = String::new();
+        let read = io
+            .stdout
+            .read_line(&mut line)
+            .map_err(|e| format!("failed to read remote browser output: {e}"))?;
+        if read == 0 {
+            let stderr = read_cli_browser_stderr(&mut io.stderr);
+            return Err(if stderr.is_empty() {
+                "remote browser shell closed before completing the command".to_string()
+            } else {
+                format!("remote browser shell closed before completing the command: {stderr}")
+            });
+        }
+        if let Some(rest) = line.strip_prefix(&marker) {
+            let status = rest.trim().parse::<i32>().unwrap_or(1);
+            if status == 0 {
+                return Ok(output.trim().to_string());
+            }
+            let stderr = read_cli_browser_stderr(&mut io.stderr);
+            let body = output.trim();
+            let detail = if !stderr.is_empty() {
+                stderr
+            } else if !body.is_empty() {
+                body.to_string()
+            } else {
+                format!("remote browser command failed with exit code {status}")
+            };
+            return Err(detail);
+        }
+        output.push_str(&line);
+    }
+}
+
+fn remote_browser_root_path_via_cli_session(
+    session: &CliRemoteBrowserSession,
+) -> Result<String, String> {
+    let output = run_cli_remote_browser_command(session, "cd && pwd -P")?;
     output
         .lines()
         .next()
@@ -3528,8 +3670,8 @@ fn remote_browser_root_path_via_cli(endpoint: &SshEndpoint) -> Result<String, St
         .ok_or_else(|| "remote browser root path was empty".to_string())
 }
 
-fn list_remote_browser_children_via_cli(
-    endpoint: &SshEndpoint,
+fn list_remote_browser_children_via_cli_session(
+    session: &CliRemoteBrowserSession,
     path: &str,
 ) -> Result<Vec<RemoteBrowseEntry>, String> {
     const SPLIT_MARKER: &str = "__SCP_REMOTE_BROWSER_LISTING__";
@@ -3537,7 +3679,7 @@ fn list_remote_browser_children_via_cli(
         "cd {} && pwd -P && printf '\\n{SPLIT_MARKER}\\n' && LC_ALL=C ls -A1p",
         shell_quote(path)
     );
-    let output = run_ssh_command(endpoint, &script)?;
+    let output = run_cli_remote_browser_command(session, &script)?;
     let (resolved_path, raw_entries) = output
         .split_once(&format!("\n{SPLIT_MARKER}\n"))
         .ok_or_else(|| "remote browser listing output was not recognized".to_string())?;
@@ -3548,8 +3690,8 @@ fn list_remote_browser_children_via_cli(
         .collect())
 }
 
-fn stat_remote_browser_path_via_cli(
-    endpoint: &SshEndpoint,
+fn stat_remote_browser_path_via_cli_session(
+    session: &CliRemoteBrowserSession,
     path: &str,
 ) -> Result<RemoteBrowseNodeInfo, String> {
     let quoted = shell_quote(path);
@@ -3560,7 +3702,7 @@ fn stat_remote_browser_path_via_cli(
          elif [ -e \"$p\" ]; then printf 'other'; \
          else printf 'missing'; fi"
     );
-    let raw_kind = run_ssh_command(endpoint, &script)?;
+    let raw_kind = run_cli_remote_browser_command(session, &script)?;
     let kind = match raw_kind.trim() {
         "directory" => RemotePathKind::Directory,
         "file" => RemotePathKind::File,
@@ -3645,8 +3787,9 @@ fn open_remote_browser(
     let endpoint = resolve_server_ssh_endpoint(&server, "remote browser")?;
     #[cfg(target_os = "windows")]
     let (root_path, transport) = {
-        let root_path = remote_browser_root_path_via_cli(&endpoint)?;
-        (root_path, RemoteBrowserTransport::Cli(endpoint))
+        let session = spawn_cli_remote_browser_session(&endpoint)?;
+        let root_path = remote_browser_root_path_via_cli_session(&session)?;
+        (root_path, RemoteBrowserTransport::Cli(session))
     };
     #[cfg(not(target_os = "windows"))]
     let (root_path, transport) = {
@@ -3719,7 +3862,7 @@ fn list_remote_browser_children(
             Ok(entries)
         }
         RemoteBrowserTransport::Cli(endpoint) => {
-            list_remote_browser_children_via_cli(endpoint, &target_path)
+            list_remote_browser_children_via_cli_session(endpoint, &target_path)
         }
     }
 }
@@ -3751,7 +3894,7 @@ fn stat_remote_browser_path(
             }
         }
         RemoteBrowserTransport::Cli(endpoint) => {
-            stat_remote_browser_path_via_cli(endpoint, &target_path)
+            stat_remote_browser_path_via_cli_session(endpoint, &target_path)
         }
     }
 }

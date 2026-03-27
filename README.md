@@ -178,6 +178,7 @@ npm run tauri build
     - Works for direct SSH and for Boundary servers over the tunnel (connecting to `127.0.0.1` and the listen port).
     - Opens a two-pane remote browser modal: a lazy folder tree on the left and the current folder contents on the right.
     - The remote browser keeps a persistent backend remote-browser session open while the modal is visible, so repeated navigation reuses the same remote connection instead of reconnecting per click.
+    - On Windows, the browser uses one persistent OpenSSH-backed shell session for navigation while the modal is open, so repeated browse commands reuse the same SSH connection.
     - Lifecycle safety is enforced on both sides: leaving the Servers view, changing the selected server, editing/deleting that server, or restarting/stopping its tunnel will close the active remote-browser session instead of leaving stale connections behind.
     - The browser opens at the remote user’s home directory, and the tree starts collapsed at that root instead of opening from `/`.
     - Breadcrumbs above the contents pane let you jump back up the active path, while manual path entry remains available as a fallback instead of the primary flow.
