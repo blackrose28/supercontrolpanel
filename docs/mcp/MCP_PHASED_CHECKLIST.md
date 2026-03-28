@@ -108,7 +108,7 @@
 - [x] Add audit logging for MCP calls
 - [x] Standardize error and warning responses
 - [ ] Add notifications for status and transfer changes if needed
-- [ ] Update README and AGENTS docs if contract changes
+- [x] Update README and AGENTS docs if contract changes
 
 ## Phase 10 — `supercontrolpanelhelper` CLI over MCP
 
@@ -144,3 +144,4 @@
 - Phase 7 now exposes remote-browser lifecycle tools, direct/PTY-backed SCP transfer start tools, and backend-backed SCP transfer history queries
 - Phase 8 now exposes config sync pull/push and git pull/push actions for the configured repo root
 - Phase 9 hardening now enforces localhost-only bind addresses, redacts config/token secrets in MCP outputs, blocks sensitive tools unless the policy is set to `allow-with-token`, logs MCP HTTP calls to stderr, and returns standardized JSON error envelopes from the HTTP transport
+- README and AGENTS now document the current minimal HTTP MCP surface and hardening behavior

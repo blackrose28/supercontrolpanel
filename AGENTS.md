@@ -3,6 +3,7 @@
 Guidance for AI agents working in this repository.
 
 Detailed design docs for MCP work live under `docs/mcp/`.
+The repo now also contains a minimal localhost HTTP MCP implementation in `src-tauri/src/mcp/`.
 
 ## Goal
 
@@ -19,6 +20,7 @@ Maintain and extend a PTY-driven function runner: each feature function can laun
 - `src/main.ts`: multi-page UI (Status + OpenVPN + Servers + Boundary + Config), PTY/event wiring
 - `src/styles.css`: terminal layout and basic app styling
 - `src-tauri/src/main.rs`: PTY session lifecycle + function orchestration
+- `src-tauri/src/mcp/`: minimal localhost HTTP MCP runtime, tool dispatch, resources, and transport glue
 - `src-tauri/tauri.conf.json`: build/dev config and window settings
 
 ## PTY command contract
@@ -110,6 +112,22 @@ Config behavior:
 - `save_sync_settings` uses partial-patch semantics: only fields explicitly provided by the caller are updated on disk, so unrelated device-local settings (e.g. `caddyFolder`) are not accidentally cleared.
 
 Do not break these names unless updating both frontend and backend in the same change.
+
+## MCP notes
+
+- Current transport is a minimal localhost HTTP listener, not a full spec-polished MCP transport.
+- Runtime/config is driven by device-local `sync-local.json` MCP fields.
+- HTTP MCP currently exposes:
+  - `GET /health`
+  - `GET /mcp/status`
+  - `GET /mcp/tools`
+  - `GET /mcp/resources`
+  - `POST /mcp/tools/call`
+  - `POST /mcp/resources/read`
+- Bearer token is required for all HTTP MCP requests.
+- Backend currently enforces localhost-only bind addresses.
+- When MCP sensitive-action policy is `require-ui-approval`, sensitive HTTP tools are rejected instead of executed.
+- MCP config-related outputs redact secrets and the MCP auth token.
 
 ## Development workflow
 

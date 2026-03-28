@@ -96,9 +96,29 @@ npm run tauri dev
 npm run tauri build
 ```
 
-## MCP support planning
+## MCP support
 
-SuperControlPanel is planned to support acting as an MCP server for AI agents.
+SuperControlPanel can now expose a **minimal localhost HTTP MCP surface** for AI agents and local helper tooling.
+
+Current implementation highlights:
+
+- disabled by default
+- bearer-token protected
+- localhost-only bind enforcement
+- configurable from the Config page
+- read-only, runtime-control, config-mutation, remote-browser, SCP, config-sync, and git tool coverage
+- sensitive tools can be blocked unless MCP policy is switched to `allow-with-token`
+
+Current HTTP routes:
+
+- `GET /health`
+- `GET /mcp/status`
+- `GET /mcp/tools`
+- `GET /mcp/resources`
+- `POST /mcp/tools/call`
+- `POST /mcp/resources/read`
+
+This is still a **repo-local minimal transport**, not a final spec-polished MCP server.
 
 Detailed design docs live under `docs/mcp/`:
 
