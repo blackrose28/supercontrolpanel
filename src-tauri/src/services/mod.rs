@@ -1,6 +1,7 @@
 pub mod automation_service;
 pub mod boundary_service;
 pub mod config_service;
+pub mod caddy_service;
 pub mod function_service;
 pub mod openvpn_service;
 pub mod pty_service;
@@ -10,6 +11,7 @@ pub mod scp_service;
 
 pub use automation_service::*;
 pub use boundary_service::*;
+pub use caddy_service::*;
 pub use config_service::*;
 pub use function_service::*;
 #[cfg(target_os = "windows")]

@@ -14,9 +14,11 @@ use std::{
 
 use portable_pty::{CommandBuilder, PtySize};
 use tauri::{AppHandle, Emitter, Manager, State};
+use serde_json::Value;
 
 mod app_state;
 mod models;
+mod mcp;
 mod server_mgmt;
 mod services;
 mod stores;
@@ -28,6 +30,11 @@ use models::{
 #[cfg(target_os = "windows")]
 use models::{HelperStatusFile, OpenVpnLaunchConfig};
 use server_mgmt::{load_servers, new_server_id, save_servers, Server};
+use mcp::{
+    call_mcp_tool, list_mcp_resources, list_mcp_tools, mcp_runtime_status, read_mcp_resource,
+    stop_mcp_runtime, sync_mcp_runtime_from_settings, McpResourceDescriptor, McpRuntimeState,
+    McpRuntimeStatus, McpToolCallEnvelope, McpToolDescriptor,
+};
 use services::{
     apply_boundary_env, apply_boundary_env_builder, apply_boundary_token_arg_if_present,
     apply_boundary_token_arg_if_present_builder, boundary_addr_base, boundary_cli_path,
@@ -46,6 +53,7 @@ use services::{
     delete_remote_browser_path as delete_remote_browser_path_service,
     list_remote_browser_children as list_remote_browser_children_service,
     open_remote_browser as open_remote_browser_service,
+    start_caddy_run as start_caddy_run_service, stop_caddy_run as stop_caddy_run_service,
     start_server_rdp as start_server_rdp_service, start_server_ssh as start_server_ssh_service,
     start_server_tunnel as start_server_tunnel_service, stat_remote_browser_path as stat_remote_browser_path_service,
     stop_server_ssh as stop_server_ssh_service, stop_server_tunnel as stop_server_tunnel_service,
@@ -653,12 +661,16 @@ fn get_app_config(app: AppHandle) -> Result<AppConfig, String> {
     Ok(config)
 }
 
-#[tauri::command]
-fn get_config_paths(app: AppHandle) -> Result<ConfigPaths, String> {
-    let path = config_file_path(&app, CONFIG_FILE_NAME)?;
+fn get_config_paths_internal(app: &AppHandle) -> Result<ConfigPaths, String> {
+    let path = config_file_path(app, CONFIG_FILE_NAME)?;
     Ok(ConfigPaths {
         app_config_path: path.to_string_lossy().into_owned(),
     })
+}
+
+#[tauri::command]
+fn get_config_paths(app: AppHandle) -> Result<ConfigPaths, String> {
+    get_config_paths_internal(&app)
 }
 
 #[tauri::command]
@@ -667,7 +679,7 @@ fn get_sync_settings(app: AppHandle) -> Result<SyncSettings, String> {
 }
 
 #[tauri::command]
-fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch) -> Result<(), String> {
+fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch, mcp_state: State<'_, McpRuntimeState>) -> Result<(), String> {
     let mut merged = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     if let Some(repo_root) = settings.repo_root {
         merged.repo_root = repo_root;
@@ -690,7 +702,37 @@ fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch) -> Result<(),
     if let Some(caddy_folder) = settings.caddy_folder {
         merged.caddy_folder = caddy_folder;
     }
-    save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)
+    if let Some(mcp_enabled) = settings.mcp_enabled {
+        merged.mcp_enabled = mcp_enabled;
+    }
+    if let Some(mcp_bind_address) = settings.mcp_bind_address {
+        if !mcp_bind_address.trim().is_empty() {
+            merged.mcp_bind_address = mcp_bind_address;
+        }
+    }
+    if let Some(mcp_port) = settings.mcp_port {
+        if mcp_port != 0 {
+            merged.mcp_port = mcp_port;
+        }
+    }
+    if let Some(mcp_auth_token) = settings.mcp_auth_token {
+        if !mcp_auth_token.trim().is_empty() {
+            merged.mcp_auth_token = mcp_auth_token;
+        }
+    }
+    if let Some(mcp_allowed_tool_categories) = settings.mcp_allowed_tool_categories {
+        if !mcp_allowed_tool_categories.is_empty() {
+            merged.mcp_allowed_tool_categories = mcp_allowed_tool_categories;
+        }
+    }
+    if let Some(mcp_sensitive_action_policy) = settings.mcp_sensitive_action_policy {
+        if !mcp_sensitive_action_policy.trim().is_empty() {
+            merged.mcp_sensitive_action_policy = mcp_sensitive_action_policy;
+        }
+    }
+    save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
+    let _ = sync_mcp_runtime_from_settings(&app, &mcp_state, &merged, now_ms);
+    Ok(())
 }
 
 #[tauri::command]
@@ -921,8 +963,7 @@ fn detect_openvpn_executable() -> Result<String, String> {
         .ok_or_else(|| "OpenVPN executable not found in PATH/common locations".to_string())
 }
 
-#[tauri::command]
-fn start_openvpn_function(
+pub(crate) fn start_openvpn_action(
     _command: String,
     username: String,
     password: String,
@@ -1017,7 +1058,27 @@ fn start_openvpn_function(
 }
 
 #[tauri::command]
-fn stop_openvpn_function(
+fn start_openvpn_function(
+    command: String,
+    username: String,
+    password: String,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+    admin_store: State<'_, OpenVpnAdminStore>,
+) -> Result<StartFunctionResult, String> {
+    start_openvpn_action(
+        command,
+        username,
+        password,
+        app,
+        session_store,
+        function_store,
+        admin_store,
+    )
+}
+
+pub(crate) fn stop_openvpn_action(
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
@@ -1088,6 +1149,41 @@ fn stop_openvpn_function(
 }
 
 #[tauri::command]
+fn stop_openvpn_function(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+    admin_store: State<'_, OpenVpnAdminStore>,
+) -> Result<(), String> {
+    stop_openvpn_action(app, session_store, function_store, admin_store)
+}
+
+pub(crate) fn start_caddy_action(
+    cols: u16,
+    rows: u16,
+    folder: String,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<StartFunctionResult, String> {
+    start_caddy_run_service(
+        cols,
+        rows,
+        folder,
+        &app,
+        &session_store,
+        &function_store,
+        CADDY_FUNCTION_ID,
+        lock_err,
+        close_pty_internal,
+        emit_pty_exit,
+        update_functions_for_session_exit,
+        open_pty_with_command_builder,
+        upsert_function_status,
+    )
+}
+
+#[tauri::command]
 fn start_caddy_run(
     cols: u16,
     rows: u16,
@@ -1096,99 +1192,24 @@ fn start_caddy_run(
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
 ) -> Result<StartFunctionResult, String> {
-    let folder_trim = folder.trim();
-    if folder_trim.is_empty() {
-        return Err("folder cannot be empty".to_string());
-    }
-    let folder_path = PathBuf::from(folder_trim);
-    if !folder_path.exists() {
-        return Err(format!(
-            "folder does not exist: {}",
-            folder_path.to_string_lossy()
-        ));
-    }
-    let caddyfile = folder_path.join("Caddyfile");
-    if !caddyfile.exists() {
-        return Err(format!(
-            "Caddyfile not found in folder: {}",
-            folder_path.to_string_lossy()
-        ));
-    }
-
-    if let Some(prev) = lock_err(&function_store.statuses)?
-        .get(CADDY_FUNCTION_ID)
-        .and_then(|s| s.session_id.clone())
-    {
-        if let Some(p) = close_pty_internal(&prev, &session_store)? {
-            emit_pty_exit(&app, p);
-        }
-        let _ = update_functions_for_session_exit(&app, &function_store, &prev, None, "replaced");
-    }
-
-    let mut cmd = CommandBuilder::new("caddy");
-    cmd.arg("run");
-    cmd.arg("--config");
-    cmd.arg("Caddyfile");
-    cmd.cwd(folder_path.clone());
-
-    let session_id = open_pty_with_command_builder(
-        cols,
-        rows,
-        cmd,
-        &app,
-        &session_store,
-        update_functions_for_session_exit,
-    )?;
-    upsert_function_status(
-        &app,
-        &function_store,
-        CADDY_FUNCTION_ID,
-        "running",
-        &format!("Caddy running in {}", folder_path.to_string_lossy()),
-        Some(session_id.clone()),
-    )?;
-
-    Ok(StartFunctionResult {
-        function_id: CADDY_FUNCTION_ID.to_string(),
-        session_id,
-    })
+    start_caddy_action(cols, rows, folder, app, session_store, function_store)
 }
 
-#[tauri::command]
-fn stop_caddy_run(
+pub(crate) fn stop_caddy_action(
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
 ) -> Result<(), String> {
-    let sid = match lock_err(&function_store.statuses)?
-        .get(CADDY_FUNCTION_ID)
-        .and_then(|s| s.session_id.clone())
-    {
-        Some(s) => s,
-        None => {
-            upsert_function_status(
-                &app,
-                &function_store,
-                CADDY_FUNCTION_ID,
-                "idle",
-                "No running session",
-                None,
-            )?;
-            return Ok(());
-        }
-    };
-    if let Some(p) = close_pty_internal(&sid, &session_store)? {
-        emit_pty_exit(&app, p);
-    }
-    upsert_function_status(
+    stop_caddy_run_service(
         &app,
+        &session_store,
         &function_store,
         CADDY_FUNCTION_ID,
-        "idle",
-        "Stopped",
-        None,
-    )?;
-    Ok(())
+        lock_err,
+        close_pty_internal,
+        emit_pty_exit,
+        upsert_function_status,
+    )
 }
 
 #[tauri::command]
@@ -1332,7 +1353,15 @@ fn search_boundary_targets(
 }
 
 #[tauri::command]
-fn start_server_tunnel(
+fn stop_caddy_run(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<(), String> {
+    stop_caddy_action(app, session_store, function_store)
+}
+
+pub(crate) fn start_server_tunnel_action(
     server_id: String,
     cols: u16,
     rows: u16,
@@ -1364,7 +1393,27 @@ fn start_server_tunnel(
 }
 
 #[tauri::command]
-fn stop_server_tunnel(
+fn start_server_tunnel(
+    server_id: String,
+    cols: u16,
+    rows: u16,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<StartFunctionResult, String> {
+    start_server_tunnel_action(
+        server_id,
+        cols,
+        rows,
+        app,
+        session_store,
+        function_store,
+        browser_store,
+    )
+}
+
+pub(crate) fn stop_server_tunnel_action(
     server_id: String,
     app: AppHandle,
     session_store: State<'_, SessionStore>,
@@ -1386,7 +1435,17 @@ fn stop_server_tunnel(
 }
 
 #[tauri::command]
-fn start_server_ssh(
+fn stop_server_tunnel(
+    server_id: String,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<(), String> {
+    stop_server_tunnel_action(server_id, app, session_store, function_store, browser_store)
+}
+
+pub(crate) fn start_server_ssh_action(
     server_id: String,
     cols: u16,
     rows: u16,
@@ -1411,7 +1470,18 @@ fn start_server_ssh(
 }
 
 #[tauri::command]
-fn stop_server_ssh(
+fn start_server_ssh(
+    server_id: String,
+    cols: u16,
+    rows: u16,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<StartFunctionResult, String> {
+    start_server_ssh_action(server_id, cols, rows, app, session_store, function_store)
+}
+
+pub(crate) fn stop_server_ssh_action(
     server_id: String,
     app: AppHandle,
     session_store: State<'_, SessionStore>,
@@ -1647,7 +1717,16 @@ fn run_boundary_oidc_automation(
 }
 
 #[tauri::command]
-fn start_boundary_auth(
+fn stop_server_ssh(
+    server_id: String,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<(), String> {
+    stop_server_ssh_action(server_id, app, session_store, function_store)
+}
+
+pub(crate) fn start_boundary_auth_action(
     cols: u16,
     rows: u16,
     app: AppHandle,
@@ -1725,7 +1804,18 @@ fn start_boundary_auth(
 }
 
 #[tauri::command]
-fn stop_boundary_auth(
+fn start_boundary_auth(
+    cols: u16,
+    rows: u16,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+    automation_store: State<'_, BoundaryAutomationStore>,
+) -> Result<StartFunctionResult, String> {
+    start_boundary_auth_action(cols, rows, app, session_store, function_store, automation_store)
+}
+
+pub(crate) fn stop_boundary_auth_action(
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
@@ -1746,6 +1836,74 @@ fn stop_boundary_auth(
     )
 }
 
+#[tauri::command]
+fn stop_boundary_auth(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+    automation_store: State<'_, BoundaryAutomationStore>,
+) -> Result<(), String> {
+    stop_boundary_auth_action(app, session_store, function_store, automation_store)
+}
+
+#[tauri::command]
+fn mcp_get_runtime_status(mcp_state: State<'_, McpRuntimeState>) -> Result<McpRuntimeStatus, String> {
+    mcp_runtime_status(&mcp_state)
+}
+
+#[tauri::command]
+fn mcp_sync_runtime(app: AppHandle, mcp_state: State<'_, McpRuntimeState>) -> Result<McpRuntimeStatus, String> {
+    let settings = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+    sync_mcp_runtime_from_settings(&app, &mcp_state, &settings, now_ms)
+}
+
+#[tauri::command]
+fn mcp_stop_runtime(mcp_state: State<'_, McpRuntimeState>) -> Result<McpRuntimeStatus, String> {
+    stop_mcp_runtime(&mcp_state)
+}
+
+#[tauri::command]
+fn mcp_list_tools_command() -> Result<Vec<McpToolDescriptor>, String> {
+    Ok(list_mcp_tools())
+}
+
+#[tauri::command]
+fn mcp_list_resources_command() -> Result<Vec<McpResourceDescriptor>, String> {
+    Ok(list_mcp_resources())
+}
+
+#[tauri::command]
+fn mcp_call_tool_command(
+    app: AppHandle,
+    tool_name: String,
+    args: Value,
+) -> Result<McpToolCallEnvelope, String> {
+    call_mcp_tool(
+        &app,
+        &tool_name,
+        args,
+        now_ms,
+        OPENVPN_FUNCTION_ID,
+        BOUNDARY_AUTH_FUNCTION_ID,
+        get_config_paths_internal,
+    )
+}
+
+#[tauri::command]
+fn mcp_read_resource_command(
+    app: AppHandle,
+    uri: String,
+) -> Result<McpToolCallEnvelope, String> {
+    read_mcp_resource(
+        &app,
+        &uri,
+        now_ms,
+        OPENVPN_FUNCTION_ID,
+        BOUNDARY_AUTH_FUNCTION_ID,
+        get_config_paths_internal,
+    )
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
@@ -1753,6 +1911,13 @@ fn main() {
         .manage(OpenVpnAdminStore::default())
         .manage(BoundaryAutomationStore::default())
         .manage(RemoteBrowserStore::default())
+        .manage(McpRuntimeState::default())
+        .setup(|app| {
+            let state = app.state::<McpRuntimeState>();
+            let settings = load_sync_settings_from_disk(app.handle(), SYNC_SETTINGS_FILE_NAME)?;
+            let _ = sync_mcp_runtime_from_settings(app.handle(), &state, &settings, now_ms);
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             open_pty,
             write_pty,
@@ -1761,6 +1926,13 @@ fn main() {
             list_function_statuses,
             get_app_config,
             get_config_paths,
+            mcp_get_runtime_status,
+            mcp_sync_runtime,
+            mcp_stop_runtime,
+            mcp_list_tools_command,
+            mcp_list_resources_command,
+            mcp_call_tool_command,
+            mcp_read_resource_command,
             get_sync_settings,
             save_sync_settings,
             save_app_config,

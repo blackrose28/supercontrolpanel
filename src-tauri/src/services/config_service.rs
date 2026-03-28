@@ -1,5 +1,7 @@
 use std::{fs, path::PathBuf, process::Command};
 
+use uuid::Uuid;
+
 use keyring::{Entry, Error as KeyringError};
 use portable_pty::CommandBuilder;
 use serde::{Deserialize, Serialize};
@@ -16,7 +18,7 @@ pub const KEYRING_BOUNDARY_OIDC_PASSWORD: &str = "boundary_oidc_password";
 pub const KEYRING_BOUNDARY_OIDC_OTP_SECRET: &str = "boundary_oidc_otp_secret";
 pub const KEYRING_BOUNDARY_APP_TOKEN: &str = "boundary_app_token";
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSettings {
     #[serde(default)]
@@ -29,6 +31,36 @@ pub struct SyncSettings {
     pub boundary_cli_path: String,
     #[serde(default)]
     pub caddy_folder: String,
+    #[serde(default)]
+    pub mcp_enabled: bool,
+    #[serde(default = "default_mcp_bind_address")]
+    pub mcp_bind_address: String,
+    #[serde(default = "default_mcp_port")]
+    pub mcp_port: u16,
+    #[serde(default = "generate_mcp_auth_token")]
+    pub mcp_auth_token: String,
+    #[serde(default = "default_mcp_allowed_tool_categories")]
+    pub mcp_allowed_tool_categories: Vec<String>,
+    #[serde(default = "default_mcp_sensitive_action_policy")]
+    pub mcp_sensitive_action_policy: String,
+}
+
+impl Default for SyncSettings {
+    fn default() -> Self {
+        Self {
+            repo_root: String::new(),
+            openvpn_executable_path: String::new(),
+            openvpn_ovpn_path: String::new(),
+            boundary_cli_path: String::new(),
+            caddy_folder: String::new(),
+            mcp_enabled: false,
+            mcp_bind_address: default_mcp_bind_address(),
+            mcp_port: default_mcp_port(),
+            mcp_auth_token: generate_mcp_auth_token(),
+            mcp_allowed_tool_categories: default_mcp_allowed_tool_categories(),
+            mcp_sensitive_action_policy: default_mcp_sensitive_action_policy(),
+        }
+    }
 }
 
 #[derive(Deserialize, Default)]
@@ -44,12 +76,47 @@ pub struct SyncSettingsPatch {
     pub boundary_cli_path: Option<String>,
     #[serde(default)]
     pub caddy_folder: Option<String>,
+    #[serde(default)]
+    pub mcp_enabled: Option<bool>,
+    #[serde(default)]
+    pub mcp_bind_address: Option<String>,
+    #[serde(default)]
+    pub mcp_port: Option<u16>,
+    #[serde(default)]
+    pub mcp_auth_token: Option<String>,
+    #[serde(default)]
+    pub mcp_allowed_tool_categories: Option<Vec<String>>,
+    #[serde(default)]
+    pub mcp_sensitive_action_policy: Option<String>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigPaths {
     pub app_config_path: String,
+}
+
+pub fn default_mcp_bind_address() -> String {
+    "127.0.0.1".to_string()
+}
+
+pub fn default_mcp_port() -> u16 {
+    46739
+}
+
+pub fn default_mcp_allowed_tool_categories() -> Vec<String> {
+    vec![
+        "read-only".to_string(),
+        "runtime-control".to_string(),
+    ]
+}
+
+pub fn default_mcp_sensitive_action_policy() -> String {
+    "require-ui-approval".to_string()
+}
+
+pub fn generate_mcp_auth_token() -> String {
+    Uuid::new_v4().simple().to_string()
 }
 
 pub fn default_app_config() -> AppConfig {
@@ -109,7 +176,24 @@ pub fn load_sync_settings_from_disk(
     }
     let raw =
         fs::read_to_string(&path).map_err(|e| format!("failed to read sync settings: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("invalid sync settings format: {e}"))
+    let mut settings: SyncSettings =
+        serde_json::from_str(&raw).map_err(|e| format!("invalid sync settings format: {e}"))?;
+    if settings.mcp_auth_token.trim().is_empty() {
+        settings.mcp_auth_token = generate_mcp_auth_token();
+    }
+    if settings.mcp_bind_address.trim().is_empty() {
+        settings.mcp_bind_address = default_mcp_bind_address();
+    }
+    if settings.mcp_port == 0 {
+        settings.mcp_port = default_mcp_port();
+    }
+    if settings.mcp_allowed_tool_categories.is_empty() {
+        settings.mcp_allowed_tool_categories = default_mcp_allowed_tool_categories();
+    }
+    if settings.mcp_sensitive_action_policy.trim().is_empty() {
+        settings.mcp_sensitive_action_policy = default_mcp_sensitive_action_policy();
+    }
+    Ok(settings)
 }
 
 pub fn save_sync_settings_to_disk(

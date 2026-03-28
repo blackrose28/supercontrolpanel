@@ -627,6 +627,81 @@
                         </div>
                     </div>
 
+
+
+                    <h3>MCP Server</h3>
+                    <p class="hint">
+                        Expose the running app to local AI agents over a
+                        localhost MCP endpoint. Disabled by default.
+                    </p>
+                    <div class="form-grid">
+                        <div class="form-grid-span">
+                            <label for="cfg-mcp-enabled" class="openvpn-terminate-check">
+                                <input id="cfg-mcp-enabled" type="checkbox" />
+                                <span><strong>Enable MCP server</strong></span>
+                            </label>
+                        </div>
+                        <label for="cfg-mcp-bind-address">Bind address</label>
+                        <input
+                            id="cfg-mcp-bind-address"
+                            type="text"
+                            placeholder="127.0.0.1"
+                            autocomplete="off"
+                        />
+                        <label for="cfg-mcp-port">Port</label>
+                        <input
+                            id="cfg-mcp-port"
+                            type="number"
+                            min="1"
+                            max="65535"
+                            placeholder="46739"
+                        />
+                        <label for="cfg-mcp-auth-token">Auth token</label>
+                        <div class="inline-input-actions single-action">
+                            <input
+                                id="cfg-mcp-auth-token"
+                                type="text"
+                                class="masked-secret"
+                                autocomplete="off"
+                                spellcheck="false"
+                            />
+                            <button id="cfg-mcp-token-regenerate" type="button">
+                                Regenerate
+                            </button>
+                        </div>
+                        <label for="cfg-mcp-allowed-read-only">Allowed tool categories</label>
+                        <div class="form-grid-span">
+                            <label for="cfg-mcp-allowed-read-only" class="openvpn-terminate-check">
+                                <input id="cfg-mcp-allowed-read-only" type="checkbox" />
+                                <span>Read-only</span>
+                            </label>
+                            <label for="cfg-mcp-allowed-runtime-control" class="openvpn-terminate-check">
+                                <input id="cfg-mcp-allowed-runtime-control" type="checkbox" />
+                                <span>Runtime control</span>
+                            </label>
+                            <label for="cfg-mcp-allowed-file-transfer" class="openvpn-terminate-check">
+                                <input id="cfg-mcp-allowed-file-transfer" type="checkbox" />
+                                <span>File transfer</span>
+                            </label>
+                            <label for="cfg-mcp-allowed-config-mutation" class="openvpn-terminate-check">
+                                <input id="cfg-mcp-allowed-config-mutation" type="checkbox" />
+                                <span>Config mutation</span>
+                            </label>
+                        </div>
+                        <label for="cfg-mcp-sensitive-policy">Sensitive action policy</label>
+                        <select id="cfg-mcp-sensitive-policy">
+                            <option value="require-ui-approval">Require UI approval</option>
+                            <option value="allow-with-token">Allow with token</option>
+                        </select>
+                        <div class="form-grid-span hint">
+                            MCP status: <span id="cfg-mcp-status">Not configured yet.</span>
+                        </div>
+                        <div class="form-grid-span hint">
+                            MCP client snippet:
+                            <code id="cfg-mcp-snippet">(load Config first)</code>
+                        </div>
+                    </div>
+
                     <h3>Caddy</h3>
                     <div class="form-grid">
                         <label for="cfg-caddy-folder">Caddy folder</label>

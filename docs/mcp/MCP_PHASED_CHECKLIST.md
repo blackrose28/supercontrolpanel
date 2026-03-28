@@ -3,7 +3,7 @@
 ## Phase 0 — Design
 
 - [x] Finalize MCP transport choice
-- [ ] Finalize auth/token approach
+- [x] Finalize auth/token approach
 - [x] Finalize v1 tool list
 - [x] Classify sensitive tools
 - [x] Decide whether raw PTY tools are deferred to v2
@@ -12,61 +12,61 @@
 ## Phase 1 — Backend refactor
 
 - [x] Extract shared model types from `src-tauri/src/main.rs` into `src-tauri/src/models/`
-- [ ] Extract function status service from Tauri command handlers
-- [ ] Extract PTY/session service
-- [ ] Extract OpenVPN service
-- [ ] Extract Boundary service
-- [ ] Extract server management service
-- [ ] Extract remote browser and SCP service
-- [ ] Extract config and sync service
-- [ ] Extract Caddy service
-- [ ] Keep existing Tauri commands as thin adapters
+- [x] Extract function status service from Tauri command handlers
+- [x] Extract PTY/session service
+- [x] Extract OpenVPN service
+- [x] Extract Boundary service
+- [x] Extract server management service
+- [x] Extract remote browser and SCP service
+- [x] Extract config and sync service
+- [x] Extract Caddy service
+- [x] Keep existing Tauri commands as thin adapters
 
 ## Phase 2 — Config and UI
 
-- [ ] Add MCP server settings to device-local config
-- [ ] Add Config page MCP section
-- [ ] Add enable/disable toggle
-- [ ] Add bind address and port fields
-- [ ] Add auth token field and regenerate action
-- [ ] Add allowed tool category controls
-- [ ] Add sensitive-action confirmation setting
-- [ ] Add MCP running/error status display
-- [ ] Add copyable client config snippet
+- [x] Add MCP server settings to device-local config
+- [x] Add Config page MCP section
+- [x] Add enable/disable toggle
+- [x] Add bind address and port fields
+- [x] Add auth token field and regenerate action
+- [x] Add allowed tool category controls
+- [x] Add sensitive-action confirmation setting
+- [x] Add MCP running/error status display
+- [x] Add copyable client config snippet
 
 ## Phase 3 — MCP server skeleton
 
-- [ ] Add MCP module(s) to Rust backend
-- [ ] Implement server startup and shutdown lifecycle
-- [ ] Implement tools listing
-- [ ] Implement tool dispatch
-- [ ] Implement resources listing
-- [ ] Implement resource reads
-- [ ] Wire MCP handlers to shared services
+- [x] Add MCP module(s) to Rust backend
+- [x] Implement server startup and shutdown lifecycle
+- [x] Implement tools listing
+- [x] Implement tool dispatch
+- [x] Implement resources listing
+- [x] Implement resource reads
+- [x] Wire MCP handlers to shared services
 
 ## Phase 4 — Read-only tool coverage
 
-- [ ] `app_get_overview`
-- [ ] `function_status_list`
-- [ ] `function_status_get`
-- [ ] `openvpn_get_status`
-- [ ] `boundary_get_status`
-- [ ] `servers_list`
-- [ ] `server_get`
-- [ ] `config_get_paths`
+- [x] `app_get_overview`
+- [x] `function_status_list`
+- [x] `function_status_get`
+- [x] `openvpn_get_status`
+- [x] `boundary_get_status`
+- [x] `servers_list`
+- [x] `server_get`
+- [x] `config_get_paths`
 
 ## Phase 5 — Runtime control coverage
 
-- [ ] `openvpn_start`
-- [ ] `openvpn_stop`
-- [ ] `boundary_auth_start`
-- [ ] `boundary_auth_stop`
-- [ ] `server_tunnel_start`
-- [ ] `server_tunnel_stop`
-- [ ] `server_ssh_start`
-- [ ] `server_ssh_stop`
-- [ ] `caddy_start`
-- [ ] `caddy_stop`
+- [x] `openvpn_start`
+- [x] `openvpn_stop`
+- [x] `boundary_auth_start`
+- [x] `boundary_auth_stop`
+- [x] `server_tunnel_start`
+- [x] `server_tunnel_stop`
+- [x] `server_ssh_start`
+- [x] `server_ssh_stop`
+- [x] `caddy_start`
+- [x] `caddy_stop`
 
 ## Phase 6 — Mutation tools
 
@@ -102,7 +102,7 @@
 ## Phase 9 — Hardening and polish
 
 - [ ] Enforce localhost-only default bind
-- [ ] Enforce token auth
+- [x] Enforce token auth
 - [ ] Redact secrets in all config and status outputs
 - [ ] Add approval policy for destructive tools
 - [ ] Add audit logging for MCP calls
@@ -125,3 +125,18 @@
 - MCP planning docs have been created under `docs/mcp/`
 - Old SCP planning/checklist docs were moved from the repo root into `docs/scp/`
 - PR1 model extraction has been implemented and verified with `cargo check`
+
+
+## Progress notes update
+
+- Phase 0 auth decision: use a device-local bearer token stored in `sync-local.json`
+- MCP config fields now exist in device-local sync settings so the UI/server bootstrap can build on a stable contract
+- Backend refactor items are now fully complete for Phase 1
+
+
+## Skeleton status note
+
+- Phase 3 now includes a minimal localhost HTTP listener bound from the desktop app
+- MCP runtime state, tool/resource catalogs, dispatch/read plumbing, and token-gated HTTP routes now exist in Rust
+- Current runtime reports `implementationStage = http-minimal`; full MCP-spec transport polish is still pending
+- Phase 5 runtime-control tools now dispatch through the same internal action paths used by the Tauri commands

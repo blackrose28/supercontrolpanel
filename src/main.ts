@@ -70,12 +70,29 @@ type AppConfig = {
   };
 };
 
+type McpRuntimeStatus = {
+  enabled: boolean;
+  active: boolean;
+  transport: string;
+  bindAddress: string;
+  port: number;
+  implementationStage: string;
+  lastError?: string | null;
+  lastStartedAtMs?: number | null;
+};
+
 type SyncSettings = {
   repoRoot: string;
   openvpnExecutablePath?: string;
   openvpnOvpnPath?: string;
   boundaryCliPath?: string;
   caddyFolder?: string;
+  mcpEnabled?: boolean;
+  mcpBindAddress?: string;
+  mcpPort?: number;
+  mcpAuthToken?: string;
+  mcpAllowedToolCategories?: string[];
+  mcpSensitiveActionPolicy?: string;
 };
 
 type ServerService = { name: string; port: number };
@@ -270,6 +287,18 @@ const cfgGitPushBtn = mustElement<HTMLButtonElement>("#cfg-git-push");
 const cfgGitStatus = mustElement<HTMLElement>("#cfg-git-status");
 const cfgCaddyFolder = mustElement<HTMLInputElement>("#cfg-caddy-folder");
 const cfgCaddyBrowseBtn = mustElement<HTMLButtonElement>("#cfg-caddy-browse");
+const cfgMcpEnabled = mustElement<HTMLInputElement>("#cfg-mcp-enabled");
+const cfgMcpBindAddress = mustElement<HTMLInputElement>("#cfg-mcp-bind-address");
+const cfgMcpPort = mustElement<HTMLInputElement>("#cfg-mcp-port");
+const cfgMcpAuthToken = mustElement<HTMLInputElement>("#cfg-mcp-auth-token");
+const cfgMcpTokenRegenerateBtn = mustElement<HTMLButtonElement>("#cfg-mcp-token-regenerate");
+const cfgMcpAllowedReadOnly = mustElement<HTMLInputElement>("#cfg-mcp-allowed-read-only");
+const cfgMcpAllowedRuntimeControl = mustElement<HTMLInputElement>("#cfg-mcp-allowed-runtime-control");
+const cfgMcpAllowedFileTransfer = mustElement<HTMLInputElement>("#cfg-mcp-allowed-file-transfer");
+const cfgMcpAllowedConfigMutation = mustElement<HTMLInputElement>("#cfg-mcp-allowed-config-mutation");
+const cfgMcpSensitivePolicy = mustElement<HTMLSelectElement>("#cfg-mcp-sensitive-policy");
+const cfgMcpStatus = mustElement<HTMLElement>("#cfg-mcp-status");
+const cfgMcpSnippet = mustElement<HTMLElement>("#cfg-mcp-snippet");
 
 const serversTbody = mustElement<HTMLElement>("#servers-tbody");
 const serversStatus = mustElement<HTMLElement>("#servers-status");
@@ -895,6 +924,60 @@ function renderConfigPreview() {
   openvpnConfigPreview.textContent = `Executable: ${executable} | OVPN: ${ovpn} | Username: ${username} | Password: ${passwordLabel} | OTP secret: ${otpLabel} | ${link}`;
 }
 
+function generateLocalMcpToken() {
+  return `${crypto.randomUUID().replace(/-/g, "")}`;
+}
+
+function readMcpAllowedToolCategories(): string[] {
+  const categories: string[] = [];
+  if (cfgMcpAllowedReadOnly.checked) categories.push("read-only");
+  if (cfgMcpAllowedRuntimeControl.checked) categories.push("runtime-control");
+  if (cfgMcpAllowedFileTransfer.checked) categories.push("file-transfer");
+  if (cfgMcpAllowedConfigMutation.checked) categories.push("config-mutation");
+  return categories;
+}
+
+async function refreshMcpRuntimeStatus() {
+  try {
+    const runtime = await invoke<McpRuntimeStatus>("mcp_get_runtime_status");
+    if (runtime.lastError) {
+      cfgMcpStatus.textContent = `Error: ${runtime.lastError}`;
+      return;
+    }
+    cfgMcpStatus.textContent = runtime.active
+      ? `Running ${runtime.transport} on ${runtime.bindAddress}:${runtime.port} (${runtime.implementationStage})`
+      : runtime.enabled
+        ? `Enabled but not active (${runtime.implementationStage})`
+        : "Disabled in config.";
+  } catch (e) {
+    cfgMcpStatus.textContent = `Status unavailable: ${String(e)}`;
+  }
+}
+
+function renderMcpSnippet() {
+  const enabled = cfgMcpEnabled.checked;
+  const bindAddress = cfgMcpBindAddress.value.trim() || "127.0.0.1";
+  const port = Number(cfgMcpPort.value) || 46739;
+  const token = cfgMcpAuthToken.value.trim();
+  const categories = readMcpAllowedToolCategories();
+  cfgMcpSnippet.textContent = JSON.stringify(
+    {
+      transport: "http",
+      url: `http://${bindAddress}:${port}`,
+      bearerToken: token || "(set token)",
+    },
+    null,
+    2,
+  );
+}
+
+async function saveSyncSettingsPatch(next: Partial<SyncSettings>) {
+  syncSettings = { ...(syncSettings ?? { repoRoot: "" }), ...next };
+  await invoke("save_sync_settings", { settings: next });
+  renderMcpSnippet();
+  await refreshMcpRuntimeStatus();
+}
+
 function renderConfigForm() {
   if (!appConfig) {
     return;
@@ -938,6 +1021,21 @@ function renderConfigForm() {
   syncBoundaryPasswordFieldsVisibility();
   cfgSyncRepoRoot.value = syncSettings?.repoRoot ?? "";
   cfgCaddyFolder.value = syncSettings?.caddyFolder ?? "";
+  cfgMcpEnabled.checked = syncSettings?.mcpEnabled === true;
+  cfgMcpBindAddress.value = syncSettings?.mcpBindAddress ?? "127.0.0.1";
+  cfgMcpPort.value = String(syncSettings?.mcpPort ?? 46739);
+  cfgMcpAuthToken.value = syncSettings?.mcpAuthToken ?? "";
+  const allowed = syncSettings?.mcpAllowedToolCategories ?? ["read-only", "runtime-control"];
+  cfgMcpAllowedReadOnly.checked = allowed.includes("read-only");
+  cfgMcpAllowedRuntimeControl.checked = allowed.includes("runtime-control");
+  cfgMcpAllowedFileTransfer.checked = allowed.includes("file-transfer");
+  cfgMcpAllowedConfigMutation.checked = allowed.includes("config-mutation");
+  cfgMcpSensitivePolicy.value =
+    syncSettings?.mcpSensitiveActionPolicy === "allow-with-token"
+      ? "allow-with-token"
+      : "require-ui-approval";
+  renderMcpSnippet();
+  void refreshMcpRuntimeStatus();
   renderConfigPreview();
 }
 
@@ -1049,10 +1147,25 @@ async function loadSyncSettings() {
   try {
     syncSettings = await invoke<SyncSettings>("get_sync_settings");
   } catch {
-    syncSettings = { repoRoot: "" };
+    syncSettings = { repoRoot: "", mcpBindAddress: "127.0.0.1", mcpPort: 46739 };
   }
   cfgSyncRepoRoot.value = syncSettings.repoRoot ?? "";
   cfgCaddyFolder.value = syncSettings.caddyFolder ?? "";
+  cfgMcpEnabled.checked = syncSettings.mcpEnabled === true;
+  cfgMcpBindAddress.value = syncSettings.mcpBindAddress ?? "127.0.0.1";
+  cfgMcpPort.value = String(syncSettings.mcpPort ?? 46739);
+  cfgMcpAuthToken.value = syncSettings.mcpAuthToken ?? "";
+  const allowed = syncSettings.mcpAllowedToolCategories ?? ["read-only", "runtime-control"];
+  cfgMcpAllowedReadOnly.checked = allowed.includes("read-only");
+  cfgMcpAllowedRuntimeControl.checked = allowed.includes("runtime-control");
+  cfgMcpAllowedFileTransfer.checked = allowed.includes("file-transfer");
+  cfgMcpAllowedConfigMutation.checked = allowed.includes("config-mutation");
+  cfgMcpSensitivePolicy.value =
+    syncSettings.mcpSensitiveActionPolicy === "allow-with-token"
+      ? "allow-with-token"
+      : "require-ui-approval";
+  renderMcpSnippet();
+  await refreshMcpRuntimeStatus();
 }
 
 type ConfigPaths = {
@@ -3453,21 +3566,66 @@ cfgGitPushBtn.addEventListener("click", () => {
 
 cfgSyncRepoRoot.addEventListener("change", () => {
   const repoRoot = cfgSyncRepoRoot.value.trim();
-  syncSettings = { ...(syncSettings ?? { repoRoot: "" }), repoRoot };
-  void invoke("save_sync_settings", { settings: syncSettings }).catch(() => {
+  void saveSyncSettingsPatch({ repoRoot }).catch(() => {
     // Non-fatal; user will see error on actual sync if something is wrong.
   });
 });
 
 cfgCaddyFolder.addEventListener("change", () => {
   const caddyFolder = cfgCaddyFolder.value.trim();
-  const repoRoot = cfgSyncRepoRoot.value.trim() || syncSettings?.repoRoot?.trim() || "";
-  syncSettings = {
-    ...(syncSettings ?? { repoRoot }),
-    repoRoot: repoRoot || (syncSettings?.repoRoot ?? ""),
-    caddyFolder,
-  };
-  void invoke("save_sync_settings", { settings: syncSettings }).catch(() => {});
+  void saveSyncSettingsPatch({ caddyFolder }).catch(() => {});
+});
+
+cfgMcpEnabled.addEventListener("change", () => {
+  void saveSyncSettingsPatch({ mcpEnabled: cfgMcpEnabled.checked }).catch(() => {});
+});
+
+cfgMcpBindAddress.addEventListener("change", () => {
+  const mcpBindAddress = cfgMcpBindAddress.value.trim() || "127.0.0.1";
+  void saveSyncSettingsPatch({ mcpBindAddress }).catch(() => {});
+});
+
+cfgMcpPort.addEventListener("change", () => {
+  const mcpPort = Number(cfgMcpPort.value);
+  if (!Number.isInteger(mcpPort) || mcpPort < 1 || mcpPort > 65535) {
+    cfgStatus.textContent = "MCP port must be 1-65535.";
+    return;
+  }
+  void saveSyncSettingsPatch({ mcpPort }).catch(() => {});
+});
+
+cfgMcpAuthToken.addEventListener("change", () => {
+  const mcpAuthToken = cfgMcpAuthToken.value.trim();
+  if (!mcpAuthToken) {
+    cfgStatus.textContent = "MCP auth token cannot be empty.";
+    return;
+  }
+  void saveSyncSettingsPatch({ mcpAuthToken }).catch(() => {});
+});
+
+cfgMcpTokenRegenerateBtn.addEventListener("click", () => {
+  const mcpAuthToken = generateLocalMcpToken();
+  cfgMcpAuthToken.value = mcpAuthToken;
+  void saveSyncSettingsPatch({ mcpAuthToken }).catch(() => {});
+});
+
+for (const checkbox of [
+  cfgMcpAllowedReadOnly,
+  cfgMcpAllowedRuntimeControl,
+  cfgMcpAllowedFileTransfer,
+  cfgMcpAllowedConfigMutation,
+]) {
+  checkbox.addEventListener("change", () => {
+    void saveSyncSettingsPatch({
+      mcpAllowedToolCategories: readMcpAllowedToolCategories(),
+    }).catch(() => {});
+  });
+}
+
+cfgMcpSensitivePolicy.addEventListener("change", () => {
+  void saveSyncSettingsPatch({
+    mcpSensitiveActionPolicy: cfgMcpSensitivePolicy.value,
+  }).catch(() => {});
 });
 
 void attachListeners();

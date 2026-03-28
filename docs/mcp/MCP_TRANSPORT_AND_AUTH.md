@@ -76,3 +76,61 @@ If a future need appears, additional local transports can be evaluated later, bu
 - one running app instance
 - one local MCP endpoint
 - optional helper CLI layered on top of MCP
+
+
+## Concrete v1 auth decision
+
+Use a single device-local bearer token stored in `sync-local.json`.
+
+### v1 settings contract
+
+- `mcpEnabled`
+- `mcpBindAddress`
+- `mcpPort`
+- `mcpAuthToken`
+- `mcpAllowedToolCategories`
+- `mcpSensitiveActionPolicy`
+
+### Defaults
+
+- bind address: `127.0.0.1`
+- port: `46739`
+- enabled: `false`
+- allowed categories: `read-only`, `runtime-control`
+- sensitive action policy: `require-ui-approval`
+
+### Token details
+
+- token is generated locally
+- token is device-local and not part of synced config
+- legacy `sync-local.json` files missing the token will get one generated on load
+- UI should later expose regenerate/copy actions without changing the storage contract
+
+
+## Current implementation status
+
+The current repo now includes a minimal in-process localhost HTTP listener.
+
+### Current local HTTP endpoints
+
+- `GET /health`
+- `GET /mcp/status`
+- `GET /mcp/tools`
+- `GET /mcp/resources`
+- `POST /mcp/tools/call`
+- `POST /mcp/resources/read`
+
+### Current auth behavior
+
+- every HTTP request requires `Authorization: Bearer <mcpAuthToken>`
+- token comes from device-local `sync-local.json` settings
+- changing MCP settings through the Config page re-syncs the live runtime
+
+### Current tool coverage
+
+- read-only tools: app overview, function status, OpenVPN status, Boundary status, server list/detail, config paths
+- runtime-control tools: OpenVPN start/stop, Boundary auth start/stop, server tunnel start/stop, server SSH start/stop, Caddy start/stop
+
+### Important note
+
+This is a **minimal localhost HTTP transport** for the current implementation phase. It is intentionally simpler than a full spec-complete MCP transport and should be treated as the repo's current working transport layer, not the final polish state.
