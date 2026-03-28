@@ -33,6 +33,7 @@ pub struct StartFunctionResult {
     pub session_id: String,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenVpnLogPayload {

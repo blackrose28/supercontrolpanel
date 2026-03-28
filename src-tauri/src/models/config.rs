@@ -121,6 +121,7 @@ pub struct OpenVpnConfig {
     pub terminate_open_vpn_when_helper_exits: bool,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenVpnLaunchConfig {
@@ -132,6 +133,7 @@ pub struct OpenVpnLaunchConfig {
     pub terminate_open_vpn_when_helper_exits: bool,
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HelperStatusFile {

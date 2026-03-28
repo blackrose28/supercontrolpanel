@@ -180,6 +180,20 @@ Move PTY lifecycle code behind a service boundary.
 
 ## Slice 6 — Extract feature services one by one
 
+### Status so far
+
+- [x] OpenVPN service bootstrap has started and several runtime helpers are already extracted
+- [x] Boundary service bootstrap is complete
+- [x] Boundary runtime start/stop orchestration has been significantly cleaned up
+- [x] Boundary OIDC automation flow is now extracted behind the Boundary service
+- [x] server / remote browser / SCP orchestration has been reassessed
+- [x] shared server/SCP helpers have started moving into `server_service`
+- [x] server runtime start/stop and RDP orchestration has moved behind `server_service`
+- [x] remote browser command handlers now route through `remote_browser_service`
+- [x] remove duplicated remote browser helper bodies still left in `main.rs`
+- [x] SCP command/lifecycle extraction has moved behind `scp_service`
+
+
 After the groundwork above, extract feature logic in this order:
 
 ### 6A. OpenVPN service
@@ -251,8 +265,8 @@ Create `stores/` modules and move store structs only.
 
 Success condition:
 
-- app compiles
-- PTY/session/function behavior unchanged
+- [x] app compiles
+- [x] PTY/session/function behavior unchanged
 
 ## Step C
 
@@ -344,3 +358,16 @@ After each step:
 - `docs/mcp/MCP_IMPLEMENTATION_PLAN.md`
 - `docs/mcp/MCP_TOOL_SCHEMAS.md`
 - `docs/mcp/MCP_PR1_RUST_SCAFFOLDING.md`
+
+
+### Current readiness note
+
+At this point, the major pre-MCP service boundaries are in place:
+
+- `boundary_service`
+- `openvpn_service`
+- `server_service`
+- `remote_browser_service`
+- `scp_service`
+
+What remains is mostly cleanup-level work rather than large structural extraction.

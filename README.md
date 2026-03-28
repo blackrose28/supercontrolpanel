@@ -113,6 +113,11 @@ Detailed design docs live under `docs/mcp/`:
 - `docs/mcp/MCP_FIRST_REFACTOR_SLICE.md`
 - `docs/mcp/MCP_PR1_RUST_SCAFFOLDING.md`
 
+Pre-MCP refactor planning docs live under `docs/refactor/`:
+
+- `docs/refactor/PRE_MCP_REFACTOR_CHECKLIST.md`
+- `docs/refactor/BOUNDARY_SERVICE_EXTRACTION_PLAN.md`
+
 ## Feature details
 
 ### OpenVPN function
