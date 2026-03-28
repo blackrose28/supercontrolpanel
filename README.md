@@ -1,12 +1,12 @@
-# Super Control Panel (MVP)
+# Super Control Panel
 
-Minimal cross-platform desktop prototype using:
+Cross-platform desktop app using:
 
 - Tauri (desktop shell)
 - xterm.js (terminal UI)
 - Rust PTY backend (`portable-pty`)
 
-This prototype provides a basic function-runner shell where each feature function can own and control a PTY session.
+Super Control Panel is a PTY-driven desktop control panel where each feature can own and control its own runtime session.
 
 ## What is implemented
 
