@@ -4,6 +4,26 @@
 
 `supercontrolpanelhelper` is a planned command-line helper that talks to the already-running SuperControlPanel app through its local MCP endpoint.
 
+## Current implementation status
+
+The repo now includes a first working helper binary at:
+
+- `src-tauri/src/bin/supercontrolpanelhelper.rs`
+
+Current behavior:
+
+- talks to the app's local MCP HTTP endpoint
+- reads endpoint/token from CLI flags, environment variables, or discovered `sync-local.json`
+- supports `--json`
+- supports meaningful exit codes
+- covers core status/runtime/config commands
+
+Current config/env discovery order:
+
+1. `--endpoint` / `--token`
+2. `SUPERCONTROLPANEL_MCP_ENDPOINT` / `SUPERCONTROLPANEL_MCP_TOKEN`
+3. discovered `sync-local.json`
+
 The helper exists for:
 
 - scripting

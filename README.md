@@ -133,6 +133,11 @@ Detailed design docs live under `docs/mcp/`:
 - `docs/mcp/MCP_FIRST_REFACTOR_SLICE.md`
 - `docs/mcp/MCP_PR1_RUST_SCAFFOLDING.md`
 
+Helper CLI note:
+
+- first working helper binary lives at `src-tauri/src/bin/supercontrolpanelhelper.rs`
+- it talks to the app's local MCP HTTP endpoint and can discover endpoint/token from `sync-local.json`
+
 Pre-MCP refactor planning docs live under `docs/refactor/`:
 
 - `docs/refactor/PRE_MCP_REFACTOR_CHECKLIST.md`

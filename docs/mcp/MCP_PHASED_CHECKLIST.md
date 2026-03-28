@@ -113,11 +113,11 @@
 ## Phase 10 — `supercontrolpanelhelper` CLI over MCP
 
 - [x] Define helper command tree and argument model
-- [ ] Implement helper-to-MCP connection logic
-- [ ] Reuse MCP auth/token configuration
+- [x] Implement helper-to-MCP connection logic
+- [x] Reuse MCP auth/token configuration
 - [x] Add shell-friendly exit codes
 - [x] Add `--json` output mode
-- [ ] Add helper commands for core status and runtime controls
+- [x] Add helper commands for core status and runtime controls
 - [x] Document helper usage in docs
 
 ## Progress notes
@@ -145,3 +145,4 @@
 - Phase 8 now exposes config sync pull/push and git pull/push actions for the configured repo root
 - Phase 9 hardening now enforces localhost-only bind addresses, redacts config/token secrets in MCP outputs, blocks sensitive tools unless the policy is set to `allow-with-token`, logs MCP HTTP calls to stderr, and returns standardized JSON error envelopes from the HTTP transport
 - README and AGENTS now document the current minimal HTTP MCP surface and hardening behavior
+- Phase 10 now includes a first working `src-tauri/src/bin/supercontrolpanelhelper.rs` binary that discovers MCP settings from `sync-local.json` (or CLI/env overrides), calls the local MCP HTTP endpoint, supports `--json`, and covers core status/runtime/config commands
