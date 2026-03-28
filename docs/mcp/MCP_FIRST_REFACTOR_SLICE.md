@@ -369,5 +369,6 @@ At this point, the major pre-MCP service boundaries are in place:
 - `server_service`
 - `remote_browser_service`
 - `scp_service`
+- `caddy_service`
 
 What remains is mostly cleanup-level work rather than large structural extraction.
