@@ -96,6 +96,23 @@ npm run tauri dev
 npm run tauri build
 ```
 
+## MCP support planning
+
+SuperControlPanel is planned to support acting as an MCP server for AI agents.
+
+Detailed design docs live under `docs/mcp/`:
+
+- `docs/mcp/MCP_IMPLEMENTATION_PLAN.md`
+- `docs/mcp/MCP_TOOL_CATALOG.md`
+- `docs/mcp/MCP_PHASED_CHECKLIST.md`
+- `docs/mcp/MCP_SECURITY_MODEL.md`
+- `docs/mcp/MCP_TRANSPORT_AND_AUTH.md`
+- `docs/mcp/MCP_HELPER_CLI_SPEC.md`
+- `docs/mcp/MCP_TOOL_SCHEMAS.md`
+- `docs/mcp/MCP_RUST_MODULE_PLAN.md`
+- `docs/mcp/MCP_FIRST_REFACTOR_SLICE.md`
+- `docs/mcp/MCP_PR1_RUST_SCAFFOLDING.md`
+
 ## Feature details
 
 ### OpenVPN function

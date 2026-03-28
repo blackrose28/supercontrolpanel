@@ -2,6 +2,8 @@
 
 Guidance for AI agents working in this repository.
 
+Detailed design docs for MCP work live under `docs/mcp/`.
+
 ## Goal
 
 Maintain and extend a PTY-driven function runner: each feature function can launch/control a PTY and report runtime status to the UI.
