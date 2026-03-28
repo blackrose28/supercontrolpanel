@@ -10,8 +10,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
     models::{PtyExitPayload, PtyOutputPayload},
-    services::lock_err,
-    stores::{FunctionStore, PtySession, SessionStore},
+    services::{handle_scp_transfer_output, lock_err, complete_scp_transfer_session},
+    stores::{FunctionStore, PtySession, ScpTransferStore, SessionStore},
 };
 
 pub fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<str>) {
@@ -25,6 +25,9 @@ pub fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<
     );
     let session_state = app.state::<SessionStore>();
     let _ = broadcast_watchers(&session_state, session_id, &data);
+    if let Some(transfer_state) = app.try_state::<ScpTransferStore>() {
+        let _ = handle_scp_transfer_output(&transfer_state, session_id, &data, crate::services::now_ms);
+    }
 }
 
 pub fn passive_pty_command() -> CommandBuilder {
@@ -79,6 +82,15 @@ pub fn broadcast_watchers(store: &SessionStore, id: &str, data: &str) -> Result<
 }
 
 pub fn emit_pty_exit(app: &AppHandle, payload: PtyExitPayload) {
+    if let Some(transfer_state) = app.try_state::<ScpTransferStore>() {
+        let _ = complete_scp_transfer_session(
+            &transfer_state,
+            &payload.id,
+            payload.exit_code,
+            &payload.reason,
+            crate::services::now_ms,
+        );
+    }
     let _ = app.emit("pty-exit", payload);
 }
 
@@ -145,6 +157,14 @@ pub fn open_pty_with_command_builder(
                     );
                     let session_state = output_app.state::<SessionStore>();
                     let _ = broadcast_watchers(&session_state, &output_session_id, &data);
+                    if let Some(transfer_state) = output_app.try_state::<ScpTransferStore>() {
+                        let _ = handle_scp_transfer_output(
+                            &transfer_state,
+                            &output_session_id,
+                            &data,
+                            crate::services::now_ms,
+                        );
+                    }
                 }
                 Err(_) => break,
             }
@@ -200,6 +220,15 @@ pub fn open_pty_with_command_builder(
 
             if removed {
                 emit_pty_exit(&monitor_app, payload.clone());
+                if let Some(transfer_state) = monitor_app.try_state::<ScpTransferStore>() {
+                    let _ = complete_scp_transfer_session(
+                        &transfer_state,
+                        &monitor_session_id,
+                        payload.exit_code,
+                        &payload.reason,
+                        crate::services::now_ms,
+                    );
+                }
                 let function_state = monitor_app.state::<FunctionStore>();
                 let _ = on_session_exit(
                     &monitor_app,

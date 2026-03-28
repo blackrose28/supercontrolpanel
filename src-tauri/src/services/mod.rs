@@ -8,6 +8,7 @@ pub mod pty_service;
 pub mod server_service;
 pub mod remote_browser_service;
 pub mod scp_service;
+pub mod scp_transfer_service;
 
 pub use automation_service::*;
 pub use boundary_service::*;
@@ -28,3 +29,4 @@ pub use server_service::*;
 pub use remote_browser_service::*;
 
 pub use scp_service::*;
+pub use scp_transfer_service::*;

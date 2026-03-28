@@ -249,6 +249,379 @@ Where `result` is a `StartFunctionResult`.
 {
   "stopped": true
 }
+
+## `server_upsert`
+
+### Input
+
+```json
+{
+  "server": {}
+}
+```
+
+Where `server` is a full `Server` object. An empty `id` creates a new server; a non-empty `id` updates an existing server.
+
+### Output `data`
+
+```json
+[]
+```
+
+Where the returned value is the full updated server list.
+
+## `server_delete`
+
+### Input
+
+```json
+{
+  "id": "srv-123"
+}
+```
+
+### Output `data`
+
+```json
+[]
+```
+
+Where the returned value is the full updated server list.
+
+## `config_save`
+
+### Input
+
+```json
+{
+  "config": {}
+}
+```
+
+Where `config` is a full `AppConfig` object.
+
+### Output `data`
+
+```json
+{}
+```
+
+Where the returned value is the saved `AppConfig`.
+
+## `config_save_partial`
+
+### Input
+
+```json
+{
+  "patch": {
+    "boundary": {
+      "addr": "https://boundary.example.com"
+    }
+  }
+}
+```
+
+The patch is merged into the current in-memory `AppConfig` shape before saving.
+
+### Output `data`
+
+```json
+{}
+```
+
+Where the returned value is the saved `AppConfig`.
+
+## `sync_settings_get`
+
+### Input
+
+```json
+{}
+```
+
+### Output `data`
+
+```json
+{}
+```
+
+Where the returned value is the full device-local sync settings object from `sync-local.json`.
+
+## `sync_settings_save_partial`
+
+### Input
+
+```json
+{
+  "patch": {
+    "mcpEnabled": true,
+    "mcpPort": 46739
+  }
+}
+```
+
+The patch follows the same partial-update semantics as the UI/backend `save_sync_settings` command.
+
+### Output `data`
+
+```json
+{}
+```
+
+Where the returned value is the full saved device-local sync settings object.
+
+## `remote_browser_open`
+
+### Input
+
+```json
+{
+  "serverId": "srv-123"
+}
+```
+
+### Output `data`
+
+```json
+{
+  "browserId": "browser-1",
+  "rootPath": "/home/ubuntu"
+}
+```
+
+## `remote_browser_close`
+
+### Input
+
+```json
+{
+  "browserId": "browser-1"
+}
+```
+
+### Output `data`
+
+```json
+{}
+```
+
+## `remote_browser_list_children`
+
+### Input
+
+```json
+{
+  "browserId": "browser-1",
+  "path": "/home/ubuntu"
+}
+```
+
+### Output `data`
+
+```json
+[
+  {
+    "name": "logs",
+    "path": "/home/ubuntu/logs",
+    "kind": "directory"
+  }
+]
+```
+
+## `remote_browser_stat_path`
+
+### Input
+
+```json
+{
+  "browserId": "browser-1",
+  "path": "/home/ubuntu/app.log"
+}
+```
+
+### Output `data`
+
+```json
+{
+  "path": "/home/ubuntu/app.log",
+  "kind": "file",
+  "exists": true
+}
+```
+
+## `remote_browser_create_directory`
+
+### Input
+
+```json
+{
+  "browserId": "browser-1",
+  "path": "/home/ubuntu/new-folder"
+}
+```
+
+### Output `data`
+
+```json
+{}
+```
+
+## `remote_browser_delete_path`
+
+### Input
+
+```json
+{
+  "browserId": "browser-1",
+  "path": "/home/ubuntu/old-folder",
+  "recursive": true
+}
+```
+
+### Output `data`
+
+```json
+{}
+```
+
+## `scp_upload`
+
+### Input
+
+```json
+{
+  "serverId": "srv-123",
+  "localPath": "/tmp/report.txt",
+  "remotePath": "/home/ubuntu/report.txt",
+  "recursive": false
+}
+```
+
+### Output `data`
+
+```json
+{
+  "result": "Upload completed"
+}
+```
+
+## `scp_download`
+
+### Input
+
+```json
+{
+  "serverId": "srv-123",
+  "remotePath": "/home/ubuntu/report.txt",
+  "localPath": "/tmp/report.txt",
+  "recursive": false
+}
+```
+
+### Output `data`
+
+```json
+{
+  "result": "Download completed"
+}
+```
+
+## `scp_start_upload`
+
+### Input
+
+```json
+{
+  "serverId": "srv-123",
+  "localPath": "/tmp/reports",
+  "remotePath": "/home/ubuntu/reports",
+  "recursive": true
+}
+```
+
+### Output `data`
+
+```json
+{
+  "sessionId": "pty-123"
+}
+```
+
+## `scp_start_download`
+
+### Input
+
+```json
+{
+  "serverId": "srv-123",
+  "remotePath": "/home/ubuntu/reports",
+  "localPath": "/tmp/reports",
+  "recursive": true
+}
+```
+
+### Output `data`
+
+```json
+{
+  "sessionId": "pty-123"
+}
+
+## `scp_transfer_list`
+
+### Input
+
+```json
+{}
+```
+
+### Output `data`
+
+```json
+[
+  {
+    "id": "scp-123",
+    "title": "Upload",
+    "detail": "Transferring… 42%",
+    "state": "pending",
+    "createdAtMs": 0,
+    "updatedAtMs": 0,
+    "progressPercent": 42,
+    "source": "/tmp/report.txt",
+    "destination": "/home/ubuntu/report.txt",
+    "sessionId": "pty-123"
+  }
+]
+```
+
+## `scp_transfer_get`
+
+### Input
+
+```json
+{
+  "transferId": "scp-123"
+}
+```
+
+### Output `data`
+
+```json
+{
+  "id": "scp-123",
+  "title": "Upload",
+  "detail": "Transfer finished.",
+  "state": "success",
+  "createdAtMs": 0,
+  "updatedAtMs": 0,
+  "progressPercent": 100,
+  "source": "/tmp/report.txt",
+  "destination": "/home/ubuntu/report.txt",
+  "sessionId": "pty-123"
+}
+```
+```
 ```
 
 ## `boundary_search_targets`
@@ -422,10 +795,7 @@ Where `result` is a `StartFunctionResult`.
 ### Output `data`
 
 ```json
-{
-  "synced": true,
-  "direction": "pull"
-}
+{}
 ```
 
 ## `config_sync_push`
@@ -442,8 +812,42 @@ Where `result` is a `StartFunctionResult`.
 
 ```json
 {
-  "synced": true,
-  "direction": "push"
+}
+```
+
+## `config_git_pull`
+
+### Input
+
+```json
+{
+  "repoRoot": "/path/to/repo"
+}
+```
+
+### Output `data`
+
+```json
+{
+  "result": "Already up to date."
+}
+```
+
+## `config_git_push`
+
+### Input
+
+```json
+{
+  "repoRoot": "/path/to/repo"
+}
+```
+
+### Output `data`
+
+```json
+{
+  "result": "No changes to commit."
 }
 ```
 

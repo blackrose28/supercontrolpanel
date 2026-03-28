@@ -125,12 +125,27 @@ The current repo now includes a minimal in-process localhost HTTP listener.
 - every HTTP request requires `Authorization: Bearer <mcpAuthToken>`
 - token comes from device-local `sync-local.json` settings
 - changing MCP settings through the Config page re-syncs the live runtime
+- non-localhost bind addresses are currently rejected by the backend
+- when sensitive-action policy is `require-ui-approval`, sensitive tool calls are rejected over HTTP until the policy is changed to `allow-with-token`
 
 ### Current tool coverage
 
 - read-only tools: app overview, function status, OpenVPN status, Boundary status, server list/detail, config paths
 - runtime-control tools: OpenVPN start/stop, Boundary auth start/stop, server tunnel start/stop, server SSH start/stop, Caddy start/stop
+- mutation tools: server upsert/delete, full/partial app-config save, device-local sync-settings get/patch
+- remote-browser and SCP tools: open/close/list/stat/mkdir/delete remote browser sessions plus direct and PTY-backed SCP upload/download starts and SCP transfer history lookup
+- config-sync and git tools: sync config pull/push plus git pull/push for the configured repo root
 
 ### Important note
 
 This is a **minimal localhost HTTP transport** for the current implementation phase. It is intentionally simpler than a full spec-complete MCP transport and should be treated as the repo's current working transport layer, not the final polish state.
+
+### Current error behavior
+
+- malformed requests and MCP call failures return a standardized JSON envelope
+- envelope shape:
+  - `ok: false`
+  - `message`
+  - `data: {}`
+  - `warnings: []`
+  - `timestamp`

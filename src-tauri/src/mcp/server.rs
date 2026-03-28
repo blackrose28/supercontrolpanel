@@ -71,6 +71,10 @@ struct SimpleHttpRequest {
     body: Vec<u8>,
 }
 
+fn is_localhost_bind(bind_address: &str) -> bool {
+    matches!(bind_address, "127.0.0.1" | "localhost" | "::1")
+}
+
 pub fn mcp_runtime_status(state: &McpRuntimeState) -> Result<McpRuntimeStatus, String> {
     let snapshot = state
         .snapshot
@@ -125,6 +129,13 @@ pub fn sync_mcp_runtime_from_settings(
     } else {
         settings.mcp_bind_address.trim().to_string()
     };
+    if !is_localhost_bind(&bind_address) {
+        let message = format!(
+            "MCP bind address must stay localhost-only for now: {bind_address}"
+        );
+        set_runtime_error(state, bind_address, settings.mcp_port, "http-minimal", &message);
+        return Err(message);
+    }
     let port = if settings.mcp_port == 0 { 46739 } else { settings.mcp_port };
     let token = settings.mcp_auth_token.trim().to_string();
     if token.is_empty() {
@@ -257,9 +268,12 @@ fn run_http_server_loop(
 }
 
 fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) -> Result<(), String> {
-    let request = read_http_request(stream)?;
+    let request = match read_http_request(stream) {
+        Ok(request) => request,
+        Err(err) => return write_error_envelope(stream, 400, &err, crate::services::now_ms),
+    };
     if !is_authorized(&request, token) {
-        return write_json_response(stream, 401, json!({"ok": false, "message": "Unauthorized"}));
+        return write_error_envelope(stream, 401, "Unauthorized", crate::services::now_ms);
     }
 
     match (request.method.as_str(), request.path.as_str()) {
@@ -277,14 +291,31 @@ fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) 
             write_json_response(stream, 200, payload)
         }
         ("POST", "/mcp/tools/call") => {
-            let body: Value = serde_json::from_slice(&request.body)
-                .map_err(|e| format!("invalid JSON body: {e}"))?;
-            let tool_name = body
-                .get("toolName")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "toolName is required".to_string())?;
+            let body: Value = match serde_json::from_slice(&request.body) {
+                Ok(body) => body,
+                Err(err) => {
+                    return write_error_envelope(
+                        stream,
+                        400,
+                        &format!("invalid JSON body: {err}"),
+                        crate::services::now_ms,
+                    )
+                }
+            };
+            let tool_name = match body.get("toolName").and_then(Value::as_str) {
+                Some(tool_name) => tool_name,
+                None => {
+                    return write_error_envelope(
+                        stream,
+                        400,
+                        "toolName is required",
+                        crate::services::now_ms,
+                    )
+                }
+            };
             let args = body.get("args").cloned().unwrap_or_else(|| json!({}));
-            let envelope = call_mcp_tool(
+            audit_mcp_call("tool.call", tool_name, &args);
+            let envelope = match call_mcp_tool(
                 app,
                 tool_name,
                 args,
@@ -292,29 +323,45 @@ fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) 
                 "openvpn-connect",
                 "boundary-auth",
                 mcp_config_paths,
-            )?;
+            ) {
+                Ok(envelope) => envelope,
+                Err(err) => return write_error_envelope(stream, 400, &err, crate::services::now_ms),
+            };
             let payload = serde_json::to_value(envelope).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
         }
         ("POST", "/mcp/resources/read") => {
-            let body: Value = serde_json::from_slice(&request.body)
-                .map_err(|e| format!("invalid JSON body: {e}"))?;
-            let uri = body
-                .get("uri")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "uri is required".to_string())?;
-            let envelope = read_mcp_resource(
+            let body: Value = match serde_json::from_slice(&request.body) {
+                Ok(body) => body,
+                Err(err) => {
+                    return write_error_envelope(
+                        stream,
+                        400,
+                        &format!("invalid JSON body: {err}"),
+                        crate::services::now_ms,
+                    )
+                }
+            };
+            let uri = match body.get("uri").and_then(Value::as_str) {
+                Some(uri) => uri,
+                None => return write_error_envelope(stream, 400, "uri is required", crate::services::now_ms),
+            };
+            audit_mcp_call("resource.read", uri, &json!({}));
+            let envelope = match read_mcp_resource(
                 app,
                 uri,
                 crate::services::now_ms,
                 "openvpn-connect",
                 "boundary-auth",
                 mcp_config_paths,
-            )?;
+            ) {
+                Ok(envelope) => envelope,
+                Err(err) => return write_error_envelope(stream, 400, &err, crate::services::now_ms),
+            };
             let payload = serde_json::to_value(envelope).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
         }
-        _ => write_json_response(stream, 404, json!({"ok": false, "message": "Not found"})),
+        _ => write_error_envelope(stream, 404, "Not found", crate::services::now_ms),
     }
 }
 
@@ -331,6 +378,42 @@ fn is_authorized(request: &SimpleHttpRequest, token: &str) -> bool {
         .get("authorization")
         .map(|value| value.trim() == format!("Bearer {token}"))
         .unwrap_or(false)
+}
+
+fn audit_mcp_call(kind: &str, name: &str, args: &Value) {
+    eprintln!(
+        "[MCP audit] kind={kind} name={name} args={}",
+        summarize_args(args)
+    );
+}
+
+fn summarize_args(args: &Value) -> String {
+    let mut value = args.clone();
+    redact_sensitive_fields(&mut value);
+    serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn redact_sensitive_fields(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, entry) in map.iter_mut() {
+                if matches!(
+                    key.as_str(),
+                    "password" | "otpSecret" | "oidcPassword" | "oidcOtpSecret" | "mcpAuthToken"
+                ) {
+                    *entry = Value::String("[redacted]".to_string());
+                } else {
+                    redact_sensitive_fields(entry);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                redact_sensitive_fields(item);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Result<SimpleHttpRequest, String> {
@@ -433,4 +516,23 @@ fn write_json_response(stream: &mut TcpStream, status: u16, payload: Value) -> R
         .write_all(response.as_bytes())
         .and_then(|_| stream.write_all(&body))
         .map_err(|e| format!("failed to write HTTP response: {e}"))
+}
+
+fn write_error_envelope(
+    stream: &mut TcpStream,
+    status: u16,
+    message: &str,
+    now_ms: fn() -> u64,
+) -> Result<(), String> {
+    write_json_response(
+        stream,
+        status,
+        json!({
+            "ok": false,
+            "message": message,
+            "data": {},
+            "warnings": [],
+            "timestamp": now_ms(),
+        }),
+    )
 }

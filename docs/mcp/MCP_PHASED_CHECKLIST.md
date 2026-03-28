@@ -70,43 +70,43 @@
 
 ## Phase 6 — Mutation tools
 
-- [ ] `server_upsert`
-- [ ] `server_delete`
-- [ ] `config_save`
-- [ ] `config_save_partial`
-- [ ] `sync_settings_get`
-- [ ] `sync_settings_save_partial`
+- [x] `server_upsert`
+- [x] `server_delete`
+- [x] `config_save`
+- [x] `config_save_partial`
+- [x] `sync_settings_get`
+- [x] `sync_settings_save_partial`
 
 ## Phase 7 — Remote browser and SCP
 
-- [ ] `remote_browser_open`
-- [ ] `remote_browser_close`
-- [ ] `remote_browser_list_children`
-- [ ] `remote_browser_stat_path`
-- [ ] `remote_browser_create_directory`
-- [ ] `remote_browser_delete_path`
-- [ ] `scp_upload`
-- [ ] `scp_download`
-- [ ] `scp_start_upload`
-- [ ] `scp_start_download`
-- [ ] `scp_transfer_list`
-- [ ] `scp_transfer_get`
+- [x] `remote_browser_open`
+- [x] `remote_browser_close`
+- [x] `remote_browser_list_children`
+- [x] `remote_browser_stat_path`
+- [x] `remote_browser_create_directory`
+- [x] `remote_browser_delete_path`
+- [x] `scp_upload`
+- [x] `scp_download`
+- [x] `scp_start_upload`
+- [x] `scp_start_download`
+- [x] `scp_transfer_list`
+- [x] `scp_transfer_get`
 
 ## Phase 8 — Config sync and Git
 
-- [ ] `config_sync_pull`
-- [ ] `config_sync_push`
-- [ ] `config_git_pull`
-- [ ] `config_git_push`
+- [x] `config_sync_pull`
+- [x] `config_sync_push`
+- [x] `config_git_pull`
+- [x] `config_git_push`
 
 ## Phase 9 — Hardening and polish
 
-- [ ] Enforce localhost-only default bind
+- [x] Enforce localhost-only default bind
 - [x] Enforce token auth
-- [ ] Redact secrets in all config and status outputs
-- [ ] Add approval policy for destructive tools
-- [ ] Add audit logging for MCP calls
-- [ ] Standardize error and warning responses
+- [x] Redact secrets in all config and status outputs
+- [x] Add approval policy for destructive tools
+- [x] Add audit logging for MCP calls
+- [x] Standardize error and warning responses
 - [ ] Add notifications for status and transfer changes if needed
 - [ ] Update README and AGENTS docs if contract changes
 
@@ -140,3 +140,7 @@
 - MCP runtime state, tool/resource catalogs, dispatch/read plumbing, and token-gated HTTP routes now exist in Rust
 - Current runtime reports `implementationStage = http-minimal`; full MCP-spec transport polish is still pending
 - Phase 5 runtime-control tools now dispatch through the same internal action paths used by the Tauri commands
+- Phase 6 mutation tools now cover server inventory updates, full/partial app config saves, and device-local sync-settings read/patch operations
+- Phase 7 now exposes remote-browser lifecycle tools, direct/PTY-backed SCP transfer start tools, and backend-backed SCP transfer history queries
+- Phase 8 now exposes config sync pull/push and git pull/push actions for the configured repo root
+- Phase 9 hardening now enforces localhost-only bind addresses, redacts config/token secrets in MCP outputs, blocks sensitive tools unless the policy is set to `allow-with-token`, logs MCP HTTP calls to stderr, and returns standardized JSON error envelopes from the HTTP transport

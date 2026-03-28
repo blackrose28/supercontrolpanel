@@ -25,7 +25,7 @@ mod stores;
 use models::{
     AppConfig, AppConfigForDisk, BoundaryConfig,
     BoundaryTargetSummary, FunctionStatus, RemoteBrowseEntry, RemoteBrowseNodeInfo,
-    RemoteBrowseSession, StartFunctionResult,
+    RemoteBrowseSession, ScpTransferState, StartFunctionResult,
 };
 #[cfg(target_os = "windows")]
 use models::{HelperStatusFile, OpenVpnLaunchConfig};
@@ -53,6 +53,7 @@ use services::{
     delete_remote_browser_path as delete_remote_browser_path_service,
     list_remote_browser_children as list_remote_browser_children_service,
     open_remote_browser as open_remote_browser_service,
+    create_scp_transfer_entry, attach_scp_transfer_session, update_scp_transfer_entry,
     start_caddy_run as start_caddy_run_service, stop_caddy_run as stop_caddy_run_service,
     start_server_rdp as start_server_rdp_service, start_server_ssh as start_server_ssh_service,
     start_server_tunnel as start_server_tunnel_service, stat_remote_browser_path as stat_remote_browser_path_service,
@@ -86,7 +87,7 @@ use services::{
 };
 use stores::{
     BoundaryAutomationSession, BoundaryAutomationStore, FunctionStore, OpenVpnAdminStore,
-    RemoteBrowserStore, SessionStore,
+    RemoteBrowserStore, ScpTransferStore, SessionStore,
 };
 #[cfg(target_os = "windows")]
 use stores::OpenVpnAdminSession;
@@ -646,8 +647,7 @@ fn list_function_statuses(
     Ok(values)
 }
 
-#[tauri::command]
-fn get_app_config(app: AppHandle) -> Result<AppConfig, String> {
+pub(crate) fn get_app_config_action(app: AppHandle) -> Result<AppConfig, String> {
     let config = load_app_config_from_disk(&app)?;
     scp_debug!(
         "get_app_config: exe_len={} ovpn_len={} user_len={} password_in_memory={} otp_configured={}",
@@ -659,6 +659,11 @@ fn get_app_config(app: AppHandle) -> Result<AppConfig, String> {
     );
     save_app_config_to_disk(&app, &config)?;
     Ok(config)
+}
+
+#[tauri::command]
+fn get_app_config(app: AppHandle) -> Result<AppConfig, String> {
+    get_app_config_action(app)
 }
 
 fn get_config_paths_internal(app: &AppHandle) -> Result<ConfigPaths, String> {
@@ -678,8 +683,11 @@ fn get_sync_settings(app: AppHandle) -> Result<SyncSettings, String> {
     load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)
 }
 
-#[tauri::command]
-fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch, mcp_state: State<'_, McpRuntimeState>) -> Result<(), String> {
+pub(crate) fn save_sync_settings_action(
+    app: AppHandle,
+    settings: SyncSettingsPatch,
+    mcp_state: State<'_, McpRuntimeState>,
+) -> Result<SyncSettings, String> {
     let mut merged = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     if let Some(repo_root) = settings.repo_root {
         merged.repo_root = repo_root;
@@ -732,11 +740,15 @@ fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch, mcp_state: St
     }
     save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
     let _ = sync_mcp_runtime_from_settings(&app, &mcp_state, &merged, now_ms);
-    Ok(())
+    Ok(merged)
 }
 
 #[tauri::command]
-fn sync_config_pull(app: AppHandle, repo_root: String) -> Result<(), String> {
+fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch, mcp_state: State<'_, McpRuntimeState>) -> Result<(), String> {
+    save_sync_settings_action(app, settings, mcp_state).map(|_| ())
+}
+
+pub(crate) fn sync_config_pull_action(app: AppHandle, repo_root: String) -> Result<(), String> {
     let repo_root = repo_root.trim();
     if repo_root.is_empty() {
         return Err("repoRoot cannot be empty".into());
@@ -770,7 +782,11 @@ fn sync_config_pull(app: AppHandle, repo_root: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn sync_config_push(app: AppHandle, repo_root: String) -> Result<(), String> {
+fn sync_config_pull(app: AppHandle, repo_root: String) -> Result<(), String> {
+    sync_config_pull_action(app, repo_root)
+}
+
+pub(crate) fn sync_config_push_action(app: AppHandle, repo_root: String) -> Result<(), String> {
     let repo_root = repo_root.trim();
     if repo_root.is_empty() {
         return Err("repoRoot cannot be empty".into());
@@ -804,6 +820,11 @@ fn sync_config_push(app: AppHandle, repo_root: String) -> Result<(), String> {
             .map_err(|e| format!("failed to copy from servers.json to repo: {e}"))?;
     }
     Ok(())
+}
+
+#[tauri::command]
+fn sync_config_push(app: AppHandle, repo_root: String) -> Result<(), String> {
+    sync_config_push_action(app, repo_root)
 }
 
 fn config_git_computer_name() -> String {
@@ -870,13 +891,16 @@ fn run_git(repo_root: &str, args: &[&str]) -> Result<String, String> {
     }
 }
 
-#[tauri::command]
-fn config_git_pull(repo_root: String) -> Result<String, String> {
+pub(crate) fn config_git_pull_action(repo_root: String) -> Result<String, String> {
     run_git(repo_root.trim(), &["pull"])
 }
 
 #[tauri::command]
-fn config_git_push(repo_root: String) -> Result<String, String> {
+fn config_git_pull(repo_root: String) -> Result<String, String> {
+    config_git_pull_action(repo_root)
+}
+
+pub(crate) fn config_git_push_action(repo_root: String) -> Result<String, String> {
     let repo_root = repo_root.trim().to_string();
     if repo_root.is_empty() {
         return Err("repoRoot cannot be empty".into());
@@ -898,7 +922,11 @@ fn config_git_push(repo_root: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, String> {
+fn config_git_push(repo_root: String) -> Result<String, String> {
+    config_git_push_action(repo_root)
+}
+
+pub(crate) fn save_app_config_action(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, String> {
     let _incoming_pw_len = config.openvpn.password.len();
     let _incoming_otp_len = config.openvpn.otp_secret.len();
     // Never wipe keyring when the UI sends empty secrets (WebViews often omit password field values).
@@ -955,6 +983,11 @@ fn save_app_config(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, S
         !config.openvpn.otp_secret.is_empty()
     );
     Ok(config)
+}
+
+#[tauri::command]
+fn save_app_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, String> {
+    save_app_config_action(app, config)
 }
 
 #[tauri::command]
@@ -1222,8 +1255,7 @@ fn close_remote_browser_sessions_for_server(
 ) -> Result<usize, String> {
     close_remote_browser_sessions_for_server_service(server_id, browser_store)
 }
-#[tauri::command]
-fn upsert_server(
+pub(crate) fn upsert_server_action(
     app: AppHandle,
     mut server: Server,
     browser_store: State<'_, RemoteBrowserStore>,
@@ -1243,7 +1275,15 @@ fn upsert_server(
 }
 
 #[tauri::command]
-fn delete_server(
+fn upsert_server(
+    app: AppHandle,
+    server: Server,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<Vec<Server>, String> {
+    upsert_server_action(app, server, browser_store)
+}
+
+pub(crate) fn delete_server_action(
     app: AppHandle,
     id: String,
     browser_store: State<'_, RemoteBrowserStore>,
@@ -1253,6 +1293,15 @@ fn delete_server(
     list.retain(|s| s.id != id);
     save_servers(&app, &list)?;
     Ok(list)
+}
+
+#[tauri::command]
+fn delete_server(
+    app: AppHandle,
+    id: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<Vec<Server>, String> {
+    delete_server_action(app, id, browser_store)
 }
 
 /// Search Boundary targets (uses CLI token). Optional text filter; empty = list all.
@@ -1500,8 +1549,7 @@ pub(crate) fn stop_server_ssh_action(
 }
 
 
-#[tauri::command]
-fn open_remote_browser(
+pub(crate) fn open_remote_browser_action(
     app: AppHandle,
     server_id: String,
     browser_store: State<'_, RemoteBrowserStore>,
@@ -1531,7 +1579,16 @@ fn open_remote_browser(
 }
 
 #[tauri::command]
-fn close_remote_browser(
+fn open_remote_browser(
+    app: AppHandle,
+    server_id: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+    function_store: State<'_, FunctionStore>,
+) -> Result<RemoteBrowseSession, String> {
+    open_remote_browser_action(app, server_id, browser_store, function_store)
+}
+
+pub(crate) fn close_remote_browser_action(
     browser_id: String,
     browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<(), String> {
@@ -1539,7 +1596,14 @@ fn close_remote_browser(
 }
 
 #[tauri::command]
-fn list_remote_browser_children(
+fn close_remote_browser(
+    browser_id: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<(), String> {
+    close_remote_browser_action(browser_id, browser_store)
+}
+
+pub(crate) fn list_remote_browser_children_action(
     browser_id: String,
     path: String,
     browser_store: State<'_, RemoteBrowserStore>,
@@ -1548,7 +1612,15 @@ fn list_remote_browser_children(
 }
 
 #[tauri::command]
-fn stat_remote_browser_path(
+fn list_remote_browser_children(
+    browser_id: String,
+    path: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<Vec<RemoteBrowseEntry>, String> {
+    list_remote_browser_children_action(browser_id, path, browser_store)
+}
+
+pub(crate) fn stat_remote_browser_path_action(
     browser_id: String,
     path: String,
     browser_store: State<'_, RemoteBrowserStore>,
@@ -1557,7 +1629,15 @@ fn stat_remote_browser_path(
 }
 
 #[tauri::command]
-fn create_remote_browser_directory(
+fn stat_remote_browser_path(
+    browser_id: String,
+    path: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<RemoteBrowseNodeInfo, String> {
+    stat_remote_browser_path_action(browser_id, path, browser_store)
+}
+
+pub(crate) fn create_remote_browser_directory_action(
     browser_id: String,
     path: String,
     browser_store: State<'_, RemoteBrowserStore>,
@@ -1566,7 +1646,15 @@ fn create_remote_browser_directory(
 }
 
 #[tauri::command]
-fn delete_remote_browser_path(
+fn create_remote_browser_directory(
+    browser_id: String,
+    path: String,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<(), String> {
+    create_remote_browser_directory_action(browser_id, path, browser_store)
+}
+
+pub(crate) fn delete_remote_browser_path_action(
     browser_id: String,
     path: String,
     recursive: Option<bool>,
@@ -1576,14 +1664,120 @@ fn delete_remote_browser_path(
 }
 
 #[tauri::command]
+fn delete_remote_browser_path(
+    browser_id: String,
+    path: String,
+    recursive: Option<bool>,
+    browser_store: State<'_, RemoteBrowserStore>,
+) -> Result<(), String> {
+    delete_remote_browser_path_action(browser_id, path, recursive, browser_store)
+}
+
+pub(crate) fn scp_upload_action(
+    app: AppHandle,
+    server_id: String,
+    local_path: String,
+    remote_path: String,
+    recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
+) -> Result<String, String> {
+    let transfer_id = create_scp_transfer_entry(
+        &transfer_store,
+        now_ms,
+        "Upload",
+        "Uploading…",
+        Some(local_path.clone()),
+        Some(remote_path.clone()),
+    )?;
+    match scp_upload_service(&app, server_id, local_path, remote_path, recursive) {
+        Ok(message) => {
+            update_scp_transfer_entry(
+                &transfer_store,
+                &transfer_id,
+                ScpTransferState::Success,
+                message.clone(),
+                Some(100),
+                now_ms,
+            )?;
+            Ok(message)
+        }
+        Err(err) => {
+            update_scp_transfer_entry(
+                &transfer_store,
+                &transfer_id,
+                ScpTransferState::Error,
+                err.clone(),
+                None,
+                now_ms,
+            )?;
+            Err(err)
+        }
+    }
+}
+
+#[tauri::command]
 fn scp_upload(
     app: AppHandle,
     server_id: String,
     local_path: String,
     remote_path: String,
     recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
-    scp_upload_service(&app, server_id, local_path, remote_path, recursive)
+    scp_upload_action(
+        app,
+        server_id,
+        local_path,
+        remote_path,
+        recursive,
+        transfer_store,
+    )
+}
+
+pub(crate) fn start_scp_upload_action(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    server_id: String,
+    local_path: String,
+    remote_path: String,
+    recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
+) -> Result<String, String> {
+    let transfer_id = create_scp_transfer_entry(
+        &transfer_store,
+        now_ms,
+        "Upload",
+        "Uploading…",
+        Some(local_path.clone()),
+        Some(remote_path.clone()),
+    )?;
+    let result = start_scp_upload_service(
+        &app,
+        &session_store,
+        server_id,
+        local_path,
+        remote_path,
+        recursive,
+        open_pty_with_command_builder,
+        update_functions_for_session_exit,
+    );
+    match result {
+        Ok(session_id) => {
+            attach_scp_transfer_session(&transfer_store, &transfer_id, &session_id)?;
+            Ok(session_id)
+        }
+        Err(err) => {
+            update_scp_transfer_entry(
+                &transfer_store,
+                &transfer_id,
+                ScpTransferState::Error,
+                err.clone(),
+                None,
+                now_ms,
+            )?;
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1594,17 +1788,59 @@ fn start_scp_upload(
     local_path: String,
     remote_path: String,
     recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
-    start_scp_upload_service(
-        &app,
-        &session_store,
+    start_scp_upload_action(
+        app,
+        session_store,
         server_id,
         local_path,
         remote_path,
         recursive,
-        open_pty_with_command_builder,
-        update_functions_for_session_exit,
+        transfer_store,
     )
+}
+
+pub(crate) fn scp_download_action(
+    app: AppHandle,
+    server_id: String,
+    remote_path: String,
+    local_path: String,
+    recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
+) -> Result<String, String> {
+    let transfer_id = create_scp_transfer_entry(
+        &transfer_store,
+        now_ms,
+        "Download",
+        "Downloading…",
+        Some(remote_path.clone()),
+        Some(local_path.clone()),
+    )?;
+    match scp_download_service(&app, server_id, remote_path, local_path, recursive) {
+        Ok(message) => {
+            update_scp_transfer_entry(
+                &transfer_store,
+                &transfer_id,
+                ScpTransferState::Success,
+                message.clone(),
+                Some(100),
+                now_ms,
+            )?;
+            Ok(message)
+        }
+        Err(err) => {
+            update_scp_transfer_entry(
+                &transfer_store,
+                &transfer_id,
+                ScpTransferState::Error,
+                err.clone(),
+                None,
+                now_ms,
+            )?;
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1614,8 +1850,62 @@ fn scp_download(
     remote_path: String,
     local_path: String,
     recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
-    scp_download_service(&app, server_id, remote_path, local_path, recursive)
+    scp_download_action(
+        app,
+        server_id,
+        remote_path,
+        local_path,
+        recursive,
+        transfer_store,
+    )
+}
+
+pub(crate) fn start_scp_download_action(
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    server_id: String,
+    remote_path: String,
+    local_path: String,
+    recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
+) -> Result<String, String> {
+    let transfer_id = create_scp_transfer_entry(
+        &transfer_store,
+        now_ms,
+        "Download",
+        "Downloading…",
+        Some(remote_path.clone()),
+        Some(local_path.clone()),
+    )?;
+    let result = start_scp_download_service(
+        &app,
+        &session_store,
+        server_id,
+        remote_path,
+        local_path,
+        recursive,
+        open_pty_with_command_builder,
+        update_functions_for_session_exit,
+    );
+    match result {
+        Ok(session_id) => {
+            attach_scp_transfer_session(&transfer_store, &transfer_id, &session_id)?;
+            Ok(session_id)
+        }
+        Err(err) => {
+            update_scp_transfer_entry(
+                &transfer_store,
+                &transfer_id,
+                ScpTransferState::Error,
+                err.clone(),
+                None,
+                now_ms,
+            )?;
+            Err(err)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1626,16 +1916,16 @@ fn start_scp_download(
     remote_path: String,
     local_path: String,
     recursive: Option<bool>,
+    transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
-    start_scp_download_service(
-        &app,
-        &session_store,
+    start_scp_download_action(
+        app,
+        session_store,
         server_id,
         remote_path,
         local_path,
         recursive,
-        open_pty_with_command_builder,
-        update_functions_for_session_exit,
+        transfer_store,
     )
 }
 
@@ -1911,6 +2201,7 @@ fn main() {
         .manage(OpenVpnAdminStore::default())
         .manage(BoundaryAutomationStore::default())
         .manage(RemoteBrowserStore::default())
+        .manage(ScpTransferStore::default())
         .manage(McpRuntimeState::default())
         .setup(|app| {
             let state = app.state::<McpRuntimeState>();
