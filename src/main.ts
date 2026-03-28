@@ -313,6 +313,7 @@ const scpResultEl = mustElement<HTMLElement>("#scp-result");
 const scpClearHistoryBtn = mustElement<HTMLButtonElement>("#scp-clear-history-btn");
 const serverEditorOverlay = mustElement<HTMLElement>("#server-editor-overlay");
 const scpPickerOverlay = mustElement<HTMLElement>("#scp-picker-overlay");
+const scpPickerPanel = mustElement<HTMLElement>("#scp-picker-panel");
 const scpPickerTitle = mustElement<HTMLElement>("#scp-picker-title");
 const scpPickerHint = mustElement<HTMLElement>("#scp-picker-hint");
 const scpPickerCurrentPath = mustElement<HTMLElement>("#scp-picker-current-path");
@@ -335,6 +336,11 @@ const scpPickerDeleteBtn = mustElement<HTMLButtonElement>(
 const scpPickerTbody = mustElement<HTMLElement>("#scp-picker-tbody");
 const scpPickerCancelBtn = mustElement<HTMLButtonElement>("#scp-picker-cancel");
 const scpPickerSelectBtn = mustElement<HTMLButtonElement>("#scp-picker-select-btn");
+const confirmOverlay = mustElement<HTMLElement>("#confirm-overlay");
+const confirmPanel = mustElement<HTMLElement>("#confirm-panel");
+const confirmMessage = mustElement<HTMLElement>("#confirm-message");
+const confirmCancelBtn = mustElement<HTMLButtonElement>("#confirm-cancel");
+const confirmOkBtn = mustElement<HTMLButtonElement>("#confirm-ok");
 const seName = mustElement<HTMLInputElement>("#se-name");
 const seHost = mustElement<HTMLInputElement>("#se-host");
 const seOs = mustElement<HTMLSelectElement>("#se-os");
@@ -446,6 +452,8 @@ let scpTransferCounter = 0;
 let scpTransferHistory: ScpTransferEntry[] = [];
 let scpTransferSessionIds: Record<string, string> = {};
 let scpTransferSessionOutput: Record<string, string> = {};
+let confirmResolver: ((accepted: boolean) => void) | null = null;
+let scpPickerGlobalKeyHandlerAttached = false;
 let unlistenOutput: UnlistenFn | null = null;
 let unlistenExit: UnlistenFn | null = null;
 let unlistenFunctionStatus: UnlistenFn | null = null;
@@ -1528,6 +1536,134 @@ function parseScpProgressPercent(output: string): number | null {
   return Math.max(0, Math.min(100, value));
 }
 
+function closeConfirmOverlay(accepted: boolean) {
+  confirmOverlay.classList.add("hidden");
+  confirmOverlay.setAttribute("aria-hidden", "true");
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  if (resolve) {
+    resolve(accepted);
+  }
+}
+
+function openConfirmOverlay(message: string): Promise<boolean> {
+  if (confirmResolver) {
+    closeConfirmOverlay(false);
+  }
+  confirmMessage.textContent = message;
+  confirmOverlay.classList.remove("hidden");
+  confirmOverlay.setAttribute("aria-hidden", "false");
+  requestAnimationFrame(() => confirmPanel.focus());
+  return new Promise<boolean>((resolve) => {
+    confirmResolver = resolve;
+  });
+}
+
+function isScpPickerOpen() {
+  return !scpPickerOverlay.classList.contains("hidden");
+}
+
+function focusScpPickerPrimaryTarget() {
+  requestAnimationFrame(() => {
+    const selectedTree = scpPickerTree.querySelector<HTMLElement>(
+      `[data-scp-tree-path="${CSS.escape(scpPickerSelectedPath || scpTreeRootPath())}"]`,
+    );
+    const currentTree = scpPickerTree.querySelector<HTMLElement>(
+      `[data-scp-tree-path="${CSS.escape(scpPickerCurrentListingPath || scpTreeRootPath())}"]`,
+    );
+    const firstRow = scpPickerTbody.querySelector<HTMLElement>("tr[data-scp-path]");
+    const target = selectedTree ?? currentTree ?? firstRow ?? scpPickerPanel;
+    target.focus();
+  });
+}
+
+function handleScpPickerGlobalKeydown(event: KeyboardEvent) {
+  if (!isScpPickerOpen() || scpPickerBusy) {
+    return;
+  }
+  const target = event.target as HTMLElement | null;
+  const inTextInput =
+    !!target &&
+    (target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target.isContentEditable);
+  if (inTextInput) {
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeScpPicker(null);
+    return;
+  }
+  if (event.key === "ArrowDown") {
+    event.preventDefault();
+    moveScpPickerSelection(1);
+    return;
+  }
+  if (event.key === "ArrowUp") {
+    event.preventDefault();
+    moveScpPickerSelection(-1);
+    return;
+  }
+  if (event.key === "Enter") {
+    const inTree = !!target?.closest("#scp-picker-tree");
+    if (!inTree) {
+      event.preventDefault();
+      void openSelectedScpEntry();
+    }
+  }
+}
+
+function selectedScpEntryIndex() {
+  return scpPickerEntries.findIndex((entry) => entry.path === scpPickerSelectedPath);
+}
+
+function syncSelectedEntry(entry: RemoteBrowseEntry) {
+  scpPickerSelectedPath = entry.path;
+  scpPickerSelectedKind = entry.kind;
+  scpPickerManualPath.value = entry.path;
+  scpPickerStatus.textContent = "";
+}
+
+function moveScpPickerSelection(delta: number) {
+  if (scpPickerEntries.length === 0) {
+    return;
+  }
+  const currentIndex = selectedScpEntryIndex();
+  const nextIndex =
+    currentIndex < 0
+      ? delta > 0
+        ? 0
+        : scpPickerEntries.length - 1
+      : Math.max(0, Math.min(scpPickerEntries.length - 1, currentIndex + delta));
+  const entry = scpPickerEntries[nextIndex];
+  if (!entry) {
+    return;
+  }
+  syncSelectedEntry(entry);
+  renderScpPicker();
+  requestAnimationFrame(() => {
+    scpPickerTbody
+      .querySelector<HTMLElement>(`tr[data-scp-path="${CSS.escape(entry.path)}"]`)
+      ?.focus();
+  });
+}
+
+async function openSelectedScpEntry() {
+  const entry =
+    scpPickerEntries.find((candidate) => candidate.path === scpPickerSelectedPath) ?? null;
+  if (!entry) {
+    return;
+  }
+  if (entry.kind === "directory") {
+    ensureScpTreePath(entry.path);
+    expandScpTreeAncestors(entry.path);
+    await loadScpPickerPath(entry.path);
+    return;
+  }
+  renderScpPicker();
+}
+
 function localBasename(path: string): string {
   const cleaned = path.replace(/[\\/]+$/, "");
   const parts = cleaned.split(/[\\/]/);
@@ -1741,8 +1877,6 @@ function renderScpTreeNode(path: string, depth: number): string {
       ? `<div class="scp-picker-tree-meta">Loading…</div>`
       : node.error
         ? `<div class="scp-picker-tree-meta">${escapeHtml(node.error)}</div>`
-        : !node.loaded && node.children.length === 0
-          ? `<div class="scp-picker-tree-meta">Open this folder to load its subfolders.</div>`
         : node.loaded && node.children.length === 0
           ? `<div class="scp-picker-tree-meta">No subfolders</div>`
           : ""
@@ -1928,7 +2062,11 @@ function renderScpPicker() {
 
   if (scpPickerEntries.length === 0) {
     scpPickerTbody.innerHTML = `<tr><td colspan="3" class="scp-picker-empty">${
-      scpPickerBusy ? "Loading…" : "This folder is empty."
+      scpPickerBusy
+        ? "Loading folder…"
+        : scpPickerCurrentListingPath
+          ? "No items in this folder."
+          : "Select a folder to browse."
     }</td></tr>`;
     return;
   }
@@ -1937,7 +2075,7 @@ function renderScpPicker() {
     .map((entry) => {
       const selected = entry.path === scpPickerSelectedPath ? ' class="selected"' : "";
       const actionLabel = entry.kind === "directory" ? "Open" : "Select";
-      return `<tr data-scp-path="${escapeHtml(entry.path)}"${selected}>
+      return `<tr data-scp-path="${escapeHtml(entry.path)}" tabindex="0"${selected}>
         <td>${escapeHtml(entry.name)}</td>
         <td class="scp-picker-type">${escapeHtml(entry.kind)}</td>
         <td class="row-actions">
@@ -1981,6 +2119,13 @@ function renderScpPicker() {
         scpPickerManualPath.value = path;
       }
       renderScpPicker();
+    });
+    row.addEventListener("keydown", async (event) => {
+      const keyEvent = event as KeyboardEvent;
+      if (keyEvent.key === "Enter") {
+        keyEvent.preventDefault();
+        await openSelectedScpEntry();
+      }
     });
   });
 
@@ -2031,6 +2176,10 @@ function closeScpPicker(selection: ScpPickerSelection | null) {
   scpPickerTbody.innerHTML = "";
   if (browserId) {
     void invoke("close_remote_browser", { browserId }).catch(() => {});
+  }
+  if (scpPickerGlobalKeyHandlerAttached) {
+    window.removeEventListener("keydown", handleScpPickerGlobalKeydown);
+    scpPickerGlobalKeyHandlerAttached = false;
   }
   if (resolve) {
     resolve(selection);
@@ -2195,33 +2344,12 @@ async function deleteRemoteBrowserSelection() {
     return;
   }
   let infoKind = scpPickerSelectedKind;
-  if (!infoKind) {
-    try {
-      const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
-        browserId: scpPickerBrowserId,
-        path: scpPickerSelectedPath,
-      });
-      if (!info.exists) {
-        scpPickerStatus.textContent = "Selected remote path no longer exists.";
-        renderScpPicker();
-        return;
-      }
-      infoKind = info.kind;
-    } catch (error) {
-      if (handleScpPickerSessionError(error)) {
-        return;
-      }
-      scpPickerStatus.textContent = String(error);
-      renderScpPicker();
-      return;
-    }
-  }
   const noun = infoKind === "directory" ? "folder" : "file";
   const dangerText =
     infoKind === "directory"
       ? `Delete this remote folder and its contents?\n\n${scpPickerSelectedPath}`
       : `Delete this remote file?\n\n${scpPickerSelectedPath}`;
-  if (!confirm(dangerText)) {
+  if (!(await openConfirmOverlay(dangerText))) {
     return;
   }
   const refreshPath =
@@ -2233,6 +2361,17 @@ async function deleteRemoteBrowserSelection() {
   scpPickerStatus.textContent = `Deleting remote ${noun}…`;
   renderScpPicker();
   try {
+    if (!infoKind) {
+      const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
+        browserId: scpPickerBrowserId,
+        path: scpPickerSelectedPath,
+      });
+      if (!info.exists) {
+        scpPickerStatus.textContent = "Selected remote path no longer exists.";
+        return;
+      }
+      infoKind = info.kind;
+    }
     await invoke("delete_remote_browser_path", {
       browserId: scpPickerBrowserId,
       path: scpPickerSelectedPath,
@@ -2274,6 +2413,10 @@ async function openScpPicker(
   scpPickerManualPath.value = "";
   scpPickerOverlay.classList.remove("hidden");
   scpPickerOverlay.setAttribute("aria-hidden", "false");
+  if (!scpPickerGlobalKeyHandlerAttached) {
+    window.addEventListener("keydown", handleScpPickerGlobalKeydown);
+    scpPickerGlobalKeyHandlerAttached = true;
+  }
   renderScpPicker();
 
   const promise = new Promise<ScpPickerSelection | null>((resolve) => {
@@ -2286,6 +2429,7 @@ async function openScpPicker(
     scpPickerBrowserId = session.browserId;
     scpPickerRootPath = normalizeRemotePath(session.rootPath) || "/";
     await loadScpPickerPath(session.rootPath);
+    focusScpPickerPrimaryTarget();
   } catch (error) {
     closeScpPicker(null);
     throw error;
@@ -2756,6 +2900,23 @@ scpPickerNewFolderBtn.addEventListener("click", async () => {
 });
 scpPickerDeleteBtn.addEventListener("click", async () => {
   await deleteRemoteBrowserSelection();
+});
+confirmCancelBtn.addEventListener("click", () => closeConfirmOverlay(false));
+confirmOkBtn.addEventListener("click", () => closeConfirmOverlay(true));
+confirmOverlay.addEventListener("click", (event) => {
+  if (event.target === confirmOverlay) {
+    closeConfirmOverlay(false);
+  }
+});
+confirmPanel.addEventListener("keydown", (event) => {
+  const keyEvent = event as KeyboardEvent;
+  if (keyEvent.key === "Escape") {
+    keyEvent.preventDefault();
+    closeConfirmOverlay(false);
+  } else if (keyEvent.key === "Enter") {
+    keyEvent.preventDefault();
+    closeConfirmOverlay(true);
+  }
 });
 scpPickerSelectBtn.addEventListener("click", async () => {
   await resolveScpPickerSelection();

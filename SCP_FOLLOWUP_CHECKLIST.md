@@ -16,8 +16,8 @@ Finish the post-refactor cleanup and polish work after the SCP remote browser ro
 - [x] Start the visible tree at the remote user home directory instead of `/`.
 - [x] Keep tree expand/collapse as local UI state only.
 - [x] Expand a tree folder when the user clicks it in the left tree.
-- [ ] Improve keyboard navigation and focus behavior.
-- [ ] Refine empty/loading/error states after testing feedback.
+- [x] Improve keyboard navigation and focus behavior.
+- [x] Refine empty/loading/error states after testing feedback.
 
 ## Phase K: Remote File Operations In Browser Modal
 

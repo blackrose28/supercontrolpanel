@@ -281,9 +281,11 @@
                         aria-hidden="true"
                     >
                         <div
+                            id="scp-picker-panel"
                             class="modal-panel modal-panel-wide"
                             role="dialog"
                             aria-labelledby="scp-picker-title"
+                            tabindex="-1"
                         >
                             <h3 id="scp-picker-title">Remote browser</h3>
                             <p id="scp-picker-hint" class="hint"></p>
@@ -375,6 +377,31 @@
                                     id="scp-picker-select-btn"
                                 >
                                     Select
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div
+                        id="confirm-overlay"
+                        class="modal-overlay hidden"
+                        aria-hidden="true"
+                    >
+                        <div
+                            id="confirm-panel"
+                            class="modal-panel"
+                            role="dialog"
+                            aria-labelledby="confirm-title"
+                            tabindex="-1"
+                        >
+                            <h3 id="confirm-title">Confirm</h3>
+                            <p id="confirm-message" class="hint"></p>
+                            <div class="modal-actions">
+                                <button type="button" id="confirm-cancel">
+                                    Cancel
+                                </button>
+                                <button type="button" id="confirm-ok">
+                                    Confirm
                                 </button>
                             </div>
                         </div>

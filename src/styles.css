@@ -708,6 +708,14 @@ h3 {
     background: #1c2230;
 }
 
+.scp-picker-tree-toggle:focus-visible,
+.scp-picker-tree-label:focus-visible,
+.scp-picker-crumb:focus-visible,
+.scp-picker-table tr:focus-visible {
+    outline: 2px solid #7cc3ff;
+    outline-offset: 1px;
+}
+
 .scp-picker-tree-icon {
     flex: none;
     width: 18px;
@@ -819,6 +827,10 @@ h3 {
 
 .scp-picker-table tr.selected td {
     background: #243049;
+}
+
+.scp-picker-table tr {
+    cursor: pointer;
 }
 
 .scp-picker-type {
