@@ -519,6 +519,24 @@ fn handle_openvpn_terminal_state(app: &AppHandle, state: &str, reason: &str) {
             return;
         }
         reconnect.consecutive_failures = reconnect.consecutive_failures.saturating_add(1);
+        // Safety cap: stop retrying after too many consecutive failures to avoid
+        // unbounded retry chains when config is permanently broken.
+        const MAX_RECONNECT_RETRIES: u32 = 50;
+        if reconnect.consecutive_failures > MAX_RECONNECT_RETRIES {
+            reconnect.next_retry_at_ms = None;
+            drop(reconnect);
+            let _ = upsert_function_status(
+                app,
+                &app.state::<FunctionStore>(),
+                OPENVPN_FUNCTION_ID,
+                "error",
+                &format!(
+                    "Auto-reconnect gave up after {MAX_RECONNECT_RETRIES} consecutive failures. {reason}"
+                ),
+                None,
+            );
+            return;
+        }
         let delay_secs = compute_openvpn_reconnect_delay_secs(
             reconnect.consecutive_failures,
             cfg.openvpn.auto_reconnect_base_seconds,
@@ -560,6 +578,9 @@ fn handle_openvpn_terminal_state(app: &AppHandle, state: &str, reason: &str) {
             }
             reconnect.next_retry_at_ms = None;
         }
+        // Empty command/username/password: start_openvpn_action loads stored
+        // config from disk when these are empty, so the reconnect uses the
+        // same credentials as the original manual start.
         if let Err(err) = start_openvpn_action(
             String::new(),
             String::new(),

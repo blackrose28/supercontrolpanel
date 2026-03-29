@@ -3582,7 +3582,12 @@ if (openvpnReconnectRenderTimer !== null) {
   window.clearInterval(openvpnReconnectRenderTimer);
 }
 openvpnReconnectRenderTimer = window.setInterval(() => {
-  renderOpenvpnReconnectStatus();
+  // Only re-render the countdown when actively reconnecting;
+  // other states are updated reactively via function-status events.
+  const status = statusMap.get(OPENVPN_FUNCTION_ID);
+  if (status?.state === "reconnecting") {
+    renderOpenvpnReconnectStatus();
+  }
 }, 1000);
 
 navOpenvpn.addEventListener("click", () => {
