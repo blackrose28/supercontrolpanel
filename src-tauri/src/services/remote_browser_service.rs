@@ -6,6 +6,8 @@ use std::{
     process::{ChildStderr, Command, Stdio},
     sync::{Arc, Mutex},
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use ssh2::{FileStat, Session as SshSession};
 use tauri::AppHandle;

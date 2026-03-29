@@ -486,7 +486,7 @@ fn start_openvpn_admin_worker(
     )
 }
 
-#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg(not(target_os = "windows"))]
 fn run_openvpn_automation(
     app: AppHandle,
     session_id: String,

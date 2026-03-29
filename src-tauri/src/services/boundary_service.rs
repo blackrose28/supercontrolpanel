@@ -5,6 +5,8 @@ use std::{
     thread,
     time::Duration,
 };
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use portable_pty::CommandBuilder;
 use serde::Deserialize;

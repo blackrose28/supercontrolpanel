@@ -1,4 +1,6 @@
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 
 use portable_pty::CommandBuilder;
 
