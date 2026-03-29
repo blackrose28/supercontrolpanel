@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "docker:build_image": "docker build -f Dockerfile.linux -t scp-linux-builder .",
-    "docker:build_app": "docker run --rm -v \"$(pwd):/app\" -v \"$(pwd)/dist-linux:/out\" scp-linux-builder bash -c \"npm install && npm run build && npx tauri build && cp -r src-tauri/target/release/bundle/* /out/ && echo '\u2705 Build artifacts copied to dist-linux/'\"",
+    "docker:build_app": "docker run --rm -v \"$(pwd):/app\" -v \"$(pwd)/dist-linux:/out\" scp-linux-builder bash -c \"npm install && npm run build && npx tauri build && cp -r src-tauri/target/release/bundle/* /out/ && echo '✅ Build artifacts copied to dist-linux/'\"",
     "tauri:dev": "tauri dev -- --bin super-control-panel",
     "tauri:build": "tauri build -- --bin super-control-panel",
     "helper:run": "cargo run --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper --",
@@ -22,7 +22,7 @@
     "@xterm/xterm": "^6.0.0"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.10.1",
     "typescript": "^5.8.2",
     "vite": "^6.2.2"
   }
