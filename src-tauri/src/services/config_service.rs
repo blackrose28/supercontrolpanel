@@ -7,7 +7,10 @@ use portable_pty::CommandBuilder;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use crate::models::{AppConfig, AppRuntimeConfig, BoundaryConfig, OpenVpnConfig};
+use crate::models::{
+    default_openvpn_reconnect_base_seconds, default_openvpn_reconnect_max_seconds, AppConfig,
+    AppRuntimeConfig, BoundaryConfig, OpenVpnConfig,
+};
 
 /// OS credential store: Windows Credential Manager, macOS Keychain, Linux Secret Service.
 pub const KEYRING_SERVICE: &str = "com.example.supercontrolpanel";
@@ -134,6 +137,9 @@ pub fn default_app_config() -> AppConfig {
             password: String::new(),
             otp_secret: String::new(),
             terminate_open_vpn_when_helper_exits: false,
+            auto_reconnect_enabled: false,
+            auto_reconnect_base_seconds: default_openvpn_reconnect_base_seconds(),
+            auto_reconnect_max_seconds: default_openvpn_reconnect_max_seconds(),
         },
         boundary: BoundaryConfig::default(),
     }

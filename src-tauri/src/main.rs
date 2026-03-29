@@ -87,7 +87,7 @@ use services::{
 };
 use stores::{
     BoundaryAutomationSession, BoundaryAutomationStore, FunctionStore, OpenVpnAdminStore,
-    RemoteBrowserStore, ScpTransferStore, SessionStore,
+    OpenVpnReconnectStore, RemoteBrowserStore, ScpTransferStore, SessionStore,
 };
 #[cfg(target_os = "windows")]
 use stores::OpenVpnAdminSession;
@@ -326,6 +326,7 @@ fn update_functions_for_session_exit(
     reason: &str,
 ) -> Result<(), String> {
     let mut changed = Vec::<FunctionStatus>::new();
+    let mut openvpn_terminal: Option<(String, String)> = None;
     {
         let mut statuses = lock_err(&function_store.statuses)?;
         for status in statuses.values_mut() {
@@ -374,6 +375,7 @@ fn update_functions_for_session_exit(
                 changed.push(status.clone());
                 continue;
             }
+            let function_id = status.function_id.clone();
             status.state = if exit_code == Some(0) {
                 "stopped".to_string()
             } else {
@@ -388,9 +390,15 @@ fn update_functions_for_session_exit(
             status.session_id = None;
             status.updated_at_ms = now_ms();
             changed.push(status.clone());
+            if function_id == OPENVPN_FUNCTION_ID {
+                openvpn_terminal = Some((status.state.clone(), status.message.clone()));
+            }
         }
     }
 
+    if let Some((state, message)) = openvpn_terminal {
+        handle_openvpn_terminal_state(app, &state, &message);
+    }
     for status in changed {
         let _ = app.emit("function-status", status);
     }
@@ -458,6 +466,114 @@ fn boundary_oidc_init_script(cfg: &BoundaryConfig) -> String {
     boundary_oidc_init_script_service(cfg, generate_totp_code)
 }
 
+fn compute_openvpn_reconnect_delay_secs(
+    failure_count: u32,
+    base_seconds: u64,
+    max_seconds: u64,
+) -> u64 {
+    if failure_count <= 1 {
+        return 0;
+    }
+    let effective_base = base_seconds.max(1);
+    let effective_max = max_seconds.max(effective_base);
+    let exponent = failure_count.saturating_sub(1).min(62);
+    let factor = (1_u128 << exponent).saturating_sub(1);
+    let delay = (effective_base as u128).saturating_mul(factor);
+    delay.min(effective_max as u128) as u64
+}
+
+fn mark_openvpn_connected(app: &AppHandle) {
+    if let Ok(mut state) = app.state::<OpenVpnReconnectStore>().state.lock() {
+        state.consecutive_failures = 0;
+        state.next_retry_at_ms = None;
+    }
+}
+
+fn reset_openvpn_reconnect(app: &AppHandle, user_requested_stop: bool) {
+    if let Ok(mut state) = app.state::<OpenVpnReconnectStore>().state.lock() {
+        state.consecutive_failures = 0;
+        state.next_retry_at_ms = None;
+        state.retry_generation = state.retry_generation.saturating_add(1);
+        state.user_requested_stop = user_requested_stop;
+    }
+}
+
+fn prepare_openvpn_manual_start(app: &AppHandle) {
+    reset_openvpn_reconnect(app, false);
+}
+
+fn handle_openvpn_terminal_state(app: &AppHandle, state: &str, reason: &str) {
+    let reconnect_store = app.state::<OpenVpnReconnectStore>();
+    let cfg = match load_app_config_from_disk(app) {
+        Ok(cfg) => cfg,
+        Err(_) => return,
+    };
+    let now = now_ms();
+    let (generation, delay_secs) = {
+        let mut reconnect = match reconnect_store.state.lock() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
+        if reconnect.user_requested_stop || !cfg.openvpn.auto_reconnect_enabled {
+            reconnect.next_retry_at_ms = None;
+            return;
+        }
+        reconnect.consecutive_failures = reconnect.consecutive_failures.saturating_add(1);
+        let delay_secs = compute_openvpn_reconnect_delay_secs(
+            reconnect.consecutive_failures,
+            cfg.openvpn.auto_reconnect_base_seconds,
+            cfg.openvpn.auto_reconnect_max_seconds,
+        );
+        reconnect.next_retry_at_ms = Some(now.saturating_add(delay_secs.saturating_mul(1000)));
+        (reconnect.retry_generation, delay_secs)
+    };
+
+    let message = if delay_secs == 0 {
+        format!("OpenVPN exited unexpectedly ({state}); reconnecting now. {reason}")
+    } else {
+        format!(
+            "OpenVPN exited unexpectedly ({state}); retrying in {delay_secs}s. {reason}"
+        )
+    };
+    let _ = upsert_function_status(
+        app,
+        &app.state::<FunctionStore>(),
+        OPENVPN_FUNCTION_ID,
+        "reconnecting",
+        &message,
+        None,
+    );
+
+    let app_clone = app.clone();
+    thread::spawn(move || {
+        if delay_secs > 0 {
+            thread::sleep(Duration::from_secs(delay_secs));
+        }
+        {
+            let reconnect_store = app_clone.state::<OpenVpnReconnectStore>();
+            let mut reconnect = match reconnect_store.state.lock() {
+                Ok(guard) => guard,
+                Err(_) => return,
+            };
+            if reconnect.retry_generation != generation || reconnect.user_requested_stop {
+                return;
+            }
+            reconnect.next_retry_at_ms = None;
+        }
+        if let Err(err) = start_openvpn_action(
+            String::new(),
+            String::new(),
+            String::new(),
+            app_clone.clone(),
+            app_clone.state::<SessionStore>(),
+            app_clone.state::<FunctionStore>(),
+            app_clone.state::<OpenVpnAdminStore>(),
+        ) {
+            handle_openvpn_terminal_state(&app_clone, "error", &format!("Reconnect start failed: {err}"));
+        }
+    });
+}
+
 #[cfg(target_os = "windows")]
 fn start_openvpn_admin_worker(
     app: &AppHandle,
@@ -482,6 +598,8 @@ fn start_openvpn_admin_worker(
         OPENVPN_FUNCTION_ID,
         now_ms,
         is_windows_pid_running,
+        mark_openvpn_connected,
+        handle_openvpn_terminal_state,
         upsert_function_status,
     )
 }
@@ -507,6 +625,7 @@ fn run_openvpn_automation(
         write_pty_internal,
         upsert_function_status,
         generate_openvpn_password,
+        mark_openvpn_connected,
         adapt_command_for_shell,
         lock_err,
     )
@@ -1090,6 +1209,27 @@ pub(crate) fn start_openvpn_action(
     }
 }
 
+pub(crate) fn start_openvpn_manual_action(
+    command: String,
+    username: String,
+    password: String,
+    app: AppHandle,
+    session_store: State<'_, SessionStore>,
+    function_store: State<'_, FunctionStore>,
+    admin_store: State<'_, OpenVpnAdminStore>,
+) -> Result<StartFunctionResult, String> {
+    prepare_openvpn_manual_start(&app);
+    start_openvpn_action(
+        command,
+        username,
+        password,
+        app,
+        session_store,
+        function_store,
+        admin_store,
+    )
+}
+
 #[tauri::command]
 fn start_openvpn_function(
     command: String,
@@ -1100,7 +1240,7 @@ fn start_openvpn_function(
     function_store: State<'_, FunctionStore>,
     admin_store: State<'_, OpenVpnAdminStore>,
 ) -> Result<StartFunctionResult, String> {
-    start_openvpn_action(
+    start_openvpn_manual_action(
         command,
         username,
         password,
@@ -1117,6 +1257,7 @@ pub(crate) fn stop_openvpn_action(
     function_store: State<'_, FunctionStore>,
     _admin_store: State<'_, OpenVpnAdminStore>,
 ) -> Result<(), String> {
+    reset_openvpn_reconnect(&app, true);
     #[cfg(target_os = "windows")]
     {
         let _ = &session_store;
@@ -2199,6 +2340,7 @@ fn main() {
         .manage(SessionStore::default())
         .manage(FunctionStore::default())
         .manage(OpenVpnAdminStore::default())
+        .manage(OpenVpnReconnectStore::default())
         .manage(BoundaryAutomationStore::default())
         .manage(RemoteBrowserStore::default())
         .manage(ScpTransferStore::default())

@@ -119,6 +119,20 @@ pub struct OpenVpnConfig {
     /// Field name uses `open_vpn` so camelCase matches UI (`terminateOpenVpnWhenHelperExits`).
     #[serde(default, alias = "terminateOpenvpnWhenHelperExits")]
     pub terminate_open_vpn_when_helper_exits: bool,
+    #[serde(default)]
+    pub auto_reconnect_enabled: bool,
+    #[serde(default = "default_openvpn_reconnect_base_seconds")]
+    pub auto_reconnect_base_seconds: u64,
+    #[serde(default = "default_openvpn_reconnect_max_seconds")]
+    pub auto_reconnect_max_seconds: u64,
+}
+
+pub fn default_openvpn_reconnect_base_seconds() -> u64 {
+    5
+}
+
+pub fn default_openvpn_reconnect_max_seconds() -> u64 {
+    3600
 }
 
 #[cfg(target_os = "windows")]
@@ -151,6 +165,12 @@ pub struct OpenVpnConfigForDisk {
     pub username: String,
     #[serde(default, alias = "terminateOpenvpnWhenHelperExits")]
     pub terminate_open_vpn_when_helper_exits: bool,
+    #[serde(default)]
+    pub auto_reconnect_enabled: bool,
+    #[serde(default = "default_openvpn_reconnect_base_seconds")]
+    pub auto_reconnect_base_seconds: u64,
+    #[serde(default = "default_openvpn_reconnect_max_seconds")]
+    pub auto_reconnect_max_seconds: u64,
 }
 
 #[derive(Serialize)]
@@ -171,6 +191,9 @@ impl From<&AppConfig> for AppConfigForDisk {
                 extra_args: c.openvpn.extra_args.clone(),
                 username: c.openvpn.username.clone(),
                 terminate_open_vpn_when_helper_exits: c.openvpn.terminate_open_vpn_when_helper_exits,
+                auto_reconnect_enabled: c.openvpn.auto_reconnect_enabled,
+                auto_reconnect_base_seconds: c.openvpn.auto_reconnect_base_seconds,
+                auto_reconnect_max_seconds: c.openvpn.auto_reconnect_max_seconds,
             },
             boundary: BoundaryConfigForDisk {
                 addr: c.boundary.addr.clone(),

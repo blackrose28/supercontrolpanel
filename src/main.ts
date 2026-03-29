@@ -54,6 +54,9 @@ type AppConfig = {
     password: string;
     otpSecret: string;
     terminateOpenVpnWhenHelperExits?: boolean;
+    autoReconnectEnabled?: boolean;
+    autoReconnectBaseSeconds?: number;
+    autoReconnectMaxSeconds?: number;
   };
   boundary?: {
     cliPath: string;
@@ -200,6 +203,9 @@ const statusAppVersion = mustElement<HTMLElement>("#status-app-version");
 const openvpnConfigPreview = mustElement<HTMLElement>(
   "#openvpn-config-preview",
 );
+const openvpnReconnectStatus = mustElement<HTMLElement>(
+  "#openvpn-reconnect-status",
+);
 const vpnStartBtn = mustElement<HTMLButtonElement>("#vpn-start");
 const vpnStopBtn = mustElement<HTMLButtonElement>("#vpn-stop");
 const caddyStartBtn = mustElement<HTMLButtonElement>("#caddy-start");
@@ -233,6 +239,15 @@ const cfgOpenvpnOtpSecret = mustElement<HTMLInputElement>(
 );
 const cfgOpenvpnTerminateWithHelper = mustElement<HTMLInputElement>(
   "#cfg-openvpn-terminate-with-helper",
+);
+const cfgOpenvpnAutoReconnect = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-auto-reconnect",
+);
+const cfgOpenvpnReconnectBase = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-reconnect-base",
+);
+const cfgOpenvpnReconnectMax = mustElement<HTMLInputElement>(
+  "#cfg-openvpn-reconnect-max",
 );
 const cfgSaveBtn = mustElement<HTMLButtonElement>("#cfg-save");
 const cfgReloadBtn = mustElement<HTMLButtonElement>("#cfg-reload");
@@ -487,6 +502,7 @@ let unlistenOutput: UnlistenFn | null = null;
 let unlistenExit: UnlistenFn | null = null;
 let unlistenFunctionStatus: UnlistenFn | null = null;
 let unlistenOpenVpnLog: UnlistenFn | null = null;
+let openvpnReconnectRenderTimer: number | null = null;
 
 async function attachListeners() {
   unlistenOutput = await listen<PtyOutputPayload>("pty-output", (event) => {
@@ -608,6 +624,7 @@ async function attachListeners() {
     (event) => {
       storeStatus(event.payload);
       renderStatusList();
+      renderOpenvpnReconnectStatus();
       if (event.payload.functionId === OPENVPN_FUNCTION_ID) {
         openvpnSessionId = event.payload.sessionId;
         syncFunctionButtons();
@@ -894,9 +911,11 @@ async function navigateFromStatusCard(functionId: string) {
 
 function syncFunctionButtons() {
   const status = statusMap.get(OPENVPN_FUNCTION_ID);
-  const running = Boolean(openvpnSessionId) || Boolean(status?.sessionId);
-  vpnStartBtn.disabled = running;
-  vpnStopBtn.disabled = !running;
+  const sessionActive = Boolean(openvpnSessionId) || Boolean(status?.sessionId);
+  const reconnectPending = status?.state === "reconnecting";
+  const busy = sessionActive || reconnectPending;
+  vpnStartBtn.disabled = busy;
+  vpnStopBtn.disabled = !busy;
 }
 
 function syncCaddyButtons() {
@@ -906,9 +925,60 @@ function syncCaddyButtons() {
   caddyStopBtn.disabled = !running;
 }
 
+function formatRemainingSeconds(targetMs: number): string {
+  const remainingMs = Math.max(0, targetMs - Date.now());
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  if (totalSeconds >= 3600) {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.ceil((totalSeconds % 3600) / 60);
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  if (totalSeconds >= 60) {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  return `${totalSeconds}s`;
+}
+
+function parseReconnectDelaySeconds(status: FunctionStatus): number | null {
+  if (status.state !== "reconnecting") return null;
+  if (status.message.includes("reconnecting now")) return 0;
+  const match = status.message.match(/retrying in (\d+)s/i);
+  return match ? Number(match[1]) : null;
+}
+
+function renderOpenvpnReconnectStatus() {
+  if (!appConfig) {
+    openvpnReconnectStatus.textContent = "";
+    return;
+  }
+  const status = statusMap.get(OPENVPN_FUNCTION_ID);
+  if (status?.state === "reconnecting") {
+    const delaySeconds = parseReconnectDelaySeconds(status);
+    if (delaySeconds === null) {
+      openvpnReconnectStatus.textContent = `Reconnect status: ${status.message}`;
+      return;
+    }
+    if (delaySeconds <= 0) {
+      openvpnReconnectStatus.textContent = "Reconnect status: retrying now after an unexpected exit.";
+      return;
+    }
+    const nextRetryAt = status.updatedAtMs + delaySeconds * 1000;
+    openvpnReconnectStatus.textContent = `Reconnect status: retry scheduled in ${formatRemainingSeconds(nextRetryAt)} after an unexpected exit.`;
+    return;
+  }
+  if (appConfig.openvpn.autoReconnectEnabled === true) {
+    openvpnReconnectStatus.textContent = `Reconnect status: enabled (${appConfig.openvpn.autoReconnectBaseSeconds ?? 5}s base, ${appConfig.openvpn.autoReconnectMaxSeconds ?? 3600}s max).`;
+    return;
+  }
+  openvpnReconnectStatus.textContent = "Reconnect status: disabled.";
+}
+
 function renderConfigPreview() {
   if (!appConfig) {
     openvpnConfigPreview.textContent = "Config not loaded.";
+    openvpnReconnectStatus.textContent = "";
     return;
   }
   const username = appConfig.openvpn.username || "(empty)";
@@ -921,7 +991,11 @@ function renderConfigPreview() {
     appConfig.openvpn.terminateOpenVpnWhenHelperExits === true
       ? "helper close stops VPN"
       : "VPN survives helper close";
-  openvpnConfigPreview.textContent = `Executable: ${executable} | OVPN: ${ovpn} | Username: ${username} | Password: ${passwordLabel} | OTP secret: ${otpLabel} | ${link}`;
+  const reconnect = appConfig.openvpn.autoReconnectEnabled === true
+    ? `auto reconnect on (${appConfig.openvpn.autoReconnectBaseSeconds ?? 5}s base / ${appConfig.openvpn.autoReconnectMaxSeconds ?? 3600}s max)`
+    : "auto reconnect off";
+  openvpnConfigPreview.textContent = `Executable: ${executable} | OVPN: ${ovpn} | Username: ${username} | Password: ${passwordLabel} | OTP secret: ${otpLabel} | ${link} | ${reconnect}`;
+  renderOpenvpnReconnectStatus();
 }
 
 function generateLocalMcpToken() {
@@ -993,6 +1067,14 @@ function renderConfigForm() {
   cfgOpenvpnOtpSecret.value = appConfig.openvpn.otpSecret;
   cfgOpenvpnTerminateWithHelper.checked =
     appConfig.openvpn.terminateOpenVpnWhenHelperExits === true;
+  cfgOpenvpnAutoReconnect.checked =
+    appConfig.openvpn.autoReconnectEnabled === true;
+  cfgOpenvpnReconnectBase.value = String(
+    appConfig.openvpn.autoReconnectBaseSeconds ?? 5,
+  );
+  cfgOpenvpnReconnectMax.value = String(
+    appConfig.openvpn.autoReconnectMaxSeconds ?? 3600,
+  );
   const b = appConfig.boundary ?? {
     cliPath: "",
     addr: "",
@@ -1085,6 +1167,15 @@ function readConfigForm(): AppConfig | null {
       password: pw || appConfig?.openvpn.password || "",
       otpSecret: otp || appConfig?.openvpn.otpSecret || "",
       terminateOpenVpnWhenHelperExits: cfgOpenvpnTerminateWithHelper.checked,
+      autoReconnectEnabled: cfgOpenvpnAutoReconnect.checked,
+      autoReconnectBaseSeconds: Math.max(
+        1,
+        Number(cfgOpenvpnReconnectBase.value) || 5,
+      ),
+      autoReconnectMaxSeconds: Math.max(
+        1,
+        Number(cfgOpenvpnReconnectMax.value) || 3600,
+      ),
     },
     boundary: {
       cliPath: cfgBoundaryCli.value.trim(),
@@ -1350,6 +1441,7 @@ async function refreshStatuses() {
     }
   }
   renderStatusList();
+  renderOpenvpnReconnectStatus();
   syncFunctionButtons();
   syncCaddyButtons();
   syncServerActions();
@@ -3485,6 +3577,13 @@ statusList.addEventListener("click", (event) => {
   }
   void navigateFromStatusCard(functionId);
 });
+
+if (openvpnReconnectRenderTimer !== null) {
+  window.clearInterval(openvpnReconnectRenderTimer);
+}
+openvpnReconnectRenderTimer = window.setInterval(() => {
+  renderOpenvpnReconnectStatus();
+}, 1000);
 
 navOpenvpn.addEventListener("click", () => {
   setActiveView("openvpn");

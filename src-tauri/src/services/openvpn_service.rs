@@ -383,6 +383,7 @@ pub fn run_openvpn_automation(
         Option<String>,
     ) -> Result<(), String>,
     generate_openvpn_password: fn(&str, &str) -> Result<String, String>,
+    mark_openvpn_connected: fn(&AppHandle),
     adapt_command_for_shell: fn(&str) -> String,
     lock_err_sessions: fn(
         &std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<crate::stores::PtySession>>>,
@@ -516,6 +517,7 @@ pub fn run_openvpn_automation(
                         || scan_buffer.contains("peer connection initiated"))
                 {
                     seen_connected = true;
+                    mark_openvpn_connected(&app);
                     let function_state = app.state::<FunctionStore>();
                     let _ = upsert_function_status(
                         &app,
@@ -557,6 +559,8 @@ pub fn start_openvpn_admin_worker(
     openvpn_function_id: &str,
     now_ms: fn() -> u64,
     is_windows_pid_running: fn(u32) -> bool,
+    mark_openvpn_connected: fn(&AppHandle),
+    handle_openvpn_terminal_state: fn(&AppHandle, &str, &str),
     upsert_function_status: fn(
         &AppHandle,
         &FunctionStore,
@@ -681,6 +685,11 @@ pub fn start_openvpn_admin_worker(
                                 "Elevated helper ended before status file was available",
                                 None,
                             );
+                            handle_openvpn_terminal_state(
+                                &status_app,
+                                "stopped",
+                                "Elevated helper ended before status file was available",
+                            );
                             let _ =
                                 set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
                             break;
@@ -707,10 +716,14 @@ pub fn start_openvpn_admin_worker(
                         },
                     );
                     if terminal {
+                        handle_openvpn_terminal_state(&status_app, &state, &parsed.message);
                         let _ = fs::remove_file(&helper_pid_path_watch);
                         let _ =
                             set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
                         break;
+                    }
+                    if state == "running" {
+                        mark_openvpn_connected(&status_app);
                     }
                 }
             }
@@ -725,6 +738,11 @@ pub fn start_openvpn_admin_worker(
                         "stopped",
                         "Elevated helper ended (window closed or process exited)",
                         None,
+                    );
+                    handle_openvpn_terminal_state(
+                        &status_app,
+                        "stopped",
+                        "Elevated helper ended (window closed or process exited)",
                     );
                     let _ =
                         set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);

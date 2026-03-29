@@ -18,6 +18,14 @@ pub struct BoundaryAutomationSession {
     pub cancel: Arc<AtomicBool>,
 }
 
+#[derive(Clone, Default)]
+pub struct OpenVpnReconnectState {
+    pub consecutive_failures: u32,
+    pub next_retry_at_ms: Option<u64>,
+    pub retry_generation: u64,
+    pub user_requested_stop: bool,
+}
+
 #[derive(Default)]
 pub struct OpenVpnAdminStore {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -27,4 +35,9 @@ pub struct OpenVpnAdminStore {
 #[derive(Default)]
 pub struct BoundaryAutomationStore {
     pub session: Mutex<Option<BoundaryAutomationSession>>,
+}
+
+#[derive(Default)]
+pub struct OpenVpnReconnectStore {
+    pub state: Mutex<OpenVpnReconnectState>,
 }

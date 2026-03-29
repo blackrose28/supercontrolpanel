@@ -38,6 +38,7 @@
                         prompts, and keep it running.
                     </p>
                     <div id="openvpn-config-preview" class="hint"></div>
+                    <div id="openvpn-reconnect-status" class="hint"></div>
 
                     <div class="actions">
                         <button id="vpn-start">Start Function</button>
@@ -625,6 +626,46 @@
                                 object, so closing the helper stops the VPN.
                             </p>
                         </div>
+                        <div class="form-grid-span openvpn-terminate-block">
+                            <label
+                                class="openvpn-terminate-check"
+                                for="cfg-openvpn-auto-reconnect"
+                            >
+                                <input
+                                    id="cfg-openvpn-auto-reconnect"
+                                    type="checkbox"
+                                />
+                                <span
+                                    ><strong
+                                        >Reconnect automatically after unexpected exit</strong
+                                    ></span
+                                >
+                            </label>
+                            <p class="hint openvpn-terminate-hint">
+                                Retries any non-user OpenVPN exit with exponential
+                                backoff.
+                            </p>
+                        </div>
+                        <label for="cfg-openvpn-reconnect-base"
+                            >Reconnect base delay (seconds)</label
+                        >
+                        <input
+                            id="cfg-openvpn-reconnect-base"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value="5"
+                        />
+                        <label for="cfg-openvpn-reconnect-max"
+                            >Reconnect max delay (seconds)</label
+                        >
+                        <input
+                            id="cfg-openvpn-reconnect-max"
+                            type="number"
+                            min="1"
+                            step="1"
+                            value="3600"
+                        />
                     </div>
 
 
