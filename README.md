@@ -87,13 +87,20 @@ Super Control Panel is a PTY-driven desktop control panel where each feature can
 
 ```bash
 npm install
-npm run tauri dev
+npm run tauri:dev
 ```
 
 ## Build desktop app
 
 ```bash
-npm run tauri build
+npm run tauri:build
+```
+
+## Run helper CLI
+
+```bash
+npm run helper:run -- status
+npm run helper:run -- openvpn status
 ```
 
 ## MCP support
