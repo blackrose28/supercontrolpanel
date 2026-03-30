@@ -1,6 +1,6 @@
 [package]
 name = "super-control-panel"
-version = "1.1.0"
+version = "1.2.0"
 description = "Cross-platform PTY-driven control panel for OpenVPN, Boundary, SSH, and SCP workflows"
 edition = "2021"
 default-run = "super-control-panel"

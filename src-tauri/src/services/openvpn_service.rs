@@ -2,7 +2,12 @@
 use std::{fs, path::PathBuf};
 
 #[cfg(target_os = "windows")]
-use std::{process::Command, thread, time::Duration};
+use std::{
+    io::Read,
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
 #[cfg(not(target_os = "windows"))]
 use std::{
     sync::mpsc::{self, Receiver, Sender},
@@ -544,6 +549,59 @@ pub fn run_openvpn_automation(
     }
 }
 
+/// Waits for the outer PowerShell process that runs `Start-Process -Verb RunAs`. That call
+/// blocks while the UAC dialog is open; if the user cancels or the launcher hangs, `output()`
+/// would block indefinitely and stall the Tauri command — so we enforce a timeout and kill
+/// the launcher process.
+#[cfg(target_os = "windows")]
+fn powershell_elevation_launcher_output(
+    command: &str,
+    timeout: Duration,
+) -> Result<std::process::Output, String> {
+    let mut child = Command::new("powershell.exe")
+        .args(["-NoProfile", "-Command", command])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("failed to start elevated helper: {e}"))?;
+
+    let started = Instant::now();
+    loop {
+        match child
+            .try_wait()
+            .map_err(|e| format!("elevated helper launcher wait error: {e}"))?
+        {
+            Some(status) => {
+                let mut stdout = Vec::new();
+                let mut stderr = Vec::new();
+                if let Some(mut out) = child.stdout.take() {
+                    let _ = out.read_to_end(&mut stdout);
+                }
+                if let Some(mut err) = child.stderr.take() {
+                    let _ = err.read_to_end(&mut stderr);
+                }
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            None => {
+                if started.elapsed() > timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "Timed out after {}s waiting for the UAC prompt or elevation launcher. \
+                         If you cancelled the Administrator prompt, try Connect again.",
+                        timeout.as_secs()
+                    ));
+                }
+                thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 #[allow(clippy::too_many_arguments)]
 pub fn start_openvpn_admin_worker(
@@ -614,17 +672,60 @@ pub fn start_openvpn_admin_worker(
         escape_ps_single_quoted(&helper_pid_path.to_string_lossy())
     );
 
-    let output = Command::new("powershell.exe")
-        .args(["-NoProfile", "-Command", &cmd])
-        .output()
-        .map_err(|e| format!("failed to start elevated helper: {e}"))?;
+    let cleanup_session_files = || {
+        let _ = fs::remove_file(&launch_path);
+        let _ = fs::remove_file(&status_path);
+        let _ = fs::remove_file(&log_path);
+        let _ = fs::remove_file(&err_path);
+        let _ = fs::remove_file(&stop_path);
+        let _ = fs::remove_file(&helper_pid_path);
+    };
+
+    // UAC can keep the launcher blocked for a long time; still cap so the app never hangs forever.
+    const ELEVATION_LAUNCH_TIMEOUT: Duration = Duration::from_secs(180);
+    let output = match powershell_elevation_launcher_output(&cmd, ELEVATION_LAUNCH_TIMEOUT) {
+        Ok(o) => o,
+        Err(e) => {
+            cleanup_session_files();
+            return Err(e);
+        }
+    };
 
     if !output.status.success() {
+        cleanup_session_files();
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(format!("failed to elevate helper: {stderr}"));
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let detail = if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            format!("exit code {}", output.status.code().unwrap_or(-1))
+        };
+        let hint = if detail.to_lowercase().contains("cancel")
+            || detail.to_lowercase().contains("aborted")
+            || detail.to_lowercase().contains("denied")
+        {
+            " (Elevation was cancelled or denied.)"
+        } else {
+            ""
+        };
+        return Err(format!("failed to elevate helper: {detail}{hint}"));
     }
 
     let helper_pid = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let pid_ok = helper_pid
+        .parse::<u32>()
+        .ok()
+        .filter(|&p| p > 0)
+        .is_some();
+    if !pid_ok {
+        cleanup_session_files();
+        return Err(
+            "Elevation launcher returned no helper process id — the Administrator prompt may have been declined."
+                .to_string(),
+        );
+    }
     upsert_function_status(
         app,
         function_store,
@@ -649,6 +750,8 @@ pub fn start_openvpn_admin_worker(
     thread::spawn(move || {
         let mut last_raw = String::new();
         let mut cached_helper_pid: Option<u32> = None;
+        let watcher_started = Instant::now();
+        const HELPER_STALL_TIMEOUT: Duration = Duration::from_secs(120);
         loop {
             thread::sleep(Duration::from_millis(500));
 
@@ -672,6 +775,22 @@ pub fn start_openvpn_admin_worker(
                         .ok()
                         .and_then(|s| s.as_ref().map(|v| v.id.clone()));
                     if active.as_deref() != Some(status_session.as_str()) {
+                        break;
+                    }
+                    if cached_helper_pid.is_none() && watcher_started.elapsed() > HELPER_STALL_TIMEOUT {
+                        let _ = fs::remove_file(&helper_pid_path_watch);
+                        let msg = "Elevated OpenVPN helper never became ready (timeout waiting for status). Try Connect again.";
+                        let _ = upsert_function_status(
+                            &status_app,
+                            &status_app.state::<FunctionStore>(),
+                            &function_id,
+                            "error",
+                            msg,
+                            None,
+                        );
+                        handle_openvpn_terminal_state(&status_app, "error", msg);
+                        let _ =
+                            set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
                         break;
                     }
                     if let Some(pid) = cached_helper_pid {
