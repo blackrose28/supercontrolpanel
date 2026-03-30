@@ -605,6 +605,9 @@ fn start_openvpn_admin_worker(
     username: String,
     password: String,
     terminate_open_vpn_when_helper_exits: bool,
+    auto_reconnect_enabled: bool,
+    auto_reconnect_base_seconds: u64,
+    auto_reconnect_max_seconds: u64,
 ) -> Result<String, String> {
     start_openvpn_admin_worker_service(
         app,
@@ -615,12 +618,14 @@ fn start_openvpn_admin_worker(
         username,
         password,
         terminate_open_vpn_when_helper_exits,
+        auto_reconnect_enabled,
+        auto_reconnect_base_seconds,
+        auto_reconnect_max_seconds,
         OPENVPN_HELPER_SCRIPT_NAME,
         OPENVPN_FUNCTION_ID,
         now_ms,
         is_windows_pid_running,
         mark_openvpn_connected,
-        handle_openvpn_terminal_state,
         upsert_function_status,
     )
 }
@@ -1195,6 +1200,9 @@ pub(crate) fn start_openvpn_action(
             resolved_username,
             combined_password,
             resolved_openvpn.terminate_open_vpn_when_helper_exits,
+            saved_config.openvpn.auto_reconnect_enabled,
+            saved_config.openvpn.auto_reconnect_base_seconds,
+            saved_config.openvpn.auto_reconnect_max_seconds,
         )?;
         scp_debug!("start_openvpn_function: Windows helper session_id={session_id}");
 

@@ -145,6 +145,12 @@ pub struct OpenVpnLaunchConfig {
     pub password: String,
     #[serde(default, alias = "terminateOpenvpnWhenHelperExits")]
     pub terminate_open_vpn_when_helper_exits: bool,
+    #[serde(default)]
+    pub auto_reconnect_enabled: bool,
+    #[serde(default = "default_openvpn_reconnect_base_seconds")]
+    pub auto_reconnect_base_seconds: u64,
+    #[serde(default = "default_openvpn_reconnect_max_seconds")]
+    pub auto_reconnect_max_seconds: u64,
 }
 
 #[cfg(target_os = "windows")]

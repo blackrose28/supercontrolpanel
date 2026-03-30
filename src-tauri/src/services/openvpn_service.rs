@@ -84,6 +84,49 @@ function Write-Status([string]$State, [string]$Message) {
   ($payload | ConvertTo-Json -Compress) | Set-Content -Path $StatusPath -Encoding UTF8
 }
 
+function Get-ReconnectDelaySec {
+  param([int]$FailureCount, [long]$BaseSec, [long]$MaxSec)
+  if ($FailureCount -le 1) { return [long]0 }
+  $effectiveBase = [Math]::Max([long]1, $BaseSec)
+  $effectiveMax = [Math]::Max($effectiveBase, $MaxSec)
+  $exponent = [Math]::Min(62, $FailureCount - 1)
+  $factor = ([uint64]1 -shl $exponent) - [uint64]1
+  $delay = [uint64]$effectiveBase * $factor
+  $cap = [uint64]$effectiveMax
+  if ($delay -gt $cap) { return [long]$cap }
+  return [long]$delay
+}
+
+# Tokenize like CommandLineToArgvW so Start-Process -ArgumentList gets one argv per token (paths with spaces stay quoted as one token).
+function Split-CmdLineToArgv([string]$CommandLine) {
+  $argv = New-Object System.Collections.Generic.List[string]
+  $i = 0
+  $n = $CommandLine.Length
+  while ($i -lt $n) {
+    while ($i -lt $n -and [char]::IsWhiteSpace($CommandLine[$i])) { $i++ }
+    if ($i -ge $n) { break }
+    if ($CommandLine[$i] -eq [char]34) {
+      $i++
+      $sb = New-Object System.Text.StringBuilder
+      while ($i -lt $n) {
+        if ($CommandLine[$i] -eq [char]34) {
+          if (($i + 1) -lt $n -and $CommandLine[$i + 1] -eq [char]34) { [void]$sb.Append([char]34); $i += 2; continue }
+          $i++
+          break
+        }
+        [void]$sb.Append($CommandLine[$i])
+        $i++
+      }
+      [void]$argv.Add($sb.ToString())
+    } else {
+      $start = $i
+      while ($i -lt $n -and -not [char]::IsWhiteSpace($CommandLine[$i])) { $i++ }
+      [void]$argv.Add($CommandLine.Substring($start, $i - $start))
+    }
+  }
+  return [string[]]$argv.ToArray()
+}
+
 try {
   if (!(Test-Path -LiteralPath $ConfigPath)) {
     throw "Launch config not found: $ConfigPath"
@@ -93,26 +136,29 @@ try {
   if ([string]::IsNullOrWhiteSpace($cfg.executablePath)) {
     throw "OpenVPN executable path is missing."
   }
-  $authFile = [System.IO.Path]::GetTempFileName()
-  try {
-    "$($cfg.username)`r`n$($cfg.password)`r`n" | Set-Content -LiteralPath $authFile -NoNewline -Encoding ASCII
-    $exe = $cfg.executablePath
-    $args = $cfg.args
-    if ([string]::IsNullOrWhiteSpace($args)) {
-      $args = "--auth-user-pass `"$authFile`" --auth-nocache"
-    } else {
-      $args = "$args --auth-user-pass `"$authFile`" --auth-nocache"
-    }
 
-    $killWithHelper = $false
-    if (($cfg | Get-Member -Name terminateOpenVpnWhenHelperExits -MemberType NoteProperty) -and ($cfg.terminateOpenVpnWhenHelperExits -eq $true)) {
-      $killWithHelper = $true
-    }
+  $autoReconnect = $false
+  if (($cfg | Get-Member -Name autoReconnectEnabled -MemberType NoteProperty) -and ($cfg.autoReconnectEnabled -eq $true)) {
+    $autoReconnect = $true
+  }
+  $reconnectBase = [long]5
+  if ($cfg | Get-Member -Name autoReconnectBaseSeconds -MemberType NoteProperty) {
+    $reconnectBase = [long]$cfg.autoReconnectBaseSeconds
+  }
+  $reconnectMax = [long]3600
+  if ($cfg | Get-Member -Name autoReconnectMaxSeconds -MemberType NoteProperty) {
+    $reconnectMax = [long]$cfg.autoReconnectMaxSeconds
+  }
 
-    Write-Status "starting" "Starting OpenVPN process"
-    $jobHandle = [IntPtr]::Zero
-    if ($killWithHelper) {
-      $scpJobType = @'
+  $exe = $cfg.executablePath
+  $killWithHelper = $false
+  if (($cfg | Get-Member -Name terminateOpenVpnWhenHelperExits -MemberType NoteProperty) -and ($cfg.terminateOpenVpnWhenHelperExits -eq $true)) {
+    $killWithHelper = $true
+  }
+
+  $jobHandle = [IntPtr]::Zero
+  if ($killWithHelper) {
+    $scpJobType = @'
 using System;
 using System.Runtime.InteropServices;
 [StructLayout(LayoutKind.Sequential, Pack=8)]
@@ -141,62 +187,128 @@ public static class ScpOvpnJob {
   [DllImport("kernel32.dll", SetLastError=true)] public static extern bool AssignProcessToJobObject(IntPtr j,IntPtr p);
 }
 '@
-      Add-Type -TypeDefinition $scpJobType -ErrorAction Stop
-      $jobHandle = [ScpOvpnJob]::CreateJobObject([IntPtr]::Zero, $null)
-      if ($jobHandle -eq [IntPtr]::Zero) { throw "CreateJobObject failed" }
-      $jl = New-Object ScpJobExt
-      $jl.BasicLimitInformation.LimitFlags = [UInt32]0x2000
-      $sz = [System.Runtime.InteropServices.Marshal]::SizeOf([type][ScpJobExt])
-      $pNative = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($sz)
+    Add-Type -TypeDefinition $scpJobType -ErrorAction Stop
+    $jobHandle = [ScpOvpnJob]::CreateJobObject([IntPtr]::Zero, $null)
+    if ($jobHandle -eq [IntPtr]::Zero) { throw "CreateJobObject failed" }
+    $jl = New-Object ScpJobExt
+    $jl.BasicLimitInformation.LimitFlags = [UInt32]0x2000
+    $sz = [System.Runtime.InteropServices.Marshal]::SizeOf([type][ScpJobExt])
+    $pNative = [System.Runtime.InteropServices.Marshal]::AllocHGlobal($sz)
+    try {
+      [System.Runtime.InteropServices.Marshal]::StructureToPtr($jl, $pNative, $false)
+      if (-not [ScpOvpnJob]::SetInformationJobObject($jobHandle, 9, $pNative, [uint32]$sz)) {
+        $le = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        throw "SetInformationJobObject failed (win32 $le)"
+      }
+    } finally {
+      [System.Runtime.InteropServices.Marshal]::FreeHGlobal($pNative)
+    }
+    $global:ScpOvpnJobKeepAlive = $jobHandle
+  }
+
+  $consecutiveFailures = 0
+  $maxReconnect = 50
+
+  while ($true) {
+    if (Test-Path -LiteralPath $StopPath) {
+      Write-Status "stopped" "Stopped by request"
+      break
+    }
+
+    $authFile = [System.IO.Path]::GetTempFileName()
+    try {
+      "$($cfg.username)`r`n$($cfg.password)`r`n" | Set-Content -LiteralPath $authFile -NoNewline -Encoding ASCII
+      $baseArgs = $cfg.args
+      if ([string]::IsNullOrWhiteSpace($baseArgs)) {
+        $cmdArgs = "--auth-user-pass `"$authFile`" --auth-nocache"
+      } else {
+        $cmdArgs = "$baseArgs --auth-user-pass `"$authFile`" --auth-nocache"
+      }
+
+      Write-Status "starting" "Starting OpenVPN process"
+      $argList = Split-CmdLineToArgv $cmdArgs
+      $proc = $null
       try {
-        [System.Runtime.InteropServices.Marshal]::StructureToPtr($jl, $pNative, $false)
-        if (-not [ScpOvpnJob]::SetInformationJobObject($jobHandle, 9, $pNative, [uint32]$sz)) {
-          $le = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-          throw "SetInformationJobObject failed (win32 $le)"
+        $proc = Start-Process -FilePath $exe `
+          -ArgumentList $argList `
+          -WindowStyle Hidden `
+          -RedirectStandardOutput $LogPath `
+          -RedirectStandardError $ErrPath `
+          -PassThru
+
+        if ($killWithHelper) {
+          if (-not [ScpOvpnJob]::AssignProcessToJobObject($jobHandle, $proc.Handle)) {
+            $e2 = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+            throw "AssignProcessToJobObject failed (win32 $e2)"
+          }
         }
-      } finally {
-        [System.Runtime.InteropServices.Marshal]::FreeHGlobal($pNative)
+
+        $runMsg = if ($killWithHelper) { "OpenVPN running (stops when helper window closes)" } else { "OpenVPN started as Administrator (keeps running if helper closes)" }
+        Write-Status "running" $runMsg
+        $consecutiveFailures = 0
+
+        while (-not $proc.HasExited) {
+          if (Test-Path -LiteralPath $StopPath) {
+            Write-Status "stopping" "Stop requested"
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
+            break
+          }
+          Start-Sleep -Milliseconds 400
+        }
+
+        $proc.WaitForExit()
+      } catch {
+        if ($null -ne $proc) {
+          try {
+            if (-not $proc.HasExited) {
+              Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+              $proc.WaitForExit(15000)
+            }
+          } catch {}
+        }
+        throw
       }
-    }
 
-    $proc = Start-Process -FilePath $exe `
-      -ArgumentList $args `
-      -WindowStyle Hidden `
-      -RedirectStandardOutput $LogPath `
-      -RedirectStandardError $ErrPath `
-      -PassThru
-
-    if ($killWithHelper) {
-      if (-not [ScpOvpnJob]::AssignProcessToJobObject($jobHandle, $proc.Handle)) {
-        $e = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-        throw "AssignProcessToJobObject failed (win32 $e)"
-      }
-      $global:ScpOvpnJobKeepAlive = $jobHandle
-    }
-
-    $runMsg = if ($killWithHelper) { "OpenVPN running (stops when helper window closes)" } else { "OpenVPN started as Administrator (keeps running if helper closes)" }
-    Write-Status "running" $runMsg
-
-    while (-not $proc.HasExited) {
+      $code = $proc.ExitCode
       if (Test-Path -LiteralPath $StopPath) {
-        Write-Status "stopping" "Stop requested"
-        try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
+        Write-Status "stopped" "Stopped by request (exit code $code)"
         break
       }
-      Start-Sleep -Milliseconds 400
-    }
 
-    $proc.WaitForExit()
-    $code = $proc.ExitCode
-    if (Test-Path -LiteralPath $StopPath) {
-      Write-Status "stopped" "Stopped by request (exit code $code)"
-    } elseif ($code -eq 0) {
-      Write-Status "stopped" "OpenVPN exited normally"
-    } else {
-      Write-Status "error" "OpenVPN exited with code $code"
+      if (-not $autoReconnect) {
+        if ($code -eq 0) {
+          Write-Status "stopped" "OpenVPN exited normally"
+        } else {
+          Write-Status "error" "OpenVPN exited with code $code"
+        }
+        break
+      }
+
+      $consecutiveFailures++
+      if ($consecutiveFailures -gt $maxReconnect) {
+        Write-Status "error" "Auto-reconnect gave up after $maxReconnect consecutive failures. OpenVPN last exit code $code."
+        break
+      }
+
+      $delay = Get-ReconnectDelaySec -FailureCount $consecutiveFailures -BaseSec $reconnectBase -MaxSec $reconnectMax
+      if ($delay -gt 0) {
+        Write-Status "reconnecting" "OpenVPN exited (code $code); retrying in ${delay}s (attempt $consecutiveFailures of $maxReconnect)."
+        $slept = 0
+        while ($slept -lt $delay) {
+          if (Test-Path -LiteralPath $StopPath) {
+            Write-Status "stopped" "Stopped by request during reconnect wait"
+            break
+          }
+          Start-Sleep -Seconds 1
+          $slept++
+        }
+        if (Test-Path -LiteralPath $StopPath) { break }
+      } else {
+        Write-Status "reconnecting" "OpenVPN exited (code $code); reconnecting now (attempt $consecutiveFailures of $maxReconnect)."
+      }
+    } finally {
+      Remove-Item -LiteralPath $authFile -ErrorAction SilentlyContinue
     }
-  } finally {
-    Remove-Item -LiteralPath $authFile -ErrorAction SilentlyContinue
   }
 } catch {
   $msg = $_.Exception.Message
@@ -613,12 +725,14 @@ pub fn start_openvpn_admin_worker(
     username: String,
     password: String,
     terminate_open_vpn_when_helper_exits: bool,
+    auto_reconnect_enabled: bool,
+    auto_reconnect_base_seconds: u64,
+    auto_reconnect_max_seconds: u64,
     openvpn_helper_script_name: &str,
     openvpn_function_id: &str,
     now_ms: fn() -> u64,
     is_windows_pid_running: fn(u32) -> bool,
     mark_openvpn_connected: fn(&AppHandle),
-    handle_openvpn_terminal_state: fn(&AppHandle, &str, &str),
     upsert_function_status: fn(
         &AppHandle,
         &FunctionStore,
@@ -647,6 +761,9 @@ pub fn start_openvpn_admin_worker(
         username,
         password,
         terminate_open_vpn_when_helper_exits,
+        auto_reconnect_enabled,
+        auto_reconnect_base_seconds,
+        auto_reconnect_max_seconds,
     };
     let launch_payload = serde_json::to_string_pretty(&launch)
         .map_err(|e| format!("failed to encode launch config: {e}"))?;
@@ -788,7 +905,6 @@ pub fn start_openvpn_admin_worker(
                             msg,
                             None,
                         );
-                        handle_openvpn_terminal_state(&status_app, "error", msg);
                         let _ =
                             set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
                         break;
@@ -803,11 +919,6 @@ pub fn start_openvpn_admin_worker(
                                 "stopped",
                                 "Elevated helper ended before status file was available",
                                 None,
-                            );
-                            handle_openvpn_terminal_state(
-                                &status_app,
-                                "stopped",
-                                "Elevated helper ended before status file was available",
                             );
                             let _ =
                                 set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
@@ -835,7 +946,6 @@ pub fn start_openvpn_admin_worker(
                         },
                     );
                     if terminal {
-                        handle_openvpn_terminal_state(&status_app, &state, &parsed.message);
                         let _ = fs::remove_file(&helper_pid_path_watch);
                         let _ =
                             set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
@@ -857,11 +967,6 @@ pub fn start_openvpn_admin_worker(
                         "stopped",
                         "Elevated helper ended (window closed or process exited)",
                         None,
-                    );
-                    handle_openvpn_terminal_state(
-                        &status_app,
-                        "stopped",
-                        "Elevated helper ended (window closed or process exited)",
                     );
                     let _ =
                         set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
