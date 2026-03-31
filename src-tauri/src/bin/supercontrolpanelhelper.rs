@@ -1,10 +1,4 @@
-use std::{
-    env,
-    fs,
-    path::PathBuf,
-    process,
-    time::Duration,
-};
+use std::{env, fs, path::PathBuf, process, time::Duration};
 
 use reqwest::blocking::Client;
 use serde::Deserialize;
@@ -74,7 +68,10 @@ fn main() {
                     "warnings": [],
                     "timestamp": 0
                 });
-                eprintln!("{}", serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string()));
+                eprintln!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| payload.to_string())
+                );
             } else {
                 eprintln!("{message}");
             }
@@ -94,7 +91,10 @@ fn run() -> Result<i32, (i32, String, bool)> {
     let client = McpClient::from_options(&options)?;
 
     let result = match args[0].as_str() {
-        "status" => print_envelope(options.json, client.call_tool("app_get_overview", json!({}))?),
+        "status" => print_envelope(
+            options.json,
+            client.call_tool("app_get_overview", json!({}))?,
+        ),
         "function" => handle_function_command(&client, &args[1..], options.json),
         "openvpn" => handle_openvpn_command(&client, &args[1..], options.json),
         "boundary" => handle_boundary_command(&client, &args[1..], options.json),
@@ -126,22 +126,24 @@ fn parse_global_options(args: &mut Vec<String>) -> Result<GlobalOptions, (i32, S
                 let value = args.get(index + 1).cloned().ok_or_else(|| {
                     (1, "--timeout-ms requires a value".to_string(), options.json)
                 })?;
-                options.timeout_ms = value.parse::<u64>().map_err(|_| {
-                    (1, "--timeout-ms must be a number".to_string(), options.json)
-                })?;
+                options.timeout_ms = value
+                    .parse::<u64>()
+                    .map_err(|_| (1, "--timeout-ms must be a number".to_string(), options.json))?;
                 args.drain(index..=index + 1);
             }
             "--endpoint" => {
-                let value = args.get(index + 1).cloned().ok_or_else(|| {
-                    (1, "--endpoint requires a value".to_string(), options.json)
-                })?;
+                let value = args
+                    .get(index + 1)
+                    .cloned()
+                    .ok_or_else(|| (1, "--endpoint requires a value".to_string(), options.json))?;
                 options.endpoint = Some(value);
                 args.drain(index..=index + 1);
             }
             "--token" => {
-                let value = args.get(index + 1).cloned().ok_or_else(|| {
-                    (1, "--token requires a value".to_string(), options.json)
-                })?;
+                let value = args
+                    .get(index + 1)
+                    .cloned()
+                    .ok_or_else(|| (1, "--token requires a value".to_string(), options.json))?;
                 options.token = Some(value);
                 args.drain(index..=index + 1);
             }
@@ -167,9 +169,17 @@ impl McpClient {
             } else {
                 settings.mcp_bind_address
             };
-            let port = if settings.mcp_port == 0 { 46739 } else { settings.mcp_port };
+            let port = if settings.mcp_port == 0 {
+                46739
+            } else {
+                settings.mcp_port
+            };
             if !settings.mcp_enabled {
-                return Err((4, "MCP is disabled in sync-local.json".to_string(), options.json));
+                return Err((
+                    4,
+                    "MCP is disabled in sync-local.json".to_string(),
+                    options.json,
+                ));
             }
             format!("http://{bind}:{port}")
         };
@@ -181,7 +191,11 @@ impl McpClient {
         } else {
             let settings = load_sync_settings().map_err(|err| (1, err, options.json))?;
             if settings.mcp_auth_token.trim().is_empty() {
-                return Err((4, "MCP auth token is empty in sync-local.json".to_string(), options.json));
+                return Err((
+                    4,
+                    "MCP auth token is empty in sync-local.json".to_string(),
+                    options.json,
+                ));
             }
             settings.mcp_auth_token
         };
@@ -189,7 +203,13 @@ impl McpClient {
         let client = Client::builder()
             .timeout(Duration::from_millis(options.timeout_ms))
             .build()
-            .map_err(|err| (2, format!("failed to build HTTP client: {err}"), options.json))?;
+            .map_err(|err| {
+                (
+                    2,
+                    format!("failed to build HTTP client: {err}"),
+                    options.json,
+                )
+            })?;
 
         Ok(Self {
             endpoint: endpoint.trim_end_matches('/').to_string(),
@@ -225,7 +245,11 @@ impl McpClient {
             return Err((2, "Unauthorized".to_string(), false));
         }
         if !response.status().is_success() {
-            return Err((2, format!("MCP status request failed: {}", response.status()), false));
+            return Err((
+                2,
+                format!("MCP status request failed: {}", response.status()),
+                false,
+            ));
         }
         response
             .json::<McpRuntimeStatus>()
@@ -233,7 +257,9 @@ impl McpClient {
     }
 }
 
-fn parse_envelope_response(response: reqwest::blocking::Response) -> Result<McpEnvelope, (i32, String, bool)> {
+fn parse_envelope_response(
+    response: reqwest::blocking::Response,
+) -> Result<McpEnvelope, (i32, String, bool)> {
     let status = response.status();
     let text = response
         .text()
@@ -256,7 +282,11 @@ fn parse_envelope_response(response: reqwest::blocking::Response) -> Result<McpE
 
 fn map_http_err(err: reqwest::Error) -> (i32, String, bool) {
     if err.is_connect() {
-        (4, format!("failed to connect to MCP endpoint: {err}"), false)
+        (
+            4,
+            format!("failed to connect to MCP endpoint: {err}"),
+            false,
+        )
     } else if err.is_timeout() {
         (2, format!("MCP request timed out: {err}"), false)
     } else {
@@ -264,30 +294,65 @@ fn map_http_err(err: reqwest::Error) -> (i32, String, bool) {
     }
 }
 
-fn handle_function_command(client: &McpClient, args: &[String], as_json: bool) -> Result<(), (i32, String, bool)> {
+fn handle_function_command(
+    client: &McpClient,
+    args: &[String],
+    as_json: bool,
+) -> Result<(), (i32, String, bool)> {
     match args {
-        [sub] if sub == "list" => print_envelope(as_json, client.call_tool("function_status_list", json!({}))?),
-        [sub, flag, function_id] if sub == "get" && flag == "--function-id" => {
-            print_envelope(as_json, client.call_tool("function_status_get", json!({ "functionId": function_id }))?)
+        [sub] if sub == "list" => print_envelope(
+            as_json,
+            client.call_tool("function_status_list", json!({}))?,
+        ),
+        [sub, flag, function_id] if sub == "get" && flag == "--function-id" => print_envelope(
+            as_json,
+            client.call_tool("function_status_get", json!({ "functionId": function_id }))?,
+        ),
+        _ => Err((
+            1,
+            "Usage: supercontrolpanelhelper function list|get --function-id <id>".to_string(),
+            as_json,
+        )),
+    }
+}
+
+fn handle_openvpn_command(
+    client: &McpClient,
+    args: &[String],
+    as_json: bool,
+) -> Result<(), (i32, String, bool)> {
+    match args {
+        [sub] if sub == "status" => {
+            print_envelope(as_json, client.call_tool("openvpn_get_status", json!({}))?)
         }
-        _ => Err((1, "Usage: supercontrolpanelhelper function list|get --function-id <id>".to_string(), as_json)),
+        [sub] if sub == "start" => {
+            print_envelope(as_json, client.call_tool("openvpn_start", json!({}))?)
+        }
+        [sub] if sub == "stop" => {
+            print_envelope(as_json, client.call_tool("openvpn_stop", json!({}))?)
+        }
+        _ => Err((
+            1,
+            "Usage: supercontrolpanelhelper openvpn status|start|stop".to_string(),
+            as_json,
+        )),
     }
 }
 
-fn handle_openvpn_command(client: &McpClient, args: &[String], as_json: bool) -> Result<(), (i32, String, bool)> {
+fn handle_boundary_command(
+    client: &McpClient,
+    args: &[String],
+    as_json: bool,
+) -> Result<(), (i32, String, bool)> {
     match args {
-        [sub] if sub == "status" => print_envelope(as_json, client.call_tool("openvpn_get_status", json!({}))?),
-        [sub] if sub == "start" => print_envelope(as_json, client.call_tool("openvpn_start", json!({}))?),
-        [sub] if sub == "stop" => print_envelope(as_json, client.call_tool("openvpn_stop", json!({}))?),
-        _ => Err((1, "Usage: supercontrolpanelhelper openvpn status|start|stop".to_string(), as_json)),
-    }
-}
-
-fn handle_boundary_command(client: &McpClient, args: &[String], as_json: bool) -> Result<(), (i32, String, bool)> {
-    match args {
-        [sub] if sub == "status" => print_envelope(as_json, client.call_tool("boundary_get_status", json!({}))?),
+        [sub] if sub == "status" => {
+            print_envelope(as_json, client.call_tool("boundary_get_status", json!({}))?)
+        }
         [first, second, third] if first == "login" && second == "start" && third == "--hidden" => {
-            print_envelope(as_json, client.call_tool("boundary_auth_start", json!({ "hidden": true }))?)
+            print_envelope(
+                as_json,
+                client.call_tool("boundary_auth_start", json!({ "hidden": true }))?,
+            )
         }
         [first, second] if first == "login" && second == "start" => {
             print_envelope(as_json, client.call_tool("boundary_auth_start", json!({}))?)
@@ -295,33 +360,77 @@ fn handle_boundary_command(client: &McpClient, args: &[String], as_json: bool) -
         [first, second] if first == "login" && second == "stop" => {
             print_envelope(as_json, client.call_tool("boundary_auth_stop", json!({}))?)
         }
-        _ => Err((1, "Usage: supercontrolpanelhelper boundary status|login start [--hidden]|login stop".to_string(), as_json)),
+        _ => Err((
+            1,
+            "Usage: supercontrolpanelhelper boundary status|login start [--hidden]|login stop"
+                .to_string(),
+            as_json,
+        )),
     }
 }
 
-fn handle_server_command(client: &McpClient, args: &[String], as_json: bool) -> Result<(), (i32, String, bool)> {
+fn handle_server_command(
+    client: &McpClient,
+    args: &[String],
+    as_json: bool,
+) -> Result<(), (i32, String, bool)> {
     match args {
-        [sub] if sub == "list" => print_envelope(as_json, client.call_tool("servers_list", json!({}))?),
-        [sub, flag, server_id] if sub == "get" && flag == "--server-id" => {
-            print_envelope(as_json, client.call_tool("server_get", json!({ "serverId": server_id }))?)
+        [sub] if sub == "list" => {
+            print_envelope(as_json, client.call_tool("servers_list", json!({}))?)
         }
+        [sub, flag, server_id] if sub == "get" && flag == "--server-id" => print_envelope(
+            as_json,
+            client.call_tool("server_get", json!({ "serverId": server_id }))?,
+        ),
         [group, action, flag, server_id] if group == "tunnel" && flag == "--server-id" => {
-            let tool = if action == "start" { "server_tunnel_start" } else if action == "stop" { "server_tunnel_stop" } else {
-                return Err((1, "Usage: supercontrolpanelhelper server tunnel start|stop --server-id <id>".to_string(), as_json));
+            let tool = if action == "start" {
+                "server_tunnel_start"
+            } else if action == "stop" {
+                "server_tunnel_stop"
+            } else {
+                return Err((
+                    1,
+                    "Usage: supercontrolpanelhelper server tunnel start|stop --server-id <id>"
+                        .to_string(),
+                    as_json,
+                ));
             };
-            print_envelope(as_json, client.call_tool(tool, json!({ "serverId": server_id }))?)
+            print_envelope(
+                as_json,
+                client.call_tool(tool, json!({ "serverId": server_id }))?,
+            )
         }
         [group, action, flag, server_id] if group == "ssh" && flag == "--server-id" => {
-            let tool = if action == "start" { "server_ssh_start" } else if action == "stop" { "server_ssh_stop" } else {
-                return Err((1, "Usage: supercontrolpanelhelper server ssh start|stop --server-id <id>".to_string(), as_json));
+            let tool = if action == "start" {
+                "server_ssh_start"
+            } else if action == "stop" {
+                "server_ssh_stop"
+            } else {
+                return Err((
+                    1,
+                    "Usage: supercontrolpanelhelper server ssh start|stop --server-id <id>"
+                        .to_string(),
+                    as_json,
+                ));
             };
-            print_envelope(as_json, client.call_tool(tool, json!({ "serverId": server_id }))?)
+            print_envelope(
+                as_json,
+                client.call_tool(tool, json!({ "serverId": server_id }))?,
+            )
         }
-        _ => Err((1, "Usage: supercontrolpanelhelper server list|get|tunnel|ssh ...".to_string(), as_json)),
+        _ => Err((
+            1,
+            "Usage: supercontrolpanelhelper server list|get|tunnel|ssh ...".to_string(),
+            as_json,
+        )),
     }
 }
 
-fn handle_config_command(client: &McpClient, args: &[String], as_json: bool) -> Result<(), (i32, String, bool)> {
+fn handle_config_command(
+    client: &McpClient,
+    args: &[String],
+    as_json: bool,
+) -> Result<(), (i32, String, bool)> {
     match args {
         [sub] if sub == "paths" => print_envelope(as_json, client.call_tool("config_get_paths", json!({}))?),
         [first, second, flag, repo_root] if first == "sync" && (second == "pull" || second == "push") && flag == "--repo-root" => {
@@ -332,14 +441,24 @@ fn handle_config_command(client: &McpClient, args: &[String], as_json: bool) -> 
     }
 }
 
-fn handle_mcp_command(client: &McpClient, args: &[String], as_json: bool) -> Result<(), (i32, String, bool)> {
+fn handle_mcp_command(
+    client: &McpClient,
+    args: &[String],
+    as_json: bool,
+) -> Result<(), (i32, String, bool)> {
     match args {
         [sub] if sub == "ping" => {
             let status = client.get_status()?;
             if as_json {
-                println!("{}", serde_json::to_string_pretty(&json!({ "ok": true, "status": status })).unwrap());
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&json!({ "ok": true, "status": status })).unwrap()
+                );
             } else {
-                println!("MCP OK: {}://{}:{} ({})", status.transport, status.bind_address, status.port, status.implementation_stage);
+                println!(
+                    "MCP OK: {}://{}:{} ({})",
+                    status.transport, status.bind_address, status.port, status.implementation_stage
+                );
             }
             Ok(())
         }
@@ -358,7 +477,11 @@ fn handle_mcp_command(client: &McpClient, args: &[String], as_json: bool) -> Res
             }
             Ok(())
         }
-        _ => Err((1, "Usage: supercontrolpanelhelper mcp ping|info".to_string(), as_json)),
+        _ => Err((
+            1,
+            "Usage: supercontrolpanelhelper mcp ping|info".to_string(),
+            as_json,
+        )),
     }
 }
 
@@ -366,8 +489,11 @@ fn print_envelope(as_json: bool, envelope: McpEnvelope) -> Result<(), (i32, Stri
     if as_json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&envelope)
-                .map_err(|err| (1, format!("failed to encode JSON output: {err}"), as_json))?
+            serde_json::to_string_pretty(&envelope).map_err(|err| (
+                1,
+                format!("failed to encode JSON output: {err}"),
+                as_json
+            ))?
         );
         return Ok(());
     }
@@ -376,8 +502,11 @@ fn print_envelope(as_json: bool, envelope: McpEnvelope) -> Result<(), (i32, Stri
     if !envelope.data.is_null() && envelope.data != json!({}) {
         println!(
             "{}",
-            serde_json::to_string_pretty(&envelope.data)
-                .map_err(|err| (1, format!("failed to format output: {err}"), as_json))?
+            serde_json::to_string_pretty(&envelope.data).map_err(|err| (
+                1,
+                format!("failed to format output: {err}"),
+                as_json
+            ))?
         );
     }
     Ok(())
@@ -399,13 +528,17 @@ fn sync_settings_path() -> Result<PathBuf, String> {
     #[cfg(target_os = "windows")]
     {
         let appdata = env::var("APPDATA").map_err(|_| "APPDATA is not set".to_string())?;
-        return Ok(PathBuf::from(appdata).join(APP_IDENTIFIER).join("sync-local.json"));
+        return Ok(PathBuf::from(appdata)
+            .join(APP_IDENTIFIER)
+            .join("sync-local.json"));
     }
 
     #[cfg(not(target_os = "windows"))]
     {
         if let Ok(xdg) = env::var("XDG_CONFIG_HOME") {
-            return Ok(PathBuf::from(xdg).join(APP_IDENTIFIER).join("sync-local.json"));
+            return Ok(PathBuf::from(xdg)
+                .join(APP_IDENTIFIER)
+                .join("sync-local.json"));
         }
         let home = env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
         Ok(PathBuf::from(home)

@@ -130,16 +130,30 @@ pub fn sync_mcp_runtime_from_settings(
         settings.mcp_bind_address.trim().to_string()
     };
     if !is_localhost_bind(&bind_address) {
-        let message = format!(
-            "MCP bind address must stay localhost-only for now: {bind_address}"
+        let message = format!("MCP bind address must stay localhost-only for now: {bind_address}");
+        set_runtime_error(
+            state,
+            bind_address,
+            settings.mcp_port,
+            "http-minimal",
+            &message,
         );
-        set_runtime_error(state, bind_address, settings.mcp_port, "http-minimal", &message);
         return Err(message);
     }
-    let port = if settings.mcp_port == 0 { 46739 } else { settings.mcp_port };
+    let port = if settings.mcp_port == 0 {
+        46739
+    } else {
+        settings.mcp_port
+    };
     let token = settings.mcp_auth_token.trim().to_string();
     if token.is_empty() {
-        set_runtime_error(state, bind_address, port, "http-minimal", "MCP auth token cannot be empty");
+        set_runtime_error(
+            state,
+            bind_address,
+            port,
+            "http-minimal",
+            "MCP auth token cannot be empty",
+        );
         return Err("MCP auth token cannot be empty".to_string());
     }
 
@@ -267,7 +281,11 @@ fn run_http_server_loop(
     }
 }
 
-fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) -> Result<(), String> {
+fn handle_http_connection(
+    app: &AppHandle,
+    stream: &mut TcpStream,
+    token: &str,
+) -> Result<(), String> {
     let request = match read_http_request(stream) {
         Ok(request) => request,
         Err(err) => return write_error_envelope(stream, 400, &err, crate::services::now_ms),
@@ -279,7 +297,8 @@ fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) 
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/health") | ("GET", "/mcp/status") => {
             let state = app.state::<McpRuntimeState>();
-            let payload = serde_json::to_value(mcp_runtime_status(&state)?).map_err(|e| e.to_string())?;
+            let payload =
+                serde_json::to_value(mcp_runtime_status(&state)?).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
         }
         ("GET", "/mcp/tools") => {
@@ -325,7 +344,9 @@ fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) 
                 mcp_config_paths,
             ) {
                 Ok(envelope) => envelope,
-                Err(err) => return write_error_envelope(stream, 400, &err, crate::services::now_ms),
+                Err(err) => {
+                    return write_error_envelope(stream, 400, &err, crate::services::now_ms)
+                }
             };
             let payload = serde_json::to_value(envelope).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
@@ -344,7 +365,14 @@ fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) 
             };
             let uri = match body.get("uri").and_then(Value::as_str) {
                 Some(uri) => uri,
-                None => return write_error_envelope(stream, 400, "uri is required", crate::services::now_ms),
+                None => {
+                    return write_error_envelope(
+                        stream,
+                        400,
+                        "uri is required",
+                        crate::services::now_ms,
+                    )
+                }
             };
             audit_mcp_call("resource.read", uri, &json!({}));
             let envelope = match read_mcp_resource(
@@ -356,7 +384,9 @@ fn handle_http_connection(app: &AppHandle, stream: &mut TcpStream, token: &str) 
                 mcp_config_paths,
             ) {
                 Ok(envelope) => envelope,
-                Err(err) => return write_error_envelope(stream, 400, &err, crate::services::now_ms),
+                Err(err) => {
+                    return write_error_envelope(stream, 400, &err, crate::services::now_ms)
+                }
             };
             let payload = serde_json::to_value(envelope).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
@@ -423,7 +453,9 @@ fn read_http_request(stream: &mut TcpStream) -> Result<SimpleHttpRequest, String
     let mut content_length = 0usize;
 
     loop {
-        let n = stream.read(&mut temp).map_err(|e| format!("failed to read request: {e}"))?;
+        let n = stream
+            .read(&mut temp)
+            .map_err(|e| format!("failed to read request: {e}"))?;
         if n == 0 {
             break;
         }
@@ -452,7 +484,9 @@ fn read_http_request(stream: &mut TcpStream) -> Result<SimpleHttpRequest, String
     let header_text = String::from_utf8(headers_raw.to_vec())
         .map_err(|e| format!("request headers were not valid UTF-8: {e}"))?;
     let mut lines = header_text.split("\r\n");
-    let request_line = lines.next().ok_or_else(|| "missing request line".to_string())?;
+    let request_line = lines
+        .next()
+        .ok_or_else(|| "missing request line".to_string())?;
     let mut request_parts = request_line.split_whitespace();
     let method = request_parts
         .next()
@@ -507,7 +541,8 @@ fn write_json_response(stream: &mut TcpStream, status: u16, payload: Value) -> R
         500 => "Internal Server Error",
         _ => "OK",
     };
-    let body = serde_json::to_vec(&payload).map_err(|e| format!("failed to encode JSON response: {e}"))?;
+    let body =
+        serde_json::to_vec(&payload).map_err(|e| format!("failed to encode JSON response: {e}"))?;
     let response = format!(
         "HTTP/1.1 {status} {status_text}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         body.len()

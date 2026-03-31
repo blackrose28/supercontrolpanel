@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
     models::{PtyExitPayload, PtyOutputPayload},
-    services::{handle_scp_transfer_output, lock_err, complete_scp_transfer_session},
+    services::{complete_scp_transfer_session, handle_scp_transfer_output, lock_err},
     stores::{FunctionStore, PtySession, ScpTransferStore, SessionStore},
 };
 
@@ -26,7 +26,8 @@ pub fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<
     let session_state = app.state::<SessionStore>();
     let _ = broadcast_watchers(&session_state, session_id, &data);
     if let Some(transfer_state) = app.try_state::<ScpTransferStore>() {
-        let _ = handle_scp_transfer_output(&transfer_state, session_id, &data, crate::services::now_ms);
+        let _ =
+            handle_scp_transfer_output(&transfer_state, session_id, &data, crate::services::now_ms);
     }
 }
 
@@ -265,7 +266,10 @@ pub fn write_pty_internal(id: &str, data: &str, store: &SessionStore) -> Result<
     Ok(())
 }
 
-pub fn close_pty_internal(id: &str, store: &SessionStore) -> Result<Option<PtyExitPayload>, String> {
+pub fn close_pty_internal(
+    id: &str,
+    store: &SessionStore,
+) -> Result<Option<PtyExitPayload>, String> {
     let session = remove_session(store, id)?;
     if let Some(session) = session {
         let mut child = lock_err(&session.child)?;

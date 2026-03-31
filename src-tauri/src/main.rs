@@ -13,59 +13,79 @@ use std::{
 };
 
 use portable_pty::{CommandBuilder, PtySize};
-use tauri::{AppHandle, Emitter, Manager, State};
 use serde_json::Value;
+use tauri::{AppHandle, Emitter, Manager, State};
 
 mod app_state;
-mod models;
 mod mcp;
+mod models;
 mod server_mgmt;
 mod services;
 mod stores;
-use models::{
-    AppConfig, AppConfigForDisk, BoundaryConfig,
-    BoundaryTargetSummary, FunctionStatus, PtyExitPayload, RemoteBrowseEntry, RemoteBrowseNodeInfo,
-    RemoteBrowseSession, ScpTransferState, StartFunctionResult,
-};
-#[cfg(target_os = "windows")]
-use models::{HelperStatusFile, OpenVpnLaunchConfig};
-use server_mgmt::{load_servers, new_server_id, save_servers, Server};
 use mcp::{
     call_mcp_tool, list_mcp_resources, list_mcp_tools, mcp_runtime_status, read_mcp_resource,
     stop_mcp_runtime, sync_mcp_runtime_from_settings, McpResourceDescriptor, McpRuntimeState,
     McpRuntimeStatus, McpToolCallEnvelope, McpToolDescriptor,
 };
-use services::{
-    apply_boundary_env, apply_boundary_env_builder, apply_boundary_token_arg_if_present,
-    apply_boundary_token_arg_if_present_builder, boundary_addr_base, boundary_cli_path,
-    config_file_path, default_app_config, detect_openvpn_executable_path,
-    keyring_get_optional, keyring_set_or_delete, load_sync_settings_from_disk,
-    save_sync_settings_to_disk, servers_file_path, ConfigPaths, SyncSettings, SyncSettingsPatch,
-    KEYRING_BOUNDARY_APP_TOKEN, KEYRING_BOUNDARY_OIDC_OTP_SECRET, KEYRING_BOUNDARY_OIDC_PASSWORD,
-    KEYRING_BOUNDARY_PASSWORD, KEYRING_OPENVPN_OTP_SECRET, KEYRING_OPENVPN_PASSWORD,
+use models::{
+    AppConfig, AppConfigForDisk, BoundaryConfig, BoundaryTargetSummary, FunctionStatus,
+    PtyExitPayload, RemoteBrowseEntry, RemoteBrowseNodeInfo, RemoteBrowseSession, ScpTransferState,
+    StartFunctionResult,
 };
+#[cfg(target_os = "windows")]
+use models::{HelperStatusFile, OpenVpnLaunchConfig};
+use server_mgmt::{load_servers, new_server_id, save_servers, Server};
+#[cfg(target_os = "windows")]
+use services::build_openvpn_args_windows;
+use services::prepare_openvpn_start;
+#[cfg(not(target_os = "windows"))]
+use services::run_openvpn_automation as run_openvpn_automation_service;
+#[cfg(not(target_os = "windows"))]
+use services::start_openvpn_pty_session as start_openvpn_pty_session_service;
+#[cfg(not(target_os = "windows"))]
+use services::stop_openvpn_pty_session as stop_openvpn_pty_session_service;
 use services::{
-    add_watcher, close_pty_internal, emit_pty_exit, emit_pty_output_line, lock_err,
-    now_ms, open_pty_with_command_builder, passive_pty_command, write_pty_internal,
+    add_watcher, attach_scp_transfer_session, close_pty_internal,
     close_remote_browser as close_remote_browser_service,
     close_remote_browser_sessions_for_server as close_remote_browser_sessions_for_server_service,
     create_remote_browser_directory as create_remote_browser_directory_service,
-    delete_remote_browser_path as delete_remote_browser_path_service,
-    list_remote_browser_children as list_remote_browser_children_service,
-    open_remote_browser as open_remote_browser_service,
-    create_scp_transfer_entry, attach_scp_transfer_session, update_scp_transfer_entry,
-    start_caddy_run as start_caddy_run_service, stop_caddy_run as stop_caddy_run_service,
-    start_server_rdp as start_server_rdp_service, start_server_ssh as start_server_ssh_service,
-    start_server_tunnel as start_server_tunnel_service, stat_remote_browser_path as stat_remote_browser_path_service,
-    stop_server_ssh as stop_server_ssh_service, stop_server_tunnel as stop_server_tunnel_service,
-    scp_download_service, scp_upload_service, start_scp_download_service, start_scp_upload_service,
+    create_scp_transfer_entry, delete_remote_browser_path as delete_remote_browser_path_service,
+    emit_pty_exit, emit_pty_output_line,
+    list_remote_browser_children as list_remote_browser_children_service, lock_err, now_ms,
+    open_pty_with_command_builder, open_remote_browser as open_remote_browser_service,
+    passive_pty_command, scp_download_service, scp_upload_service,
+    start_caddy_run as start_caddy_run_service, start_scp_download_service,
+    start_scp_upload_service, start_server_rdp as start_server_rdp_service,
+    start_server_ssh as start_server_ssh_service,
+    start_server_tunnel as start_server_tunnel_service,
+    stat_remote_browser_path as stat_remote_browser_path_service,
+    stop_caddy_run as stop_caddy_run_service, stop_server_ssh as stop_server_ssh_service,
+    stop_server_tunnel as stop_server_tunnel_service, update_scp_transfer_entry,
+    write_pty_internal,
+};
+use services::{
+    apply_boundary_env, apply_boundary_env_builder, apply_boundary_token_arg_if_present,
+    apply_boundary_token_arg_if_present_builder, boundary_addr_base, boundary_cli_path,
+    config_file_path, default_app_config, detect_openvpn_executable_path, keyring_get_optional,
+    keyring_set_or_delete, load_sync_settings_from_disk, save_sync_settings_to_disk,
+    servers_file_path, ConfigPaths, SyncSettings, SyncSettingsPatch, KEYRING_BOUNDARY_APP_TOKEN,
+    KEYRING_BOUNDARY_OIDC_OTP_SECRET, KEYRING_BOUNDARY_OIDC_PASSWORD, KEYRING_BOUNDARY_PASSWORD,
+    KEYRING_OPENVPN_OTP_SECRET, KEYRING_OPENVPN_PASSWORD,
 };
 use services::{
     boundary_http_client, build_openvpn_command_unix, generate_openvpn_password,
     generate_totp_code, normalized_openvpn_config,
 };
-#[cfg(target_os = "windows")]
-use services::build_openvpn_args_windows;
+use services::{
+    boundary_oidc_init_script as boundary_oidc_init_script_service,
+    boundary_token_summary as boundary_token_summary_service,
+    complete_boundary_automation_session as complete_boundary_automation_session_service,
+    prepare_boundary_auth_start,
+    run_boundary_oidc_automation as run_boundary_oidc_automation_service,
+    stop_boundary_auth as stop_boundary_auth_service,
+    stop_boundary_automation_session as stop_boundary_automation_session_service,
+    BoundaryAuthLaunch, BoundaryTokenSummary,
+};
 #[cfg(target_os = "windows")]
 use services::{
     emit_openvpn_log as emit_openvpn_log_service, escape_ps_single_quoted,
@@ -73,24 +93,12 @@ use services::{
     start_openvpn_admin_worker as start_openvpn_admin_worker_service,
     write_openvpn_helper_script as write_openvpn_helper_script_service,
 };
-#[cfg(not(target_os = "windows"))]
-use services::run_openvpn_automation as run_openvpn_automation_service;
-#[cfg(not(target_os = "windows"))]
-use services::start_openvpn_pty_session as start_openvpn_pty_session_service;
-#[cfg(not(target_os = "windows"))]
-use services::stop_openvpn_pty_session as stop_openvpn_pty_session_service;
-use services::prepare_openvpn_start;
-use services::{
-    boundary_oidc_init_script as boundary_oidc_init_script_service,
-    boundary_token_summary as boundary_token_summary_service,
-    BoundaryAuthLaunch, BoundaryTokenSummary, complete_boundary_automation_session as complete_boundary_automation_session_service, prepare_boundary_auth_start, run_boundary_oidc_automation as run_boundary_oidc_automation_service, stop_boundary_auth as stop_boundary_auth_service, stop_boundary_automation_session as stop_boundary_automation_session_service,
-};
+#[cfg(target_os = "windows")]
+use stores::OpenVpnAdminSession;
 use stores::{
     BoundaryAutomationSession, BoundaryAutomationStore, FunctionStore, OpenVpnAdminStore,
     OpenVpnReconnectStore, RemoteBrowserStore, ScpTransferStore, SessionStore,
 };
-#[cfg(target_os = "windows")]
-use stores::OpenVpnAdminSession;
 
 const OPENVPN_FUNCTION_ID: &str = "openvpn-connect";
 const CADDY_FUNCTION_ID: &str = "caddy-run";
@@ -135,7 +143,6 @@ impl Default for FunctionStore {
         }
     }
 }
-
 
 fn load_app_config_from_disk(app: &AppHandle) -> Result<AppConfig, String> {
     let path = config_file_path(app, CONFIG_FILE_NAME)?;
@@ -435,7 +442,6 @@ fn open_pty_internal(
     )
 }
 
-
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 fn adapt_command_for_shell(command: &str) -> String {
     let trimmed = command.trim();
@@ -460,7 +466,6 @@ fn adapt_command_for_shell(command: &str) -> String {
         trimmed.to_string()
     }
 }
-
 
 fn boundary_oidc_init_script(cfg: &BoundaryConfig) -> String {
     boundary_oidc_init_script_service(cfg, generate_totp_code)
@@ -549,9 +554,7 @@ fn handle_openvpn_terminal_state(app: &AppHandle, state: &str, reason: &str) {
     let message = if delay_secs == 0 {
         format!("OpenVPN exited unexpectedly ({state}); reconnecting now. {reason}")
     } else {
-        format!(
-            "OpenVPN exited unexpectedly ({state}); retrying in {delay_secs}s. {reason}"
-        )
+        format!("OpenVPN exited unexpectedly ({state}); retrying in {delay_secs}s. {reason}")
     };
     let _ = upsert_function_status(
         app,
@@ -590,7 +593,11 @@ fn handle_openvpn_terminal_state(app: &AppHandle, state: &str, reason: &str) {
             app_clone.state::<FunctionStore>(),
             app_clone.state::<OpenVpnAdminStore>(),
         ) {
-            handle_openvpn_terminal_state(&app_clone, "error", &format!("Reconnect start failed: {err}"));
+            handle_openvpn_terminal_state(
+                &app_clone,
+                "error",
+                &format!("Reconnect start failed: {err}"),
+            );
         }
     });
 }
@@ -640,6 +647,8 @@ fn run_openvpn_automation(
     password: String,
     otp_secret: String,
     close_pty: fn(&str, &SessionStore) -> Result<Option<PtyExitPayload>, String>,
+    emit_exit: fn(&AppHandle, PtyExitPayload),
+    on_session_exit: fn(&AppHandle, &FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
 ) {
     run_openvpn_automation_service(
         app,
@@ -657,6 +666,8 @@ fn run_openvpn_automation(
         adapt_command_for_shell,
         lock_err,
         close_pty,
+        emit_exit,
+        on_session_exit,
     )
 }
 
@@ -892,7 +903,11 @@ pub(crate) fn save_sync_settings_action(
 }
 
 #[tauri::command]
-fn save_sync_settings(app: AppHandle, settings: SyncSettingsPatch, mcp_state: State<'_, McpRuntimeState>) -> Result<(), String> {
+fn save_sync_settings(
+    app: AppHandle,
+    settings: SyncSettingsPatch,
+    mcp_state: State<'_, McpRuntimeState>,
+) -> Result<(), String> {
     save_sync_settings_action(app, settings, mcp_state).map(|_| ())
 }
 
@@ -1074,7 +1089,10 @@ fn config_git_push(repo_root: String) -> Result<String, String> {
     config_git_push_action(repo_root)
 }
 
-pub(crate) fn save_app_config_action(app: AppHandle, mut config: AppConfig) -> Result<AppConfig, String> {
+pub(crate) fn save_app_config_action(
+    app: AppHandle,
+    mut config: AppConfig,
+) -> Result<AppConfig, String> {
     let _incoming_pw_len = config.openvpn.password.len();
     let _incoming_otp_len = config.openvpn.otp_secret.len();
     // Never wipe keyring when the UI sends empty secrets (WebViews often omit password field values).
@@ -1232,6 +1250,8 @@ pub(crate) fn start_openvpn_action(
             open_pty_internal,
             build_openvpn_command_unix,
             run_openvpn_automation,
+            emit_pty_exit,
+            update_functions_for_session_exit,
         )?;
 
         return Ok(StartFunctionResult {
@@ -1720,7 +1740,6 @@ pub(crate) fn stop_server_ssh_action(
         server_ssh_function_id,
     )
 }
-
 
 pub(crate) fn open_remote_browser_action(
     app: AppHandle,
@@ -2275,7 +2294,14 @@ fn start_boundary_auth(
     function_store: State<'_, FunctionStore>,
     automation_store: State<'_, BoundaryAutomationStore>,
 ) -> Result<StartFunctionResult, String> {
-    start_boundary_auth_action(cols, rows, app, session_store, function_store, automation_store)
+    start_boundary_auth_action(
+        cols,
+        rows,
+        app,
+        session_store,
+        function_store,
+        automation_store,
+    )
 }
 
 pub(crate) fn stop_boundary_auth_action(
@@ -2310,12 +2336,17 @@ fn stop_boundary_auth(
 }
 
 #[tauri::command]
-fn mcp_get_runtime_status(mcp_state: State<'_, McpRuntimeState>) -> Result<McpRuntimeStatus, String> {
+fn mcp_get_runtime_status(
+    mcp_state: State<'_, McpRuntimeState>,
+) -> Result<McpRuntimeStatus, String> {
     mcp_runtime_status(&mcp_state)
 }
 
 #[tauri::command]
-fn mcp_sync_runtime(app: AppHandle, mcp_state: State<'_, McpRuntimeState>) -> Result<McpRuntimeStatus, String> {
+fn mcp_sync_runtime(
+    app: AppHandle,
+    mcp_state: State<'_, McpRuntimeState>,
+) -> Result<McpRuntimeStatus, String> {
     let settings = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     sync_mcp_runtime_from_settings(&app, &mcp_state, &settings, now_ms)
 }
@@ -2353,10 +2384,7 @@ fn mcp_call_tool_command(
 }
 
 #[tauri::command]
-fn mcp_read_resource_command(
-    app: AppHandle,
-    uri: String,
-) -> Result<McpToolCallEnvelope, String> {
+fn mcp_read_resource_command(app: AppHandle, uri: String) -> Result<McpToolCallEnvelope, String> {
     read_mcp_resource(
         &app,
         &uri,

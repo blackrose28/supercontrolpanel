@@ -50,10 +50,8 @@ pub fn attach_scp_transfer_session(
             entry.session_id = Some(session_id.to_string());
         }
     }
-    lock_err(&store.session_to_transfer)?
-        .insert(session_id.to_string(), transfer_id.to_string());
-    lock_err(&store.session_output)?
-        .insert(session_id.to_string(), String::new());
+    lock_err(&store.session_to_transfer)?.insert(session_id.to_string(), transfer_id.to_string());
+    lock_err(&store.session_output)?.insert(session_id.to_string(), String::new());
     Ok(())
 }
 
@@ -154,7 +152,9 @@ pub fn handle_scp_transfer_output(
     Ok(())
 }
 
-pub fn list_scp_transfer_entries(store: &ScpTransferStore) -> Result<Vec<ScpTransferEntry>, String> {
+pub fn list_scp_transfer_entries(
+    store: &ScpTransferStore,
+) -> Result<Vec<ScpTransferEntry>, String> {
     Ok(lock_err(&store.entries)?.clone())
 }
 

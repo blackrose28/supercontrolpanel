@@ -1,24 +1,24 @@
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::{
     path::PathBuf,
     process::Command,
-    sync::{atomic::{AtomicBool, Ordering}, Arc},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     thread,
     time::Duration,
 };
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 use portable_pty::CommandBuilder;
-use serde::Deserialize;
 use reqwest::blocking::Client;
+use serde::Deserialize;
 use serde_json::json;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 
 use crate::{
-    models::{
-        AppConfig, BoundaryAuthKind, BoundaryConfig, BoundaryOidcLoginMode,
-        PtyExitPayload,
-    },
+    models::{AppConfig, BoundaryAuthKind, BoundaryConfig, BoundaryOidcLoginMode, PtyExitPayload},
     services::{apply_boundary_env, boundary_app_token, boundary_cli_path, lock_err},
     stores::{BoundaryAutomationStore, FunctionStore, SessionStore},
 };
@@ -351,7 +351,8 @@ pub fn complete_boundary_automation_session(
             &payload.reason,
         );
     } else {
-        let _ = update_functions_for_session_exit(app, function_store, session_id, exit_code, reason);
+        let _ =
+            update_functions_for_session_exit(app, function_store, session_id, exit_code, reason);
     }
 }
 
@@ -400,7 +401,8 @@ pub fn stop_boundary_auth(
     };
     if let Some(p) = close_pty_internal(&sid, session_store)? {
         emit_pty_exit(app, p.clone());
-        let _ = update_functions_for_session_exit(app, function_store, &sid, p.exit_code, &p.reason);
+        let _ =
+            update_functions_for_session_exit(app, function_store, &sid, p.exit_code, &p.reason);
     } else {
         let (state, msg, source) = match boundary_token_summary(app) {
             Ok(summary) => ("authenticated", summary.message, Some(summary.source)),
@@ -415,7 +417,6 @@ pub fn stop_boundary_auth(
     Ok(())
 }
 
-
 #[allow(clippy::too_many_arguments)]
 pub fn run_boundary_oidc_automation(
     app: AppHandle,
@@ -429,7 +430,14 @@ pub fn run_boundary_oidc_automation(
     boundary_http_client: fn() -> Result<Client, String>,
     boundary_oidc_init_script: fn(&BoundaryConfig) -> String,
     keyring_set_or_delete: fn(&str, &str) -> Result<(), String>,
-    complete_boundary_automation_session: fn(&AppHandle, &SessionStore, &FunctionStore, &str, Option<i32>, &str),
+    complete_boundary_automation_session: fn(
+        &AppHandle,
+        &SessionStore,
+        &FunctionStore,
+        &str,
+        Option<i32>,
+        &str,
+    ),
 ) {
     let function_store = app.state::<FunctionStore>();
     let session_store = app.state::<SessionStore>();

@@ -196,7 +196,9 @@ impl From<&AppConfig> for AppConfigForDisk {
                 command: String::new(),
                 extra_args: c.openvpn.extra_args.clone(),
                 username: c.openvpn.username.clone(),
-                terminate_open_vpn_when_helper_exits: c.openvpn.terminate_open_vpn_when_helper_exits,
+                terminate_open_vpn_when_helper_exits: c
+                    .openvpn
+                    .terminate_open_vpn_when_helper_exits,
                 auto_reconnect_enabled: c.openvpn.auto_reconnect_enabled,
                 auto_reconnect_base_seconds: c.openvpn.auto_reconnect_base_seconds,
                 auto_reconnect_max_seconds: c.openvpn.auto_reconnect_max_seconds,

@@ -2,38 +2,53 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::{
+    close_remote_browser_action, config_git_pull_action, config_git_push_action,
+    create_remote_browser_directory_action, delete_remote_browser_path_action,
+    delete_server_action, get_app_config_action, list_remote_browser_children_action,
     mcp::{McpToolCallEnvelope, McpToolDescriptor},
+    open_remote_browser_action, save_app_config_action, save_sync_settings_action,
+    scp_download_action, scp_upload_action,
     server_mgmt::{load_servers, Server},
     services::{
         get_scp_transfer_entry, list_scp_transfer_entries, load_sync_settings_from_disk,
         ConfigPaths, SyncSettingsPatch,
     },
+    start_boundary_auth_action, start_caddy_action, start_openvpn_manual_action,
+    start_scp_download_action, start_scp_upload_action, start_server_ssh_action,
+    start_server_tunnel_action, stat_remote_browser_path_action, stop_boundary_auth_action,
+    stop_caddy_action, stop_openvpn_action, stop_server_ssh_action, stop_server_tunnel_action,
     stores::{
         BoundaryAutomationStore, FunctionStore, OpenVpnAdminStore, RemoteBrowserStore,
         ScpTransferStore, SessionStore,
     },
-    close_remote_browser_action, create_remote_browser_directory_action,
-    config_git_pull_action, config_git_push_action,
-    delete_server_action, get_app_config_action, save_app_config_action, save_sync_settings_action,
-    delete_remote_browser_path_action, list_remote_browser_children_action, open_remote_browser_action,
-    scp_download_action, scp_upload_action, start_scp_download_action, start_scp_upload_action,
-    start_boundary_auth_action, start_caddy_action, start_openvpn_manual_action, start_server_ssh_action,
-    start_server_tunnel_action, stop_boundary_auth_action, stop_caddy_action,
-    stat_remote_browser_path_action, stop_openvpn_action, stop_server_ssh_action,
-    stop_server_tunnel_action, upsert_server_action,
-    sync_config_pull_action, sync_config_push_action,
+    sync_config_pull_action, sync_config_push_action, upsert_server_action,
 };
 
 fn redact_app_config_value(value: Value) -> Value {
     let mut value = value;
     if let Some(openvpn) = value.get_mut("openvpn").and_then(Value::as_object_mut) {
-        openvpn.insert("password".to_string(), Value::String("[redacted]".to_string()));
-        openvpn.insert("otpSecret".to_string(), Value::String("[redacted]".to_string()));
+        openvpn.insert(
+            "password".to_string(),
+            Value::String("[redacted]".to_string()),
+        );
+        openvpn.insert(
+            "otpSecret".to_string(),
+            Value::String("[redacted]".to_string()),
+        );
     }
     if let Some(boundary) = value.get_mut("boundary").and_then(Value::as_object_mut) {
-        boundary.insert("password".to_string(), Value::String("[redacted]".to_string()));
-        boundary.insert("oidcPassword".to_string(), Value::String("[redacted]".to_string()));
-        boundary.insert("oidcOtpSecret".to_string(), Value::String("[redacted]".to_string()));
+        boundary.insert(
+            "password".to_string(),
+            Value::String("[redacted]".to_string()),
+        );
+        boundary.insert(
+            "oidcPassword".to_string(),
+            Value::String("[redacted]".to_string()),
+        );
+        boundary.insert(
+            "oidcOtpSecret".to_string(),
+            Value::String("[redacted]".to_string()),
+        );
     }
     value
 }
@@ -94,13 +109,18 @@ fn tool_category(tool_name: &str) -> Option<String> {
 fn enforce_tool_policy(app: &AppHandle, tool_name: &str) -> Result<(), String> {
     let settings = load_sync_settings_from_disk(app, "sync-local.json")?;
     if let Some(category) = tool_category(tool_name) {
-        if !settings.mcp_allowed_tool_categories.iter().any(|item| item == &category) {
+        if !settings
+            .mcp_allowed_tool_categories
+            .iter()
+            .any(|item| item == &category)
+        {
             return Err(format!(
                 "MCP tool category is disabled by settings: {category}"
             ));
         }
     }
-    if settings.mcp_sensitive_action_policy == "require-ui-approval" && is_sensitive_tool(tool_name) {
+    if settings.mcp_sensitive_action_policy == "require-ui-approval" && is_sensitive_tool(tool_name)
+    {
         return Err(format!(
             "Sensitive MCP tool requires UI approval and is currently blocked over HTTP: {tool_name}"
         ));
@@ -434,8 +454,16 @@ pub fn call_mcp_tool(
         }
         "config_get_paths" => json!(config_paths(app)?),
         "openvpn_start" => {
-            let username = args.get("username").and_then(Value::as_str).unwrap_or("").to_string();
-            let password = args.get("password").and_then(Value::as_str).unwrap_or("").to_string();
+            let username = args
+                .get("username")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let password = args
+                .get("password")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             let result = start_openvpn_manual_action(
                 "".to_string(),
                 username,
@@ -479,7 +507,11 @@ pub fn call_mcp_tool(
             json!({})
         }
         "server_tunnel_start" => {
-            let server_id = args.get("serverId").and_then(Value::as_str).ok_or_else(|| "serverId is required".to_string())?.to_string();
+            let server_id = args
+                .get("serverId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "serverId is required".to_string())?
+                .to_string();
             let cols = args.get("cols").and_then(Value::as_u64).unwrap_or(120) as u16;
             let rows = args.get("rows").and_then(Value::as_u64).unwrap_or(36) as u16;
             let result = start_server_tunnel_action(
@@ -494,7 +526,11 @@ pub fn call_mcp_tool(
             json!(result)
         }
         "server_tunnel_stop" => {
-            let server_id = args.get("serverId").and_then(Value::as_str).ok_or_else(|| "serverId is required".to_string())?.to_string();
+            let server_id = args
+                .get("serverId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "serverId is required".to_string())?
+                .to_string();
             stop_server_tunnel_action(
                 server_id,
                 app.clone(),
@@ -505,7 +541,11 @@ pub fn call_mcp_tool(
             json!({})
         }
         "server_ssh_start" => {
-            let server_id = args.get("serverId").and_then(Value::as_str).ok_or_else(|| "serverId is required".to_string())?.to_string();
+            let server_id = args
+                .get("serverId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "serverId is required".to_string())?
+                .to_string();
             let cols = args.get("cols").and_then(Value::as_u64).unwrap_or(120) as u16;
             let rows = args.get("rows").and_then(Value::as_u64).unwrap_or(36) as u16;
             let result = start_server_ssh_action(
@@ -519,7 +559,11 @@ pub fn call_mcp_tool(
             json!(result)
         }
         "server_ssh_stop" => {
-            let server_id = args.get("serverId").and_then(Value::as_str).ok_or_else(|| "serverId is required".to_string())?.to_string();
+            let server_id = args
+                .get("serverId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "serverId is required".to_string())?
+                .to_string();
             stop_server_ssh_action(
                 server_id,
                 app.clone(),
@@ -529,7 +573,11 @@ pub fn call_mcp_tool(
             json!({})
         }
         "caddy_start" => {
-            let folder = args.get("folder").and_then(Value::as_str).ok_or_else(|| "folder is required".to_string())?.to_string();
+            let folder = args
+                .get("folder")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "folder is required".to_string())?
+                .to_string();
             let cols = args.get("cols").and_then(Value::as_u64).unwrap_or(120) as u16;
             let rows = args.get("rows").and_then(Value::as_u64).unwrap_or(36) as u16;
             let result = start_caddy_action(
@@ -557,11 +605,8 @@ pub fn call_mcp_tool(
                 .ok_or_else(|| "server is required".to_string())?;
             let server: Server =
                 serde_json::from_value(server_value).map_err(|e| format!("invalid server: {e}"))?;
-            let servers = upsert_server_action(
-                app.clone(),
-                server,
-                app.state::<RemoteBrowserStore>(),
-            )?;
+            let servers =
+                upsert_server_action(app.clone(), server, app.state::<RemoteBrowserStore>())?;
             json!(servers)
         }
         "server_delete" => {
@@ -570,11 +615,7 @@ pub fn call_mcp_tool(
                 .and_then(Value::as_str)
                 .ok_or_else(|| "id is required".to_string())?
                 .to_string();
-            let servers = delete_server_action(
-                app.clone(),
-                id,
-                app.state::<RemoteBrowserStore>(),
-            )?;
+            let servers = delete_server_action(app.clone(), id, app.state::<RemoteBrowserStore>())?;
             json!(servers)
         }
         "config_save" => {
@@ -582,8 +623,8 @@ pub fn call_mcp_tool(
                 .get("config")
                 .cloned()
                 .ok_or_else(|| "config is required".to_string())?;
-            let config = serde_json::from_value(config_value)
-                .map_err(|e| format!("invalid config: {e}"))?;
+            let config =
+                serde_json::from_value(config_value).map_err(|e| format!("invalid config: {e}"))?;
             let saved = save_app_config_action(app.clone(), config)?;
             redact_app_config_value(json!(saved))
         }
@@ -653,8 +694,11 @@ pub fn call_mcp_tool(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let entries =
-                list_remote_browser_children_action(browser_id, path, app.state::<RemoteBrowserStore>())?;
+            let entries = list_remote_browser_children_action(
+                browser_id,
+                path,
+                app.state::<RemoteBrowserStore>(),
+            )?;
             json!(entries)
         }
         "remote_browser_stat_path" => {
@@ -668,8 +712,11 @@ pub fn call_mcp_tool(
                 .and_then(Value::as_str)
                 .unwrap_or("")
                 .to_string();
-            let info =
-                stat_remote_browser_path_action(browser_id, path, app.state::<RemoteBrowserStore>())?;
+            let info = stat_remote_browser_path_action(
+                browser_id,
+                path,
+                app.state::<RemoteBrowserStore>(),
+            )?;
             json!(info)
         }
         "remote_browser_create_directory" => {
@@ -683,7 +730,11 @@ pub fn call_mcp_tool(
                 .and_then(Value::as_str)
                 .ok_or_else(|| "path is required".to_string())?
                 .to_string();
-            create_remote_browser_directory_action(browser_id, path, app.state::<RemoteBrowserStore>())?;
+            create_remote_browser_directory_action(
+                browser_id,
+                path,
+                app.state::<RemoteBrowserStore>(),
+            )?;
             json!({})
         }
         "remote_browser_delete_path" => {

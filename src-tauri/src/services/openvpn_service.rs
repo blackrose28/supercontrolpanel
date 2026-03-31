@@ -21,18 +21,16 @@ use crate::models::{AppConfig, FunctionStatus, OpenVpnConfig, PtyExitPayload};
 use crate::stores::FunctionStore;
 
 #[cfg(target_os = "windows")]
-use tauri::Emitter;
-#[cfg(target_os = "windows")]
 use crate::{
     models::OpenVpnLogPayload,
     services::lock_err,
     stores::{OpenVpnAdminSession, OpenVpnAdminStore},
 };
+#[cfg(target_os = "windows")]
+use tauri::Emitter;
 
 #[cfg(target_os = "windows")]
-use crate::{
-    models::{HelperStatusFile, OpenVpnLaunchConfig},
-};
+use crate::models::{HelperStatusFile, OpenVpnLaunchConfig};
 #[cfg(not(target_os = "windows"))]
 use crate::stores::SessionStore;
 
@@ -440,7 +438,25 @@ pub fn start_openvpn_pty_session(
     ) -> Result<(), String>,
     open_pty_internal: fn(u16, u16, &AppHandle, &SessionStore) -> Result<String, String>,
     build_openvpn_command_unix: fn(&OpenVpnConfig) -> Result<String, String>,
-    run_openvpn_automation: fn(AppHandle, String, String, String, String, String, fn(&str, &SessionStore) -> Result<Option<PtyExitPayload>, String>),
+    run_openvpn_automation: fn(
+        AppHandle,
+        String,
+        String,
+        String,
+        String,
+        String,
+        fn(&str, &SessionStore) -> Result<Option<PtyExitPayload>, String>,
+        fn(&AppHandle, PtyExitPayload),
+        fn(&AppHandle, &FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+    ),
+    emit_pty_exit: fn(&AppHandle, PtyExitPayload),
+    update_functions_for_session_exit: fn(
+        &AppHandle,
+        &FunctionStore,
+        &str,
+        Option<i32>,
+        &str,
+    ) -> Result<(), String>,
 ) -> Result<String, String> {
     let current = lock_err_statuses(&function_store.statuses)?
         .get(openvpn_function_id)
@@ -488,10 +504,31 @@ pub fn start_openvpn_pty_session(
             combined_password,
             String::new(),
             close_pty_internal,
+            emit_pty_exit,
+            update_functions_for_session_exit,
         );
     });
 
     Ok(session_id)
+}
+
+#[cfg_attr(target_os = "windows", allow(dead_code))]
+#[cfg(not(target_os = "windows"))]
+fn propagate_forced_pty_close<FEmit, FUpdate>(
+    session_id: &str,
+    payload: Option<PtyExitPayload>,
+    emit_pty_exit: FEmit,
+    update_functions_for_session_exit: FUpdate,
+) where
+    FEmit: FnOnce(PtyExitPayload),
+    FUpdate: FnOnce(&str, Option<i32>, &str),
+{
+    if let Some(payload) = payload {
+        let exit_code = payload.exit_code;
+        let reason = payload.reason.clone();
+        emit_pty_exit(payload);
+        update_functions_for_session_exit(session_id, exit_code, &reason);
+    }
 }
 
 #[cfg_attr(target_os = "windows", allow(dead_code))]
@@ -519,12 +556,25 @@ pub fn run_openvpn_automation(
     mark_openvpn_connected: fn(&AppHandle),
     adapt_command_for_shell: fn(&str) -> String,
     lock_err_sessions: fn(
-        &std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<crate::stores::PtySession>>>,
+        &std::sync::Mutex<
+            std::collections::HashMap<String, std::sync::Arc<crate::stores::PtySession>>,
+        >,
     ) -> Result<
-        std::sync::MutexGuard<'_, std::collections::HashMap<String, std::sync::Arc<crate::stores::PtySession>>>,
+        std::sync::MutexGuard<
+            '_,
+            std::collections::HashMap<String, std::sync::Arc<crate::stores::PtySession>>,
+        >,
         String,
     >,
     close_pty_internal: fn(&str, &SessionStore) -> Result<Option<PtyExitPayload>, String>,
+    emit_pty_exit: fn(&AppHandle, PtyExitPayload),
+    update_functions_for_session_exit: fn(
+        &AppHandle,
+        &FunctionStore,
+        &str,
+        Option<i32>,
+        &str,
+    ) -> Result<(), String>,
 ) {
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
     let session_state = app.state::<SessionStore>();
@@ -600,22 +650,22 @@ pub fn run_openvpn_automation(
                 }
 
                 if !password_sent && scan_buffer.contains("password") {
-                    let combined_password =
-                        match generate_openvpn_password(&password, &otp_secret) {
-                            Ok(value) => value,
-                            Err(err) => {
-                                let function_state = app.state::<FunctionStore>();
-                                let _ = upsert_function_status(
-                                    &app,
-                                    &function_state,
-                                    openvpn_function_id,
-                                    "error",
-                                    &format!("OTP generation failed: {err}"),
-                                    Some(session_id.clone()),
-                                );
-                                continue;
-                            }
-                        };
+                    let combined_password = match generate_openvpn_password(&password, &otp_secret)
+                    {
+                        Ok(value) => value,
+                        Err(err) => {
+                            let function_state = app.state::<FunctionStore>();
+                            let _ = upsert_function_status(
+                                &app,
+                                &function_state,
+                                openvpn_function_id,
+                                "error",
+                                &format!("OTP generation failed: {err}"),
+                                Some(session_id.clone()),
+                            );
+                            continue;
+                        }
+                    };
                     let state = app.state::<SessionStore>();
                     let _ =
                         write_pty_internal(&session_id, &format!("{combined_password}\r"), &state);
@@ -650,7 +700,21 @@ pub fn run_openvpn_automation(
                             Some(session_id.clone()),
                         );
                         let state = app.state::<SessionStore>();
-                        let _ = close_pty_internal(&session_id, &state);
+                        let payload = close_pty_internal(&session_id, &state).ok().flatten();
+                        propagate_forced_pty_close(
+                            &session_id,
+                            payload,
+                            |payload| emit_pty_exit(&app, payload),
+                            |session_id, exit_code, reason| {
+                                let _ = update_functions_for_session_exit(
+                                    &app,
+                                    &function_state,
+                                    session_id,
+                                    exit_code,
+                                    reason,
+                                );
+                            },
+                        );
                         break;
                     } else {
                         let _ = upsert_function_status(
@@ -693,6 +757,84 @@ pub fn run_openvpn_automation(
             }
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
         }
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use super::propagate_forced_pty_close;
+    use crate::models::PtyExitPayload;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn propagate_forced_pty_close_emits_and_updates_for_payload() {
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let updated = Arc::new(Mutex::new(Vec::new()));
+
+        let emitted_clone = Arc::clone(&emitted);
+        let updated_clone = Arc::clone(&updated);
+
+        propagate_forced_pty_close(
+            "session-1",
+            Some(PtyExitPayload {
+                id: "session-1".to_string(),
+                exit_code: Some(17),
+                reason: "closed_by_command".to_string(),
+            }),
+            move |payload| {
+                emitted_clone
+                    .lock()
+                    .unwrap()
+                    .push((payload.id, payload.exit_code, payload.reason));
+            },
+            move |session_id, exit_code, reason| {
+                updated_clone.lock().unwrap().push((
+                    session_id.to_string(),
+                    exit_code,
+                    reason.to_string(),
+                ));
+            },
+        );
+
+        assert_eq!(
+            emitted.lock().unwrap().as_slice(),
+            &[(
+                "session-1".to_string(),
+                Some(17),
+                "closed_by_command".to_string()
+            )]
+        );
+        assert_eq!(
+            updated.lock().unwrap().as_slice(),
+            &[(
+                "session-1".to_string(),
+                Some(17),
+                "closed_by_command".to_string()
+            )]
+        );
+    }
+
+    #[test]
+    fn propagate_forced_pty_close_is_noop_without_payload() {
+        let emitted = Arc::new(Mutex::new(0usize));
+        let updated = Arc::new(Mutex::new(0usize));
+
+        let emitted_clone = Arc::clone(&emitted);
+        let updated_clone = Arc::clone(&updated);
+
+        propagate_forced_pty_close(
+            "session-1",
+            None,
+            move |_| {
+                *emitted_clone.lock().unwrap() += 1;
+            },
+            move |_, _, _| {
+                *updated_clone.lock().unwrap() += 1;
+            },
+        );
+
+        assert_eq!(*emitted.lock().unwrap(), 0);
+        assert_eq!(*updated.lock().unwrap(), 0);
     }
 }
 
@@ -867,11 +1009,7 @@ pub fn start_openvpn_admin_worker(
     }
 
     let helper_pid = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    let pid_ok = helper_pid
-        .parse::<u32>()
-        .ok()
-        .filter(|&p| p > 0)
-        .is_some();
+    let pid_ok = helper_pid.parse::<u32>().ok().filter(|&p| p > 0).is_some();
     if !pid_ok {
         cleanup_session_files();
         return Err(
@@ -930,7 +1068,9 @@ pub fn start_openvpn_admin_worker(
                     if active.as_deref() != Some(status_session.as_str()) {
                         break;
                     }
-                    if cached_helper_pid.is_none() && watcher_started.elapsed() > HELPER_STALL_TIMEOUT {
+                    if cached_helper_pid.is_none()
+                        && watcher_started.elapsed() > HELPER_STALL_TIMEOUT
+                    {
                         let _ = fs::remove_file(&helper_pid_path_watch);
                         let msg = "Elevated OpenVPN helper never became ready (timeout waiting for status). Try Connect again.";
                         let _ = upsert_function_status(
@@ -941,8 +1081,10 @@ pub fn start_openvpn_admin_worker(
                             msg,
                             None,
                         );
-                        let _ =
-                            set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                        let _ = set_openvpn_admin_session(
+                            &status_app.state::<OpenVpnAdminStore>(),
+                            None,
+                        );
                         break;
                     }
                     if let Some(pid) = cached_helper_pid {
@@ -956,8 +1098,10 @@ pub fn start_openvpn_admin_worker(
                                 "Elevated helper ended before status file was available",
                                 None,
                             );
-                            let _ =
-                                set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                            let _ = set_openvpn_admin_session(
+                                &status_app.state::<OpenVpnAdminStore>(),
+                                None,
+                            );
                             break;
                         }
                     }
@@ -983,8 +1127,10 @@ pub fn start_openvpn_admin_worker(
                     );
                     if terminal {
                         let _ = fs::remove_file(&helper_pid_path_watch);
-                        let _ =
-                            set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                        let _ = set_openvpn_admin_session(
+                            &status_app.state::<OpenVpnAdminStore>(),
+                            None,
+                        );
                         // Trigger app-level reconnect (generates fresh TOTP)
                         on_terminal_state(&status_app, &state, &parsed.message);
                         break;
@@ -1046,7 +1192,12 @@ pub fn start_openvpn_admin_worker(
             if err_bytes.len() > err_offset {
                 let chunk = String::from_utf8_lossy(&err_bytes[err_offset..]).to_string();
                 err_offset = err_bytes.len();
-                emit_openvpn_log(&log_app, &log_session, &function_id, format!("[stderr] {chunk}"));
+                emit_openvpn_log(
+                    &log_app,
+                    &log_session,
+                    &function_id,
+                    format!("[stderr] {chunk}"),
+                );
             }
         }
     });

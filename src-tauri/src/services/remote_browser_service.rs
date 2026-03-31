@@ -1,3 +1,5 @@
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use std::{
     env,
     io::{BufRead, BufReader, Read, Write},
@@ -6,14 +8,14 @@ use std::{
     process::{ChildStderr, Command, Stdio},
     sync::{Arc, Mutex},
 };
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 
 use ssh2::{FileStat, Session as SshSession};
 use tauri::AppHandle;
 
 use crate::{
-    models::{RemoteBrowseEntry, RemoteBrowseNodeInfo, RemoteBrowseSession, RemotePathKind, SshEndpoint},
+    models::{
+        RemoteBrowseEntry, RemoteBrowseNodeInfo, RemoteBrowseSession, RemotePathKind, SshEndpoint,
+    },
     server_mgmt::ConnectionMethod,
     services::{
         add_common_ssh_options, ensure_boundary_tunnel_running, load_server_by_id, lock_err,
@@ -86,7 +88,10 @@ pub fn close_remote_browser_sessions_for_server(
 pub fn close_all_remote_browser_sessions(browser_store: &RemoteBrowserStore) -> Result<(), String> {
     let removed = {
         let mut sessions = lock_err(&browser_store.sessions)?;
-        sessions.drain().map(|(_, session)| session).collect::<Vec<_>>()
+        sessions
+            .drain()
+            .map(|(_, session)| session)
+            .collect::<Vec<_>>()
     };
     for state in removed {
         shutdown_remote_browser_session_state(&state);
@@ -400,7 +405,10 @@ pub fn delete_remote_browser_path_via_cli_session(
     run_cli_remote_browser_command(session, &script).map(|_| ())
 }
 
-pub fn remove_remote_sftp_path_recursive(sftp: &ssh2::Sftp, path: &std::path::Path) -> Result<(), String> {
+pub fn remove_remote_sftp_path_recursive(
+    sftp: &ssh2::Sftp,
+    path: &std::path::Path,
+) -> Result<(), String> {
     let stat = sftp
         .lstat(path)
         .map_err(|e| format!("failed to inspect remote path: {e}"))?;
@@ -438,7 +446,10 @@ pub fn open_remote_sftp_session(
                 endpoint.host, endpoint.port
             )
         } else {
-            format!("failed to connect to {}:{}: {e}", endpoint.host, endpoint.port)
+            format!(
+                "failed to connect to {}:{}: {e}",
+                endpoint.host, endpoint.port
+            )
         }
     })?;
     let mut session = SshSession::new().map_err(|e| format!("ssh session init failed: {e}"))?;
@@ -522,7 +533,10 @@ pub fn open_remote_browser(
         transport,
     });
     lock_err(&browser_store.sessions)?.insert(browser_id.clone(), state);
-    Ok(RemoteBrowseSession { browser_id, root_path })
+    Ok(RemoteBrowseSession {
+        browser_id,
+        root_path,
+    })
 }
 
 pub fn close_remote_browser(
@@ -652,8 +666,10 @@ pub fn delete_remote_browser_path(
                 Ok(())
             }
         }
-        RemoteBrowserTransport::Cli(session) => {
-            delete_remote_browser_path_via_cli_session(session, &target_path, recursive.unwrap_or(false))
-        }
+        RemoteBrowserTransport::Cli(session) => delete_remote_browser_path_via_cli_session(
+            session,
+            &target_path,
+            recursive.unwrap_or(false),
+        ),
     }
 }

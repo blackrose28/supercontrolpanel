@@ -1,10 +1,7 @@
 use std::{
     collections::HashMap,
     io::Write,
-    sync::{
-        mpsc::Sender,
-        Arc, Mutex,
-    },
+    sync::{mpsc::Sender, Arc, Mutex},
 };
 
 pub struct PtySession {

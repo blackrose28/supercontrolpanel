@@ -43,8 +43,21 @@ pub fn start_scp_upload_service(
     local_path: String,
     remote_path: String,
     recursive: Option<bool>,
-    open_pty_with_command_builder: fn(u16, u16, portable_pty::CommandBuilder, &AppHandle, &SessionStore, fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>) -> Result<String, String>,
-    update_functions_for_session_exit: fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+    open_pty_with_command_builder: fn(
+        u16,
+        u16,
+        portable_pty::CommandBuilder,
+        &AppHandle,
+        &SessionStore,
+        fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+    ) -> Result<String, String>,
+    update_functions_for_session_exit: fn(
+        &AppHandle,
+        &crate::stores::FunctionStore,
+        &str,
+        Option<i32>,
+        &str,
+    ) -> Result<(), String>,
 ) -> Result<String, String> {
     let server = load_server_by_id(app, &server_id)?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
@@ -55,7 +68,14 @@ pub fn start_scp_upload_service(
         recursive.unwrap_or(false),
         false,
     );
-    open_pty_with_command_builder(120, 24, cmd, app, session_store, update_functions_for_session_exit)
+    open_pty_with_command_builder(
+        120,
+        24,
+        cmd,
+        app,
+        session_store,
+        update_functions_for_session_exit,
+    )
 }
 
 pub fn scp_download_service(
@@ -91,8 +111,21 @@ pub fn start_scp_download_service(
     remote_path: String,
     local_path: String,
     recursive: Option<bool>,
-    open_pty_with_command_builder: fn(u16, u16, portable_pty::CommandBuilder, &AppHandle, &SessionStore, fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>) -> Result<String, String>,
-    update_functions_for_session_exit: fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+    open_pty_with_command_builder: fn(
+        u16,
+        u16,
+        portable_pty::CommandBuilder,
+        &AppHandle,
+        &SessionStore,
+        fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+    ) -> Result<String, String>,
+    update_functions_for_session_exit: fn(
+        &AppHandle,
+        &crate::stores::FunctionStore,
+        &str,
+        Option<i32>,
+        &str,
+    ) -> Result<(), String>,
 ) -> Result<String, String> {
     let server = load_server_by_id(app, &server_id)?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
@@ -103,5 +136,12 @@ pub fn start_scp_download_service(
         recursive.unwrap_or(false),
         true,
     );
-    open_pty_with_command_builder(120, 24, cmd, app, session_store, update_functions_for_session_exit)
+    open_pty_with_command_builder(
+        120,
+        24,
+        cmd,
+        app,
+        session_store,
+        update_functions_for_session_exit,
+    )
 }

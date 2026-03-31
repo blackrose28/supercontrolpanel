@@ -1,9 +1,6 @@
 use std::{
     path::PathBuf,
-    sync::{
-        atomic::AtomicBool,
-        Arc, Mutex,
-    },
+    sync::{atomic::AtomicBool, Arc, Mutex},
 };
 
 pub struct OpenVpnAdminSession {

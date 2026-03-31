@@ -108,10 +108,7 @@ pub fn default_mcp_port() -> u16 {
 }
 
 pub fn default_mcp_allowed_tool_categories() -> Vec<String> {
-    vec![
-        "read-only".to_string(),
-        "runtime-control".to_string(),
-    ]
+    vec!["read-only".to_string(), "runtime-control".to_string()]
 }
 
 pub fn default_mcp_sensitive_action_policy() -> String {
@@ -163,7 +160,10 @@ pub fn servers_file_path(app: &AppHandle, servers_file_name: &str) -> Result<Pat
     Ok(dir.join(servers_file_name))
 }
 
-pub fn sync_settings_path(app: &AppHandle, sync_settings_file_name: &str) -> Result<PathBuf, String> {
+pub fn sync_settings_path(
+    app: &AppHandle,
+    sync_settings_file_name: &str,
+) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
@@ -342,9 +342,7 @@ pub fn apply_boundary_token_arg_if_present(cmd: &mut Command) -> Result<(), Stri
     Ok(())
 }
 
-pub fn apply_boundary_token_arg_if_present_builder(
-    cmd: &mut CommandBuilder,
-) -> Result<(), String> {
+pub fn apply_boundary_token_arg_if_present_builder(cmd: &mut CommandBuilder) -> Result<(), String> {
     if let Some(token) = boundary_app_token()? {
         if !token.trim().is_empty() {
             cmd.arg("-token");
