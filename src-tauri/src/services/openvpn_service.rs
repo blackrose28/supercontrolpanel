@@ -275,6 +275,21 @@ public static class ScpOvpnJob {
         break
       }
 
+      # Detect AUTH_FAILED in the log — TOTP is stale so the helper must NOT retry.
+      # Exit immediately so the app-level reconnect can generate fresh credentials.
+      $logTail = if (Test-Path -LiteralPath $LogPath) { Get-Content -LiteralPath $LogPath -Tail 40 -ErrorAction SilentlyContinue } else { @() }
+      $authFailed = $false
+      foreach ($line in $logTail) {
+        if ($line -match 'AUTH_FAILED|AUTH: Received control message: AUTH_FAILED|SIGTERM\[soft,auth-failure\]') {
+          $authFailed = $true
+          break
+        }
+      }
+      if ($authFailed) {
+        Write-Status "error" "Auth failed (TOTP expired); requesting app-level reconnect with fresh credentials (exit code $code)."
+        break
+      }
+
       if (-not $autoReconnect) {
         if ($code -eq 0) {
           Write-Status "stopped" "OpenVPN exited normally"
@@ -425,7 +440,7 @@ pub fn start_openvpn_pty_session(
     ) -> Result<(), String>,
     open_pty_internal: fn(u16, u16, &AppHandle, &SessionStore) -> Result<String, String>,
     build_openvpn_command_unix: fn(&OpenVpnConfig) -> Result<String, String>,
-    run_openvpn_automation: fn(AppHandle, String, String, String, String, String),
+    run_openvpn_automation: fn(AppHandle, String, String, String, String, String, fn(&str, &SessionStore) -> Result<Option<PtyExitPayload>, String>),
 ) -> Result<String, String> {
     let current = lock_err_statuses(&function_store.statuses)?
         .get(openvpn_function_id)
@@ -472,6 +487,7 @@ pub fn start_openvpn_pty_session(
             resolved_username,
             combined_password,
             String::new(),
+            close_pty_internal,
         );
     });
 
@@ -508,6 +524,7 @@ pub fn run_openvpn_automation(
         std::sync::MutexGuard<'_, std::collections::HashMap<String, std::sync::Arc<crate::stores::PtySession>>>,
         String,
     >,
+    close_pty_internal: fn(&str, &SessionStore) -> Result<Option<PtyExitPayload>, String>,
 ) {
     let (tx, rx): (Sender<String>, Receiver<String>) = mpsc::channel();
     let session_state = app.state::<SessionStore>();
@@ -619,14 +636,32 @@ pub fn run_openvpn_automation(
                     || scan_buffer.contains("auth-failure")
                 {
                     let function_state = app.state::<FunctionStore>();
-                    let _ = upsert_function_status(
-                        &app,
-                        &function_state,
-                        openvpn_function_id,
-                        "error",
-                        "Authentication failed",
-                        Some(session_id.clone()),
-                    );
+                    if seen_connected {
+                        // Auth failed during TLS renegotiation after a successful connection.
+                        // Close the PTY (shell stays alive after OpenVPN exits) so the
+                        // monitor thread fires update_functions_for_session_exit →
+                        // handle_openvpn_terminal_state → auto-reconnect with fresh TOTP.
+                        let _ = upsert_function_status(
+                            &app,
+                            &function_state,
+                            openvpn_function_id,
+                            "error",
+                            "Auth failed during renegotiation; reconnecting with fresh credentials",
+                            Some(session_id.clone()),
+                        );
+                        let state = app.state::<SessionStore>();
+                        let _ = close_pty_internal(&session_id, &state);
+                        break;
+                    } else {
+                        let _ = upsert_function_status(
+                            &app,
+                            &function_state,
+                            openvpn_function_id,
+                            "error",
+                            "Authentication failed",
+                            Some(session_id.clone()),
+                        );
+                    }
                 }
 
                 if !seen_connected
@@ -741,6 +776,7 @@ pub fn start_openvpn_admin_worker(
         &str,
         Option<String>,
     ) -> Result<(), String>,
+    on_terminal_state: fn(&AppHandle, &str, &str),
 ) -> Result<String, String> {
     let existing = get_openvpn_admin_session(admin_store)?;
     if let Some(existing) = existing {
@@ -949,6 +985,8 @@ pub fn start_openvpn_admin_worker(
                         let _ = fs::remove_file(&helper_pid_path_watch);
                         let _ =
                             set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                        // Trigger app-level reconnect (generates fresh TOTP)
+                        on_terminal_state(&status_app, &state, &parsed.message);
                         break;
                     }
                     if state == "running" {

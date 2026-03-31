@@ -24,7 +24,7 @@ mod services;
 mod stores;
 use models::{
     AppConfig, AppConfigForDisk, BoundaryConfig,
-    BoundaryTargetSummary, FunctionStatus, RemoteBrowseEntry, RemoteBrowseNodeInfo,
+    BoundaryTargetSummary, FunctionStatus, PtyExitPayload, RemoteBrowseEntry, RemoteBrowseNodeInfo,
     RemoteBrowseSession, ScpTransferState, StartFunctionResult,
 };
 #[cfg(target_os = "windows")]
@@ -627,6 +627,7 @@ fn start_openvpn_admin_worker(
         is_windows_pid_running,
         mark_openvpn_connected,
         upsert_function_status,
+        handle_openvpn_terminal_state,
     )
 }
 
@@ -638,6 +639,7 @@ fn run_openvpn_automation(
     username: String,
     password: String,
     otp_secret: String,
+    close_pty: fn(&str, &SessionStore) -> Result<Option<PtyExitPayload>, String>,
 ) {
     run_openvpn_automation_service(
         app,
@@ -654,6 +656,7 @@ fn run_openvpn_automation(
         mark_openvpn_connected,
         adapt_command_for_shell,
         lock_err,
+        close_pty,
     )
 }
 
