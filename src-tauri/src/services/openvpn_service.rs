@@ -684,6 +684,7 @@ pub fn run_openvpn_automation(
                 if scan_buffer.contains("authentication failed")
                     || scan_buffer.contains("auth failed")
                     || scan_buffer.contains("auth-failure")
+                    || scan_buffer.contains("auth_failed")
                 {
                     let function_state = app.state::<FunctionStore>();
                     if seen_connected {
@@ -691,6 +692,7 @@ pub fn run_openvpn_automation(
                         // Close the PTY (shell stays alive after OpenVPN exits) so the
                         // monitor thread fires update_functions_for_session_exit →
                         // handle_openvpn_terminal_state → auto-reconnect with fresh TOTP.
+                        eprintln!("[SCP-debug] openvpn_automation: auth-failure detected after connection, closing PTY {session_id}");
                         let _ = upsert_function_status(
                             &app,
                             &function_state,
@@ -701,6 +703,7 @@ pub fn run_openvpn_automation(
                         );
                         let state = app.state::<SessionStore>();
                         let payload = close_pty_internal(&session_id, &state).ok().flatten();
+                        eprintln!("[SCP-debug] openvpn_automation: close_pty_internal returned payload={}", payload.is_some());
                         propagate_forced_pty_close(
                             &session_id,
                             payload,
@@ -726,6 +729,39 @@ pub fn run_openvpn_automation(
                             Some(session_id.clone()),
                         );
                     }
+                }
+
+                // Detect OpenVPN process exit after successful connection.
+                // When OpenVPN exits for any reason (auth failure, signal, network loss),
+                // it prints "process exiting". Close the PTY so auto-reconnect can fire.
+                if seen_connected && scan_buffer.contains("process exiting") {
+                    eprintln!("[SCP-debug] openvpn_automation: 'process exiting' detected after connection, closing PTY {session_id}");
+                    let function_state = app.state::<FunctionStore>();
+                    let _ = upsert_function_status(
+                        &app,
+                        &function_state,
+                        openvpn_function_id,
+                        "error",
+                        "OpenVPN process exited; attempting reconnect",
+                        Some(session_id.clone()),
+                    );
+                    let state = app.state::<SessionStore>();
+                    let payload = close_pty_internal(&session_id, &state).ok().flatten();
+                    propagate_forced_pty_close(
+                        &session_id,
+                        payload,
+                        |payload| emit_pty_exit(&app, payload),
+                        |session_id, exit_code, reason| {
+                            let _ = update_functions_for_session_exit(
+                                &app,
+                                &function_state,
+                                session_id,
+                                exit_code,
+                                reason,
+                            );
+                        },
+                    );
+                    break;
                 }
 
                 if !seen_connected
