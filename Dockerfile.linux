@@ -1,6 +1,9 @@
 FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
 
 # System deps for Tauri v2 on Ubuntu 22.04
 RUN apt-get update && apt-get install -y \
@@ -22,7 +25,9 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && rm -rf /var/lib/apt/lists/*
 
 # Rust stable
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
+RUN mkdir -p "${CARGO_HOME}" "${RUSTUP_HOME}" \
+    && chmod 0777 "${CARGO_HOME}" "${RUSTUP_HOME}" \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && chmod -R a+rwX "${CARGO_HOME}" "${RUSTUP_HOME}"
 
 WORKDIR /app

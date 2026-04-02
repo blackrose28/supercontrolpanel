@@ -1,6 +1,6 @@
 {
   "name": "super-control-panel",
-  "version": "1.2.6",
+  "version": "1.2.7",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,8 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "docker:build_image": "docker build -f Dockerfile.linux -t scp-linux-builder .",
-    "docker:build_app": "docker run --rm -v \"$(pwd):/app\" -v \"$(pwd)/dist-linux:/out\" scp-linux-builder bash -c \"npm install && npm run build && npx tauri build && cp -r src-tauri/target/release/bundle/* /out/ && echo '✅ Build artifacts copied to dist-linux/'\"",
-    "docker:helper:release": "docker run --rm -v \"$(pwd):/app\" scp-linux-builder bash -lc \"cargo build --release --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper\"",
+    "docker:build_app": "docker run --rm --user \"$(id -u):$(id -g)\" -e HOME=/tmp/scp-home -v \"$(pwd):/app\" -v \"$(pwd)/dist-linux:/out\" scp-linux-builder bash -lc \"mkdir -p /tmp/scp-home && npm install && npm run build && npx tauri build && cp -r src-tauri/target/release/bundle/* /out/ && echo '✅ Build artifacts copied to dist-linux/'\"",
+    "docker:helper:release": "docker run --rm --user \"$(id -u):$(id -g)\" -e HOME=/tmp/scp-home -v \"$(pwd):/app\" scp-linux-builder bash -lc \"mkdir -p /tmp/scp-home && cargo build --release --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper\"",
     "tauri:dev": "tauri dev -- --bin super-control-panel",
     "tauri:build": "tauri build -- --bin super-control-panel",
     "helper:run": "cargo run --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper --",

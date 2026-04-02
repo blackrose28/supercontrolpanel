@@ -1198,6 +1198,7 @@ function readConfigForm(): AppConfig | null {
 
 async function loadConfig() {
   appConfig = await invoke<AppConfig>("get_app_config");
+  await loadSyncSettings();
   renderConfigForm();
   cfgStatus.textContent = "Config loaded.";
   void refreshConfigPaths();

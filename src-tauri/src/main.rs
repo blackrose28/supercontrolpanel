@@ -1026,6 +1026,10 @@ fn run_git(repo_root: &str, args: &[&str]) -> Result<String, String> {
         .current_dir(root)
         // Avoid hanging on credential prompts in a GUI app.
         .env("GIT_TERMINAL_PROMPT", "0")
+        // On packaged Linux builds, inherited loader paths can point git and
+        // git-remote-https at the app-bundled libcurl/libnghttp2 instead of
+        // the system-matched pair, causing symbol lookup failures.
+        .env_remove("LD_LIBRARY_PATH")
         .output()
         .map_err(|e| format!("failed to run git {:?}: {e}", args))?;
 
