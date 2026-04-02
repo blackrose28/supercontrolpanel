@@ -381,6 +381,25 @@ h3 {
     margin-bottom: 12px;
 }
 
+.config-sync-actions {
+    flex-wrap: nowrap;
+}
+
+.config-sync-actions button {
+    white-space: nowrap;
+}
+
+.config-sync-statuses {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.config-sync-statuses .hint {
+    margin: 0;
+}
+
 .terminal-host {
     border: 1px solid #2f3442;
     border-radius: 8px;
