@@ -1,4 +1,7 @@
 #[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
 use std::{fs, path::PathBuf};
 
 #[cfg(target_os = "windows")]
@@ -33,6 +36,9 @@ use tauri::Emitter;
 use crate::models::{HelperStatusFile, OpenVpnLaunchConfig};
 #[cfg(not(target_os = "windows"))]
 use crate::stores::SessionStore;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[cfg(target_os = "windows")]
 pub fn runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -885,6 +891,7 @@ fn powershell_elevation_launcher_output(
 ) -> Result<std::process::Output, String> {
     let mut child = Command::new("powershell.exe")
         .args(["-NoProfile", "-Command", command])
+        .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -993,7 +1000,7 @@ pub fn start_openvpn_admin_worker(
 
     let helper_path = write_openvpn_helper_script(app, openvpn_helper_script_name)?;
     let cmd = format!(
-        "$p=Start-Process -Verb RunAs -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','{}','-ConfigPath','{}','-StatusPath','{}','-LogPath','{}','-ErrPath','{}','-StopPath','{}','-HelperPidPath','{}') -PassThru; $p.Id",
+        "$p=Start-Process -Verb RunAs -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','{}','-ConfigPath','{}','-StatusPath','{}','-LogPath','{}','-ErrPath','{}','-StopPath','{}','-HelperPidPath','{}') -PassThru; $p.Id",
         escape_ps_single_quoted(&helper_path.to_string_lossy()),
         escape_ps_single_quoted(&launch_path.to_string_lossy()),
         escape_ps_single_quoted(&status_path.to_string_lossy()),
