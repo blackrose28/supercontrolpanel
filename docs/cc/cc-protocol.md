@@ -1,4 +1,4 @@
-﻿# Control Plane Protocol (v1)
+# Control Plane Protocol (v1)
 
 Envelope: `{ type, deviceId, seq, ts, payload }`
 
@@ -26,3 +26,15 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
 
 ## Mapping to App Contracts
 - Names mirror existing Tauri commands/events 1:1; agent dispatches to `SessionStore`/`FunctionStore` and forwards `function-status`/`pty-output`/`pty-exit`/`openvpn-log`.
+
+## Versioning and Capabilities
+- Protocol version: `scp.cc.v1` (WebSocket subprotocol).
+- Feature negotiation: agent sends `hello{ agentVersion, supported: ["gzip", "chunking"] }`; server replies `welcome{ protocol: "scp.cc.v1", capabilities: { gzip: true, chunking: true } }`.
+- Backward/forward compatibility: additive payload fields are tolerated; breaking changes bump protocol or `schemaVersion` per type.
+
+## Idempotency and Delivery Semantics
+- Idempotency: control commands carry `commandId` (UUID); duplicates must return the same result; the agent caches recent `commandId`s (TTL 10m).
+- Telemetry ordering: guaranteed per `(deviceId, sessionId, type)` keyed by `seq`; cross-stream interleaving allowed.
+- Acknowledgements: batching allowed (10–50 ms or 8–16 KB); server `ack{ reqSeq }` / `nack{ reqSeq, retryAfterMs }`.
+- Compression: gzip permitted when frames > 8 KB if `welcome.capabilities.gzip=true`.
+- Chunking: oversize events include `{ chunkIndex, totalChunks }` if `welcome.capabilities.chunking=true`.
