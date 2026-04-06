@@ -24,6 +24,7 @@ pub async fn init_cc_connection(app: AppHandle) -> Result<String, String> {
         settings.cc_server_url.clone(),
         settings.cc_agent_token.clone(),
         settings.cc_device_id.clone(),
+        app.clone(),
     );
 
     // Spawn connection in background

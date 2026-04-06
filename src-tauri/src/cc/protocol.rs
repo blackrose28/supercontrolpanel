@@ -22,7 +22,9 @@ pub enum MessageType {
     Nack,
     Heartbeat,
     StatusSnapshot,
+    Inventory,
     RequestStatusSnapshot,
+    RequestInventory,
     FunctionStatus,
     Unknown(String),
 }
@@ -35,7 +37,9 @@ impl From<&str> for MessageType {
             "nack" => MessageType::Nack,
             "heartbeat" => MessageType::Heartbeat,
             "status_snapshot" => MessageType::StatusSnapshot,
+            "inventory" => MessageType::Inventory,
             "request_status_snapshot" => MessageType::RequestStatusSnapshot,
+            "request_inventory" => MessageType::RequestInventory,
             "function-status" => MessageType::FunctionStatus,
             other => MessageType::Unknown(other.to_string()),
         }
@@ -76,5 +80,9 @@ impl Envelope {
 
     pub fn function_status(device_id: String, seq: u64, status: Value) -> Self {
         Self::new("function-status", device_id, seq, Some(status))
+    }
+
+    pub fn inventory(device_id: String, seq: u64, inventory: Value) -> Self {
+        Self::new("inventory", device_id, seq, Some(inventory))
     }
 }

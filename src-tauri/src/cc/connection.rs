@@ -1,5 +1,8 @@
-use rand::Rng;
 use futures_util::{SinkExt, StreamExt};
+use rand::Rng;
+use serde_json::json;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep, Duration};
@@ -7,23 +10,27 @@ use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, Message},
 };
+use tauri::AppHandle;
 
 use super::protocol::{Envelope, MessageType};
+use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
 
 pub struct CcConnection {
     server_url: String,
     agent_token: String,
     device_id: String,
+    app: AppHandle,
     seq: Arc<Mutex<u64>>,
     connected: Arc<Mutex<bool>>,
 }
 
 impl CcConnection {
-    pub fn new(server_url: String, agent_token: String, device_id: String) -> Self {
+    pub fn new(server_url: String, agent_token: String, device_id: String, app: AppHandle) -> Self {
         Self {
             server_url,
             agent_token,
             device_id,
+            app,
             seq: Arc::new(Mutex::new(0)),
             connected: Arc::new(Mutex::new(false)),
         }
@@ -81,6 +88,7 @@ impl CcConnection {
 
         // Send initial status_snapshot
         Self::send_status_snapshot(&mut write, &self.device_id, &self.seq).await?;
+        Self::send_inventory(&mut write, &self.device_id, &self.seq, &self.app).await?;
 
         // Start heartbeat task
         let device_id = self.device_id.clone();
@@ -134,6 +142,17 @@ impl CcConnection {
                                 eprintln!("CC status_snapshot send failed: {}", err);
                                 break;
                             }
+                        } else if let MessageType::RequestInventory =
+                            MessageType::from(envelope.msg_type.as_str())
+                        {
+                            let mut w = write_clone.lock().await;
+                            if let Err(err) =
+                                Self::send_inventory(&mut *w, &self.device_id, &self.seq, &self.app)
+                                    .await
+                            {
+                                eprintln!("CC inventory send failed: {}", err);
+                                break;
+                            }
                         }
                     }
                 }
@@ -173,6 +192,59 @@ impl CcConnection {
         };
         let snapshot = Envelope::status_snapshot(device_id.to_string(), seq);
         let msg = serde_json::to_string(&snapshot)?;
+        write.send(Message::Text(msg)).await?;
+        Ok(())
+    }
+
+    async fn send_inventory(
+        write: &mut (
+            impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
+        ),
+        device_id: &str,
+        seq_counter: &Arc<Mutex<u64>>,
+        app: &AppHandle,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let servers = load_servers(app).map_err(|err| format!("load servers: {err}"))?;
+        let servers_payload: Vec<_> = servers
+            .iter()
+            .map(|server| {
+                json!({
+                    "id": server.id,
+                    "name": server.name,
+                    "host": server.host,
+                    "os": match server.os {
+                        ServerOs::Linux => "linux",
+                        ServerOs::Windows => "windows",
+                    },
+                    "connectionMethod": match server.connection_method {
+                        ConnectionMethod::Ssh => "ssh",
+                        ConnectionMethod::Boundary => "boundary",
+                    },
+                    "sshPort": server.ssh_port,
+                    "sshUser": server.ssh_user,
+                    "servicesCount": server.services.len(),
+                })
+            })
+            .collect();
+
+        let serialized = serde_json::to_string(&servers_payload)?;
+        let mut hasher = DefaultHasher::new();
+        serialized.hash(&mut hasher);
+        let hash = format!("{:016x}", hasher.finish());
+
+        let payload = json!({
+            "serversCount": servers_payload.len(),
+            "serversListHash": hash,
+            "servers": servers_payload,
+        });
+
+        let seq = {
+            let mut s = seq_counter.lock().await;
+            *s += 1;
+            *s
+        };
+        let inventory = Envelope::inventory(device_id.to_string(), seq, payload);
+        let msg = serde_json::to_string(&inventory)?;
         write.send(Message::Text(msg)).await?;
         Ok(())
     }
