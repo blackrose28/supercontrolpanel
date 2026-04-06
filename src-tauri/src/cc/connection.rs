@@ -169,9 +169,12 @@ impl CcConnection {
                         } else if let MessageType::RequestRestartOpenvpn =
                             MessageType::from(envelope.msg_type.as_str())
                         {
-                            if let Err(err) = restart_openvpn_action(self.app.clone()) {
-                                eprintln!("CC restart_openvpn failed: {}", err);
-                            }
+                            let app = self.app.clone();
+                            std::thread::spawn(move || {
+                                if let Err(err) = restart_openvpn_action(app) {
+                                    eprintln!("CC restart_openvpn failed: {}", err);
+                                }
+                            });
                         }
                     }
                 }
