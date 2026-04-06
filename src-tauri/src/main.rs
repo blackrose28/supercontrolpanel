@@ -1445,6 +1445,21 @@ pub(crate) fn restart_openvpn_action(app: AppHandle) -> Result<(), String> {
             "CC restart requested; OpenVPN is idle, starting directly",
             None,
         )?;
+
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        let admin_store = app.state::<OpenVpnAdminStore>();
+
+        return start_openvpn_manual_action(
+            String::new(),
+            String::new(),
+            String::new(),
+            app.clone(),
+            session_store,
+            function_store,
+            admin_store,
+        )
+        .map(|_| ());
     }
 
     let restart_app = app.clone();
