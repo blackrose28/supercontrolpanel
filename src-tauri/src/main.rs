@@ -1463,10 +1463,8 @@ pub(crate) fn restart_openvpn_action(app: AppHandle) -> Result<(), String> {
     }
 
     let restart_app = app.clone();
-    tauri::async_runtime::spawn(async move {
-        if is_running {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-        }
+    thread::spawn(move || {
+        thread::sleep(Duration::from_secs(2));
 
         let session_store = restart_app.state::<SessionStore>();
         let function_store = restart_app.state::<FunctionStore>();
