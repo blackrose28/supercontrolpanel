@@ -1415,6 +1415,32 @@ fn stop_openvpn_function(
 }
 
 pub(crate) fn restart_openvpn_action(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        let admin_store = app.state::<OpenVpnAdminStore>();
+        if let Some(active) = get_openvpn_admin_session(&admin_store)? {
+            let helper_pid_path = openvpn_runtime_dir(&app)?.join(format!("{}.helper.pid", active.id));
+            if let Ok(s) = fs::read_to_string(&helper_pid_path) {
+                if let Ok(pid) = s.trim().parse::<u32>() {
+                    if pid > 0 && is_windows_pid_running(pid) {
+                        let function_store = app.state::<FunctionStore>();
+                        upsert_function_status(
+                            &app,
+                            &function_store,
+                            OPENVPN_FUNCTION_ID,
+                            "restarting",
+                            "Requesting elevated OpenVPN child restart",
+                            Some(active.id.clone()),
+                        )?;
+                        fs::write(&active.control_path, "restart")
+                            .map_err(|e| format!("failed to signal openvpn restart: {e}"))?;
+                        return Ok(());
+                    }
+                }
+            }
+        }
+    }
+
     let is_running = {
         let function_store = app.state::<FunctionStore>();
         let running = lock_err(&function_store.statuses)?

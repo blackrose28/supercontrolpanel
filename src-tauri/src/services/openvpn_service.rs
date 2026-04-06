@@ -73,6 +73,7 @@ param(
   [Parameter(Mandatory=$true)][string]$LogPath,
   [Parameter(Mandatory=$true)][string]$ErrPath,
   [Parameter(Mandatory=$true)][string]$StopPath,
+  [Parameter(Mandatory=$true)][string]$ControlPath,
   [Parameter(Mandatory=$true)][string]$HelperPidPath
 )
 
@@ -88,6 +89,19 @@ function Write-Status([string]$State, [string]$Message) {
     updatedAtMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   }
   ($payload | ConvertTo-Json -Compress) | Set-Content -Path $StatusPath -Encoding UTF8
+}
+
+function Read-ControlCommand() {
+  if (!(Test-Path -LiteralPath $ControlPath)) { return $null }
+  try {
+    $raw = Get-Content -LiteralPath $ControlPath -Raw -ErrorAction Stop
+  } catch {
+    return $null
+  } finally {
+    Remove-Item -LiteralPath $ControlPath -Force -ErrorAction SilentlyContinue
+  }
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $null }
+  return $raw.Trim().ToLowerInvariant()
 }
 
 function Get-ReconnectDelaySec {
@@ -220,6 +234,10 @@ public static class ScpOvpnJob {
       Write-Status "stopped" "Stopped by request"
       break
     }
+    $pendingCommand = Read-ControlCommand
+    if ($pendingCommand -eq 'restart') {
+      Write-Status "restarting" "Restart requested before launch"
+    }
 
     $authFile = [System.IO.Path]::GetTempFileName()
     try {
@@ -252,6 +270,7 @@ public static class ScpOvpnJob {
         $runMsg = if ($killWithHelper) { "OpenVPN running (stops when helper window closes)" } else { "OpenVPN started as Administrator (keeps running if helper closes)" }
         Write-Status "running" $runMsg
         $consecutiveFailures = 0
+        $restartRequested = $false
 
         while (-not $proc.HasExited) {
           if (Test-Path -LiteralPath $StopPath) {
@@ -259,10 +278,21 @@ public static class ScpOvpnJob {
             try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
             break
           }
+          $command = Read-ControlCommand
+          if ($command -eq 'restart') {
+            Write-Status "restarting" "Restart requested"
+            $restartRequested = $true
+            try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}
+            break
+          }
           Start-Sleep -Milliseconds 400
         }
 
         $proc.WaitForExit()
+
+        if ($restartRequested) {
+          continue
+        }
       } catch {
         if ($null -ne $proc) {
           try {
@@ -320,6 +350,11 @@ public static class ScpOvpnJob {
             Write-Status "stopped" "Stopped by request during reconnect wait"
             break
           }
+          $command = Read-ControlCommand
+          if ($command -eq 'restart') {
+            Write-Status "restarting" "Restart requested during reconnect wait"
+            break
+          }
           Start-Sleep -Seconds 1
           $slept++
         }
@@ -365,6 +400,7 @@ pub fn get_openvpn_admin_session(
     Ok(slot.as_ref().map(|s| OpenVpnAdminSession {
         id: s.id.clone(),
         stop_path: s.stop_path.clone(),
+        control_path: s.control_path.clone(),
     }))
 }
 
@@ -979,6 +1015,7 @@ pub fn start_openvpn_admin_worker(
     let log_path = base_dir.join(format!("{session_id}.log.txt"));
     let err_path = base_dir.join(format!("{session_id}.err.txt"));
     let stop_path = base_dir.join(format!("{session_id}.stop"));
+    let control_path = base_dir.join(format!("{session_id}.control"));
 
     let launch = OpenVpnLaunchConfig {
         executable_path,
@@ -999,18 +1036,22 @@ pub fn start_openvpn_admin_worker(
     if stop_path.exists() {
         let _ = fs::remove_file(&stop_path);
     }
+    if control_path.exists() {
+        let _ = fs::remove_file(&control_path);
+    }
     let helper_pid_path = base_dir.join(format!("{session_id}.helper.pid"));
     let _ = fs::remove_file(&helper_pid_path);
 
     let helper_path = write_openvpn_helper_script(app, openvpn_helper_script_name)?;
     let cmd = format!(
-        "$p=Start-Process -Verb RunAs -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','{}','-ConfigPath','{}','-StatusPath','{}','-LogPath','{}','-ErrPath','{}','-StopPath','{}','-HelperPidPath','{}') -PassThru; $p.Id",
+        "$p=Start-Process -Verb RunAs -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-File','{}','-ConfigPath','{}','-StatusPath','{}','-LogPath','{}','-ErrPath','{}','-StopPath','{}','-ControlPath','{}','-HelperPidPath','{}') -PassThru; $p.Id",
         escape_ps_single_quoted(&helper_path.to_string_lossy()),
         escape_ps_single_quoted(&launch_path.to_string_lossy()),
         escape_ps_single_quoted(&status_path.to_string_lossy()),
         escape_ps_single_quoted(&log_path.to_string_lossy()),
         escape_ps_single_quoted(&err_path.to_string_lossy()),
         escape_ps_single_quoted(&stop_path.to_string_lossy()),
+        escape_ps_single_quoted(&control_path.to_string_lossy()),
         escape_ps_single_quoted(&helper_pid_path.to_string_lossy())
     );
 
@@ -1020,6 +1061,7 @@ pub fn start_openvpn_admin_worker(
         let _ = fs::remove_file(&log_path);
         let _ = fs::remove_file(&err_path);
         let _ = fs::remove_file(&stop_path);
+        let _ = fs::remove_file(&control_path);
         let _ = fs::remove_file(&helper_pid_path);
     };
 
@@ -1078,6 +1120,7 @@ pub fn start_openvpn_admin_worker(
         Some(OpenVpnAdminSession {
             id: session_id.clone(),
             stop_path: stop_path.clone(),
+            control_path: control_path.clone(),
         }),
     )?;
 

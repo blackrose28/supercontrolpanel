@@ -8,6 +8,8 @@ pub struct OpenVpnAdminSession {
     pub id: String,
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub stop_path: PathBuf,
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    pub control_path: PathBuf,
 }
 
 pub struct BoundaryAutomationSession {
