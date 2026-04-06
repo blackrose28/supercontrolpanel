@@ -23,8 +23,11 @@ pub enum MessageType {
     Heartbeat,
     StatusSnapshot,
     Inventory,
+    RecentLogs,
     RequestStatusSnapshot,
     RequestInventory,
+    RequestRecentLogs,
+    RequestRestartOpenvpn,
     FunctionStatus,
     Unknown(String),
 }
@@ -38,8 +41,11 @@ impl From<&str> for MessageType {
             "heartbeat" => MessageType::Heartbeat,
             "status_snapshot" => MessageType::StatusSnapshot,
             "inventory" => MessageType::Inventory,
+            "recent_logs" => MessageType::RecentLogs,
             "request_status_snapshot" => MessageType::RequestStatusSnapshot,
             "request_inventory" => MessageType::RequestInventory,
+            "request_recent_logs" => MessageType::RequestRecentLogs,
+            "request_restart_openvpn" => MessageType::RequestRestartOpenvpn,
             "function-status" => MessageType::FunctionStatus,
             other => MessageType::Unknown(other.to_string()),
         }
@@ -84,5 +90,9 @@ impl Envelope {
 
     pub fn inventory(device_id: String, seq: u64, inventory: Value) -> Self {
         Self::new("inventory", device_id, seq, Some(inventory))
+    }
+
+    pub fn recent_logs(device_id: String, seq: u64, logs: Value) -> Self {
+        Self::new("recent_logs", device_id, seq, Some(logs))
     }
 }

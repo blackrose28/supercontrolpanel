@@ -17,8 +17,10 @@ const SYNC_SETTINGS_FILE_NAME: &str = "sync-local.json";
 static NEXT_TELEMETRY_SEQ: AtomicU64 = AtomicU64::new(1);
 static TELEMETRY_WORKER_STARTED: AtomicBool = AtomicBool::new(false);
 static TELEMETRY_QUEUE: OnceLock<Mutex<VecDeque<QueuedTelemetryEvent>>> = OnceLock::new();
+static RECENT_TELEMETRY: OnceLock<Mutex<VecDeque<Value>>> = OnceLock::new();
 
 const MAX_QUEUED_TELEMETRY_EVENTS: usize = 500;
+const MAX_RECENT_TELEMETRY_EVENTS: usize = 100;
 const TELEMETRY_IDLE_POLL_MS: u64 = 500;
 const TELEMETRY_MAX_BACKOFF_SECS: u64 = 30;
 
@@ -31,6 +33,10 @@ struct QueuedTelemetryEvent {
 
 fn telemetry_queue() -> &'static Mutex<VecDeque<QueuedTelemetryEvent>> {
     TELEMETRY_QUEUE.get_or_init(|| Mutex::new(VecDeque::new()))
+}
+
+fn recent_telemetry() -> &'static Mutex<VecDeque<Value>> {
+    RECENT_TELEMETRY.get_or_init(|| Mutex::new(VecDeque::new()))
 }
 
 fn enqueue_telemetry_event(event: QueuedTelemetryEvent) {
@@ -47,6 +53,18 @@ fn enqueue_telemetry_event(event: QueuedTelemetryEvent) {
     }
 
     queue.push_back(event);
+}
+
+fn record_recent_telemetry(body: &Value) {
+    let Ok(mut recent) = recent_telemetry().lock() else {
+        return;
+    };
+
+    if recent.len() >= MAX_RECENT_TELEMETRY_EVENTS {
+        recent.pop_front();
+    }
+
+    recent.push_back(body.clone());
 }
 
 fn ensure_telemetry_worker_started(app: AppHandle) {
@@ -185,10 +203,21 @@ pub fn forward_log_event<T: Serialize>(
         "payload": payload_value,
     });
 
+    record_recent_telemetry(&body);
+
     enqueue_telemetry_event(QueuedTelemetryEvent {
         body,
         attempt: 0,
         next_attempt_at: Instant::now(),
     });
     ensure_telemetry_worker_started(app.clone());
+}
+
+pub fn recent_log_events(limit: usize) -> Vec<Value> {
+    let Ok(recent) = recent_telemetry().lock() else {
+        return Vec::new();
+    };
+
+    let start = recent.len().saturating_sub(limit);
+    recent.iter().skip(start).cloned().collect()
 }

@@ -1414,6 +1414,50 @@ fn stop_openvpn_function(
     stop_openvpn_action(app, session_store, function_store, admin_store)
 }
 
+pub(crate) fn restart_openvpn_action(app: AppHandle) -> Result<(), String> {
+    let session_store = app.state::<SessionStore>();
+    let function_store = app.state::<FunctionStore>();
+    let admin_store = app.state::<OpenVpnAdminStore>();
+
+    stop_openvpn_action(
+        app.clone(),
+        session_store,
+        function_store,
+        admin_store,
+    )?;
+
+    let restart_app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let session_store = restart_app.state::<SessionStore>();
+        let function_store = restart_app.state::<FunctionStore>();
+        let admin_store = restart_app.state::<OpenVpnAdminStore>();
+
+        if let Err(err) = start_openvpn_manual_action(
+            String::new(),
+            String::new(),
+            String::new(),
+            restart_app.clone(),
+            session_store,
+            function_store,
+            admin_store,
+        ) {
+            let function_store = restart_app.state::<FunctionStore>();
+            let _ = upsert_function_status(
+                &restart_app,
+                &function_store,
+                OPENVPN_FUNCTION_ID,
+                "error",
+                &format!("CC restart failed: {err}"),
+                None,
+            );
+        }
+    });
+
+    Ok(())
+}
+
 pub(crate) fn start_caddy_action(
     cols: u16,
     rows: u16,

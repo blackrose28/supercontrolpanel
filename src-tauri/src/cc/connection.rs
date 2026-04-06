@@ -14,6 +14,8 @@ use tokio_tungstenite::{
 use tauri::AppHandle;
 
 use super::protocol::{Envelope, MessageType};
+use super::telemetry::recent_log_events;
+use crate::restart_openvpn_action;
 use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
 
 pub struct CcConnection {
@@ -154,6 +156,22 @@ impl CcConnection {
                                 eprintln!("CC inventory send failed: {}", err);
                                 break;
                             }
+                        } else if let MessageType::RequestRecentLogs =
+                            MessageType::from(envelope.msg_type.as_str())
+                        {
+                            let mut w = write_clone.lock().await;
+                            if let Err(err) =
+                                Self::send_recent_logs(&mut *w, &self.device_id, &self.seq).await
+                            {
+                                eprintln!("CC recent_logs send failed: {}", err);
+                                break;
+                            }
+                        } else if let MessageType::RequestRestartOpenvpn =
+                            MessageType::from(envelope.msg_type.as_str())
+                        {
+                            if let Err(err) = restart_openvpn_action(self.app.clone()) {
+                                eprintln!("CC restart_openvpn failed: {}", err);
+                            }
                         }
                     }
                 }
@@ -260,6 +278,29 @@ impl CcConnection {
         };
         let inventory = Envelope::inventory(device_id.to_string(), seq, payload);
         let msg = serde_json::to_string(&inventory)?;
+        write.send(Message::Text(msg)).await?;
+        Ok(())
+    }
+
+    async fn send_recent_logs(
+        write: &mut (
+            impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
+        ),
+        device_id: &str,
+        seq_counter: &Arc<Mutex<u64>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let logs = recent_log_events(50);
+        let payload = json!({
+            "count": logs.len(),
+            "events": logs,
+        });
+        let seq = {
+            let mut s = seq_counter.lock().await;
+            *s += 1;
+            *s
+        };
+        let recent_logs = Envelope::recent_logs(device_id.to_string(), seq, payload);
+        let msg = serde_json::to_string(&recent_logs)?;
         write.send(Message::Text(msg)).await?;
         Ok(())
     }
