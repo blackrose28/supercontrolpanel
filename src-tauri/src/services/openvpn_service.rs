@@ -88,7 +88,22 @@ function Write-Status([string]$State, [string]$Message) {
     message = $Message
     updatedAtMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
   }
-  ($payload | ConvertTo-Json -Compress) | Set-Content -Path $StatusPath -Encoding UTF8
+  $json = $payload | ConvertTo-Json -Compress
+  $lastError = $null
+  for ($attempt = 0; $attempt -lt 20; $attempt++) {
+    try {
+      [System.IO.File]::WriteAllText(
+        $StatusPath,
+        $json,
+        [System.Text.UTF8Encoding]::new($false)
+      )
+      return
+    } catch {
+      $lastError = $_.Exception.Message
+      Start-Sleep -Milliseconds 100
+    }
+  }
+  throw "Failed to write helper status after retries: $lastError"
 }
 
 function Read-ControlCommand() {
