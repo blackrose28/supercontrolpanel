@@ -1415,20 +1415,43 @@ fn stop_openvpn_function(
 }
 
 pub(crate) fn restart_openvpn_action(app: AppHandle) -> Result<(), String> {
-    let session_store = app.state::<SessionStore>();
-    let function_store = app.state::<FunctionStore>();
-    let admin_store = app.state::<OpenVpnAdminStore>();
+    let is_running = {
+        let function_store = app.state::<FunctionStore>();
+        let running = lock_err(&function_store.statuses)?
+            .get(OPENVPN_FUNCTION_ID)
+            .and_then(|status| status.session_id.clone())
+            .is_some();
+        running
+    };
 
-    stop_openvpn_action(
-        app.clone(),
-        session_store,
-        function_store,
-        admin_store,
-    )?;
+    if is_running {
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        let admin_store = app.state::<OpenVpnAdminStore>();
+
+        stop_openvpn_action(
+            app.clone(),
+            session_store,
+            function_store,
+            admin_store,
+        )?;
+    } else {
+        let function_store = app.state::<FunctionStore>();
+        upsert_function_status(
+            &app,
+            &function_store,
+            OPENVPN_FUNCTION_ID,
+            "starting",
+            "CC restart requested; OpenVPN is idle, starting directly",
+            None,
+        )?;
+    }
 
     let restart_app = app.clone();
     tauri::async_runtime::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        if is_running {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
 
         let session_store = restart_app.state::<SessionStore>();
         let function_store = restart_app.state::<FunctionStore>();
