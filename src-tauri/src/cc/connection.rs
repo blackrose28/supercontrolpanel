@@ -3,6 +3,7 @@ use rand::Rng;
 use serde_json::json;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep, Duration};
@@ -47,24 +48,23 @@ impl CcConnection {
 
             match self.connect().await {
                 Ok(_) => {
-                    println!("CC connection established");
-                    return Ok(());
+                    eprintln!("CC connection ended; retrying");
                 }
                 Err(e) => {
                     let err_msg = e.to_string();
                     eprintln!("CC connection failed: {}", err_msg);
-                    
-                    // Jittered exponential backoff
-                    let jitter = rand::thread_rng().gen_range(0..=(base_delay_ms / 10));
-                    let delay = base_delay_ms + jitter;
-                    
-                    println!("Retrying in {}ms...", delay);
-                    sleep(Duration::from_millis(delay)).await;
-                    
-                    // Exponential backoff: double delay, cap at max
-                    base_delay_ms = (base_delay_ms * 2).min(max_delay_ms);
                 }
             }
+
+            // Jittered exponential backoff
+            let jitter = rand::thread_rng().gen_range(0..=(base_delay_ms / 10));
+            let delay = base_delay_ms + jitter;
+
+            println!("Retrying in {}ms...", delay);
+            sleep(Duration::from_millis(delay)).await;
+
+            // Exponential backoff: double delay, cap at max
+            base_delay_ms = (base_delay_ms * 2).min(max_delay_ms);
         }
     }
 
@@ -85,6 +85,7 @@ impl CcConnection {
         let (mut write, mut read) = ws_stream.split();
 
         *self.connected.lock().await = true;
+        println!("CC connection established");
 
         // Send initial status_snapshot
         Self::send_status_snapshot(&mut write, &self.device_id, &self.seq).await?;
@@ -158,18 +159,32 @@ impl CcConnection {
                 }
                 Ok(Message::Close(_)) => {
                     println!("CC connection closed by server");
-                    break;
+                    *self.connected.lock().await = false;
+                    return Err(IoError::new(
+                        ErrorKind::ConnectionAborted,
+                        "CC connection closed by server",
+                    )
+                    .into());
                 }
                 Err(e) => {
                     eprintln!("CC read error: {}", e);
-                    break;
+                    *self.connected.lock().await = false;
+                    return Err(IoError::new(
+                        ErrorKind::ConnectionAborted,
+                        format!("CC read error: {e}"),
+                    )
+                    .into());
                 }
                 _ => {}
             }
         }
 
         *self.connected.lock().await = false;
-        Ok(())
+        Err(IoError::new(
+            ErrorKind::UnexpectedEof,
+            "CC connection stream ended",
+        )
+        .into())
     }
 
     async fn next_seq(&self) -> u64 {
