@@ -49,34 +49,98 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ## Phase 2 — Telemetry
 
-**Goal:** Stream PTY/OpenVPN logs to CC, persist in ClickHouse, expose SSE for Admin UI.
+**Goal:** Stream PTY/OpenVPN logs to CC, persist telemetry, expose history + SSE for Admin UI.
 
 **Reference:** `docs/cc/cc-phase-2-telemetry.md`
 
 ### Agent
-- ⬜ Subscribe to Tauri events: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`
+- ✅ Subscribe to Tauri events: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`
 - ⬜ Batching (10–50 ms / 8–16 KB)
-- ⬜ Durable disk-backed queue (AES-256-GCM encrypted, 128 MB cap, drop-oldest policy)
+- 🟨 Retry/buffer queue implemented in-memory; durable disk-backed encrypted queue still pending
 - ⬜ Adaptive throttling (256 KB/s cap, leaky-bucket)
 - ⬜ Compression (gzip frames > 8 KB if negotiated)
 - ⬜ Chunking (oversize events with `{chunkIndex, totalChunks}`)
 - ⬜ Redaction (apply Phase 2 redaction matrix before enqueue)
 
 ### CC Server
-- ⬜ Ingest: `POST /v1/logs` (internal)
-- ⬜ ClickHouse setup: `cc_events_raw` table with partitioning and TTL
-- ⬜ SSE: `GET /v1/logs/stream?deviceId=...`
+- ✅ Ingest: `POST /v1/logs`
+- 🟨 Durable storage implemented with SQLite (current Phase 2 implementation); ClickHouse remains deferred
+- ✅ SSE: `GET /v1/logs/stream?deviceId=...`
+- ✅ History API: `GET /v1/logs`, `GET /v1/logs/export`
+- ✅ Admin telemetry UI: filters, search, export, alerts, runtime summaries
 - ⬜ Backpressure: `nack { rate_limited: true, retryAfterMs }` when saturated
-- ⬜ Inventory: handle `inventory { serversListHash, serversCount }`
+- 🟨 Inventory summary path exists; full inventory cadence/request flow still pending
 
 ### Acceptance Criteria
-- ⬜ Live logs appear in Admin UI within <250 ms P50
-- ⬜ Backfill: reconnect replays buffered events without duplicates
+- ✅ Live logs appear in Admin UI end-to-end
+- 🟨 Backfill: reconnect replays buffered events from current in-memory agent queue; durable replay across agent restarts still pending
 - ⬜ Ordering holds per `(deviceId, sessionId, type)` under burst
 - ⬜ Redaction: no secrets in SSE or stored rows
 - ⬜ Disk queue survives process restarts
 
 ---
 
-**Last Updated:** 2026-04-06T11:06:52Z
-**Status:** Phase 1 complete; Phase 2 telemetry pending
+**Last Updated:** 2026-04-06T12:40:00Z
+**Status:** Phase 1 complete; Phase 2 core telemetry/admin slice implemented, advanced buffering/redaction/backpressure still pending
+
+---
+
+## Phase 3 — Core Control
+
+**Goal:** Add safe server → agent control commands on top of the existing CC connection.
+
+**Reference:** `docs/cc/cc-phase-3-control.md`
+
+### Recommended implementation order
+1. request fresh `status_snapshot`
+2. request fresh `inventory`
+3. one low-risk start/stop command mapped to an existing Tauri command
+4. command lifecycle + audit trail
+5. idempotency + reconnect reconciliation
+
+### CC Server
+- ⬜ Add command store (`commands`) with lifecycle state:
+  - `queued`
+  - `dispatched`
+  - `executing`
+  - `succeeded`
+  - `failed`
+  - `canceled`
+- ⬜ Add `POST /v1/commands`
+- ⬜ Add `GET /v1/commands`
+- ⬜ Add `GET /v1/commands/:id`
+- ⬜ Push commands over `/agent` websocket
+- ⬜ Track command audit entries with actor, device, payload summary, timestamps, outcome
+- ⬜ Add idempotency by `commandId`
+- ⬜ Reconcile stale in-flight commands after reconnect/lost agent
+
+### Agent (Tauri/Rust)
+- ⬜ Extend CC protocol handling for server → agent messages
+- ⬜ Add command dispatcher in `src-tauri/src/cc/`
+- ⬜ Map at least one server command to an existing local action
+- ⬜ Emit lifecycle updates back to CC:
+  - dispatch ack/nack
+  - executing
+  - terminal result
+- ⬜ Add duplicate command suppression by `commandId`
+- ⬜ Add timeout handling for non-terminal commands
+
+### Admin / API
+- ⬜ Add a minimal command submit UI or HTTP-only admin flow for testing
+- ⬜ Show command history and latest outcome per device
+- ⬜ Link command outcomes to existing telemetry/runtime summary views
+
+### First safe command set
+- ⬜ `request_status_snapshot`
+- ⬜ `request_inventory`
+- ⬜ one of:
+  - `stop_openvpn_function`
+  - `stop_boundary_auth`
+  - `stop_server_tunnel`
+
+### Acceptance Criteria
+- ⬜ Server can submit a command and see deterministic lifecycle transitions
+- ⬜ Agent executes a command exactly once under retry/reconnect conditions
+- ⬜ Duplicate `commandId` does not produce duplicate side effects
+- ⬜ Reconnect reconciliation closes stale commands correctly
+- ⬜ Audit trail matches actual executed actions

@@ -2,6 +2,7 @@ pub mod connection;
 pub mod protocol;
 pub mod dispatcher;
 pub mod commands;
+pub mod telemetry;
 
 pub use connection::CcConnection;
 pub use protocol::{Envelope, MessageType};

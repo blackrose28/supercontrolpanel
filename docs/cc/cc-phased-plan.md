@@ -7,7 +7,8 @@
 
 ## Phase 2 — Telemetry
 - Stream `pty-output`, `openvpn-log`.
-- Persist logs (Postgres + Timescale/ClickHouse). SSE for UI stream.
+- Persist logs and expose SSE/history for UI stream.
+- Current implementation uses SQLite; ClickHouse remains a later upgrade path if volume demands it.
 
 ## Phase 3 — Core Control
 - Implement `start/stop_*` for OpenVPN/Boundary/tunnel/ssh.
@@ -22,11 +23,14 @@
 ## Phase 6 — Security Hardening
 - mTLS, token rotation, org scoping, approvals, rate limits, IP allowlist.
 
+> Note: some Phase 6 hardening has already been pulled forward into the current implementation:
+> admin login/session cookies, CSRF protection, hashed stored tokens, rate limiting, and security headers.
+
 ## Phase 7 — Operations
 - Metrics, dashboards, backups, log retention, alerts.
 
 ## Tech Choices
-- Server: Node (NestJS) or Python (FastAPI), Postgres, Redis fanout.
+- Server: Node (NestJS). Current persistence is SQLite; Redis/ClickHouse remain future scale-up options.
 - Admin UI: Vite + React (or server-rendered + htmx).
 - Observability: OpenTelemetry + JSON logs + Sentry.
 

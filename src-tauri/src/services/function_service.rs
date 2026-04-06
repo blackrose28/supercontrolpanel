@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Mutex};
 
 use tauri::{AppHandle, Emitter};
 
-use crate::{models::FunctionStatus, stores::FunctionStore};
+use crate::{cc::telemetry::forward_log_event, models::FunctionStatus, stores::FunctionStore};
 
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -63,7 +63,14 @@ pub fn upsert_function_status(
         statuses.insert(function_id.to_string(), status.clone());
     }
 
-    let _ = app.emit("function-status", status);
+    let _ = app.emit("function-status", status.clone());
+    forward_log_event(
+        app,
+        "function-status",
+        status.session_id.as_deref(),
+        Some(&status.function_id),
+        &status,
+    );
     Ok(())
 }
 
@@ -90,6 +97,13 @@ pub fn upsert_boundary_status(
         statuses.insert(boundary_auth_function_id.to_string(), status.clone());
     }
 
-    let _ = app.emit("function-status", status);
+    let _ = app.emit("function-status", status.clone());
+    forward_log_event(
+        app,
+        "function-status",
+        status.session_id.as_deref(),
+        Some(&status.function_id),
+        &status,
+    );
     Ok(())
 }

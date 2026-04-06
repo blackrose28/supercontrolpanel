@@ -8,7 +8,7 @@ use tokio_tungstenite::{
     tungstenite::{client::IntoClientRequest, Message},
 };
 
-use super::protocol::Envelope;
+use super::protocol::{Envelope, MessageType};
 
 pub struct CcConnection {
     server_url: String,
@@ -80,16 +80,14 @@ impl CcConnection {
         *self.connected.lock().await = true;
 
         // Send initial status_snapshot
-        let seq = self.next_seq().await;
-        let snapshot = Envelope::status_snapshot(self.device_id.clone(), seq);
-        let msg = serde_json::to_string(&snapshot)?;
-        write.send(Message::Text(msg)).await?;
+        Self::send_status_snapshot(&mut write, &self.device_id, &self.seq).await?;
 
         // Start heartbeat task
         let device_id = self.device_id.clone();
         let seq_counter = self.seq.clone();
         let connected = self.connected.clone();
         let write_clone = Arc::new(Mutex::new(write));
+        let heartbeat_write = write_clone.clone();
         
         tokio::spawn(async move {
             let mut heartbeat_interval = interval(Duration::from_secs(15));
@@ -111,7 +109,7 @@ impl CcConnection {
 
                 let heartbeat = Envelope::heartbeat(device_id.clone(), seq, uptime_sec);
                 if let Ok(msg) = serde_json::to_string(&heartbeat) {
-                    let mut w = write_clone.lock().await;
+                    let mut w = heartbeat_write.lock().await;
                     if w.send(Message::Text(msg)).await.is_err() {
                         break;
                     }
@@ -125,7 +123,18 @@ impl CcConnection {
                 Ok(Message::Text(text)) => {
                     if let Ok(envelope) = serde_json::from_str::<Envelope>(&text) {
                         println!("Received from CC: type={}", envelope.msg_type);
-                        // TODO: handle different message types
+                        if let MessageType::RequestStatusSnapshot =
+                            MessageType::from(envelope.msg_type.as_str())
+                        {
+                            let mut w = write_clone.lock().await;
+                            if let Err(err) =
+                                Self::send_status_snapshot(&mut *w, &self.device_id, &self.seq)
+                                    .await
+                            {
+                                eprintln!("CC status_snapshot send failed: {}", err);
+                                break;
+                            }
+                        }
                     }
                 }
                 Ok(Message::Close(_)) => {
@@ -148,5 +157,23 @@ impl CcConnection {
         let mut seq = self.seq.lock().await;
         *seq += 1;
         *seq
+    }
+
+    async fn send_status_snapshot(
+        write: &mut (
+            impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
+        ),
+        device_id: &str,
+        seq_counter: &Arc<Mutex<u64>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let seq = {
+            let mut s = seq_counter.lock().await;
+            *s += 1;
+            *s
+        };
+        let snapshot = Envelope::status_snapshot(device_id.to_string(), seq);
+        let msg = serde_json::to_string(&snapshot)?;
+        write.send(Message::Text(msg)).await?;
+        Ok(())
     }
 }

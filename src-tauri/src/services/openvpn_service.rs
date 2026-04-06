@@ -20,6 +20,8 @@ use std::{
 
 use tauri::{AppHandle, Manager};
 
+#[cfg(target_os = "windows")]
+use crate::cc::telemetry::forward_log_event;
 use crate::models::{AppConfig, FunctionStatus, OpenVpnConfig, PtyExitPayload};
 use crate::stores::FunctionStore;
 
@@ -368,14 +370,16 @@ pub fn get_openvpn_admin_session(
 
 #[cfg(target_os = "windows")]
 pub fn emit_openvpn_log(app: &AppHandle, session_id: &str, function_id: &str, data: String) {
+    let payload = OpenVpnLogPayload {
+        function_id: function_id.to_string(),
+        session_id: session_id.to_string(),
+        data,
+    };
     let _ = app.emit(
         "openvpn-log",
-        OpenVpnLogPayload {
-            function_id: function_id.to_string(),
-            session_id: session_id.to_string(),
-            data,
-        },
+        payload.clone(),
     );
+    forward_log_event(app, "openvpn-log", Some(session_id), Some(function_id), &payload);
 }
 
 pub fn prepare_openvpn_start(

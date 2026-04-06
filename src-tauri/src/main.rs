@@ -13,7 +13,7 @@ use std::{
 };
 
 mod cc;
-use cc::{get_cc_status, init_cc_connection};
+use cc::{get_cc_status, init_cc_connection, telemetry::forward_log_event};
 use portable_pty::{CommandBuilder, PtySize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -409,7 +409,14 @@ fn update_functions_for_session_exit(
         handle_openvpn_terminal_state(app, &state, &message);
     }
     for status in changed {
-        let _ = app.emit("function-status", status);
+        let _ = app.emit("function-status", status.clone());
+        forward_log_event(
+            app,
+            "function-status",
+            status.session_id.as_deref(),
+            Some(&status.function_id),
+            &status,
+        );
     }
     Ok(())
 }

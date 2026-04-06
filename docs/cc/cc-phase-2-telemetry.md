@@ -4,21 +4,43 @@
 - Stream `pty-output`, `pty-exit`, `openvpn-log` to CC.
 - Persist events in DB; expose SSE for Admin UI.
 
+## Current implementation note
+
+The current implementation diverges from the original Phase 2 storage plan:
+
+- Implemented now:
+  - agent forwarding for `function-status`, `pty-output`, `pty-exit`, `openvpn-log`
+  - agent retry/buffering queue in memory
+  - CC ingest endpoint: `POST /v1/logs`
+  - persisted telemetry/history in SQLite
+  - SSE stream: `GET /v1/logs/stream`
+  - history/export endpoints: `GET /v1/logs`, `GET /v1/logs/export`
+  - admin telemetry UI with filters, search, export, alerts, and runtime summaries
+- Still deferred:
+  - ClickHouse
+  - disk-backed encrypted agent queue
+  - negotiated gzip/chunking
+  - explicit `nack`/server backpressure protocol
+  - full redaction matrix enforcement
+
+Use this document as the target design, but treat SQLite + in-memory agent retry as the current Phase 2 baseline.
+
 ## Deliverables
 - Agent: batching (10–50 ms / 8–16 KB), tags `{functionId, sessionId}`.
 - Durable agent queue: disk-backed, bounded (default 50 MB), AES-GCM encrypted at rest; drop-oldest policy beyond high-watermark; flush-on-reconnect with de-dupe by `(deviceId, seq)`.
 - CC (ingest + storage):
   - Ingest: `POST /v1/logs` (internal), `GET /v1/logs/stream?deviceId=...` (SSE)
-  - Storage: ClickHouse (selected for Phase 2) — see "Storage schema (ClickHouse)" below
-  - Note: `GET /v1/logs` pagination and advanced filters deferred to Phase 3
+  - Current storage: SQLite (implemented)
+  - Target storage: ClickHouse (deferred) — see "Storage schema (ClickHouse)" below
+  - `GET /v1/logs` and export/filter/search are already implemented in the current server
 - Compression/chunking: gzip frames >8 KB if negotiated; chunk oversize events `{chunkIndex,totalChunks}`.
 - Ordering: per `(deviceId, sessionId, type)`; reconnect replay up to N buffered events.
 - Inventory publish: cadence 5m or on change; fields `{ serversListHash, serversCount }`.
 ## Checklists
 - Agent: subscribe to Tauri events: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`.
-- Agent: offline ring buffer (bounded), drop-oldest policy.
-- CC: WS → ingestor → durable store; backpressure handling.
-- CC: SSE fanout per-device and per-session.
+- Agent: retry/buffer queue implemented; offline durable ring buffer still pending.
+- CC: ingest → durable store implemented with SQLite; backpressure handling still pending.
+- CC: SSE/history fanout per-device implemented.
 - Redaction parity with MCP (no secrets at-rest/in-flight).
 
 ## Backpressure and throttling
@@ -117,14 +139,26 @@ Notes
 - Server can request a full inventory snapshot via a Phase 3 control when hashes mismatch persistently.
 
 ## Acceptance Criteria
-- Live logs appear in Admin UI within <250 ms P50.
-- Backfill: reconnect replays up to N buffered events without duplicates.
+- Live logs appear in Admin UI end-to-end. Current implementation verified manually.
+- Backfill: reconnect replays from current in-memory queue; durable replay across agent restarts is still pending.
 - Queries by device/time/type return expected events and respect redaction rules.
 - Ordering holds per `(deviceId, sessionId, type)` under burst conditions.
 
 ## Risks
 - Volume spikes from PTY spam → batching + rate limits.
 - Storage costs → compression + retention (Phase 7 finalizes).
+
+## Implemented admin/server additions pulled forward
+
+These items were implemented earlier than the original phased docs suggested:
+
+- persisted device enrollment and agent tokens
+- persisted runtime summaries per device
+- admin login/logout with cookie session
+- CSRF protection
+- hashed agent tokens and hashed admin session tokens at rest
+- security headers and request logging
+- endpoint rate limiting
 
 ## SLOs (Phase 2 Telemetry)
 
@@ -193,4 +227,3 @@ Notes
 
 - Redaction implementation: apply deterministic regex-based filters in agent before enqueue; server-side secondary redaction on ingest as safety net.
 - Never log secrets at server; audits/events store redacted forms only.
-

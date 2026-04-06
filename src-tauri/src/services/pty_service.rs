@@ -9,13 +9,13 @@ use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
+    cc::telemetry::forward_log_event,
     models::{PtyExitPayload, PtyOutputPayload},
     services::{complete_scp_transfer_session, handle_scp_transfer_output, lock_err},
     stores::{FunctionStore, PtySession, ScpTransferStore, SessionStore},
 };
 
-pub fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<str>) {
-    let data = format!("{}\r\n", line.as_ref());
+fn emit_pty_output(app: &AppHandle, session_id: &str, data: String) {
     let _ = app.emit(
         "pty-output",
         PtyOutputPayload {
@@ -29,6 +29,15 @@ pub fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<
         let _ =
             handle_scp_transfer_output(&transfer_state, session_id, &data, crate::services::now_ms);
     }
+    let payload = PtyOutputPayload {
+        id: session_id.to_string(),
+        data,
+    };
+    forward_log_event(app, "pty-output", Some(session_id), None, &payload);
+}
+
+pub fn emit_pty_output_line(app: &AppHandle, session_id: &str, line: impl AsRef<str>) {
+    emit_pty_output(app, session_id, format!("{}\r\n", line.as_ref()));
 }
 
 pub fn passive_pty_command() -> CommandBuilder {
@@ -92,7 +101,8 @@ pub fn emit_pty_exit(app: &AppHandle, payload: PtyExitPayload) {
             crate::services::now_ms,
         );
     }
-    let _ = app.emit("pty-exit", payload);
+    let _ = app.emit("pty-exit", payload.clone());
+    forward_log_event(app, "pty-exit", Some(&payload.id), None, &payload);
 }
 
 pub fn open_pty_with_command_builder(
@@ -149,23 +159,7 @@ pub fn open_pty_with_command_builder(
                 Ok(0) => break,
                 Ok(n) => {
                     let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    let _ = output_app.emit(
-                        "pty-output",
-                        PtyOutputPayload {
-                            id: output_session_id.clone(),
-                            data: data.clone(),
-                        },
-                    );
-                    let session_state = output_app.state::<SessionStore>();
-                    let _ = broadcast_watchers(&session_state, &output_session_id, &data);
-                    if let Some(transfer_state) = output_app.try_state::<ScpTransferStore>() {
-                        let _ = handle_scp_transfer_output(
-                            &transfer_state,
-                            &output_session_id,
-                            &data,
-                            crate::services::now_ms,
-                        );
-                    }
+                    emit_pty_output(&output_app, &output_session_id, data);
                 }
                 Err(_) => break,
             }

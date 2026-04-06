@@ -22,6 +22,7 @@ pub enum MessageType {
     Nack,
     Heartbeat,
     StatusSnapshot,
+    RequestStatusSnapshot,
     FunctionStatus,
     Unknown(String),
 }
@@ -34,6 +35,7 @@ impl From<&str> for MessageType {
             "nack" => MessageType::Nack,
             "heartbeat" => MessageType::Heartbeat,
             "status_snapshot" => MessageType::StatusSnapshot,
+            "request_status_snapshot" => MessageType::RequestStatusSnapshot,
             "function-status" => MessageType::FunctionStatus,
             other => MessageType::Unknown(other.to_string()),
         }

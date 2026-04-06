@@ -1,5 +1,41 @@
 # Phase 3 — Control (Low-Risk)
 
+## Current starting point
+
+Phase 3 begins from a stronger base than the original draft assumed:
+
+- agent ↔ server websocket connection is already established
+- telemetry/history/admin visibility is already implemented
+- admin auth/session/csrf/rate-limiting hardening is already in place
+- the current agent protocol implementation handles:
+  - `welcome`
+  - `ack`
+  - `nack`
+  - `heartbeat`
+  - `status_snapshot`
+  - `function-status`
+
+That means Phase 3 should focus specifically on **server → agent command delivery** and **command lifecycle**, not on rebuilding connection/admin primitives.
+
+## Recommended first slice
+
+Start with the smallest safe vertical slice:
+
+1. add command persistence and audit trail on the server
+2. add server → agent command envelope handling
+3. implement `request_status_snapshot`
+4. implement `request_inventory`
+5. implement one safe stop command backed by an existing Tauri command
+
+This keeps the first control milestone low-risk while proving:
+
+- dispatch
+- acknowledgement
+- execution
+- result reporting
+- idempotency
+- reconnect reconciliation
+
 ## Scope
 - Execute non-interactive start/stop commands via CC.
 
@@ -115,4 +151,3 @@
   - Invalid params (bad ISO date, negative limit, unsupported type) → `400 invalid_params` with details.
 - Examples
   - Include 3 example requests/responses covering: simple page, filtered by `deviceId`+time window, text search with pagination.
-
