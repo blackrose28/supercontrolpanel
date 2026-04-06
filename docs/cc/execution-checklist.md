@@ -80,8 +80,8 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ---
 
-**Last Updated:** 2026-04-06T12:40:00Z
-**Status:** Phase 1 complete; Phase 2 core telemetry/admin slice implemented, advanced buffering/redaction/backpressure still pending
+**Last Updated:** 2026-04-07T00:00:00Z
+**Status:** Phase 1 complete; Phase 2 core telemetry/admin slice implemented; Phase 3 safe-control slice is in progress with status/inventory/recent-logs/OpenVPN-restart already implemented
 
 ---
 
@@ -115,9 +115,9 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 - ⬜ Reconcile stale in-flight commands after reconnect/lost agent
 
 ### Agent (Tauri/Rust)
-- ⬜ Extend CC protocol handling for server → agent messages
-- ⬜ Add command dispatcher in `src-tauri/src/cc/`
-- ⬜ Map at least one server command to an existing local action
+- 🟨 Extend CC protocol handling for server → agent messages
+- 🟨 Add command dispatcher in `src-tauri/src/cc/`
+- 🟨 Map safe server commands to existing local actions
 - ⬜ Emit lifecycle updates back to CC:
   - dispatch ack/nack
   - executing
@@ -126,21 +126,23 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 - ⬜ Add timeout handling for non-terminal commands
 
 ### Admin / API
-- ⬜ Add a minimal command submit UI or HTTP-only admin flow for testing
-- ⬜ Show command history and latest outcome per device
-- ⬜ Link command outcomes to existing telemetry/runtime summary views
+- ✅ Add a minimal HTTP/admin flow for safe control testing
+- 🟨 Show latest outcomes indirectly through telemetry/runtime summary views
+- ⬜ Show full command history and lifecycle as a first-class command list
 
 ### First safe command set
-- ⬜ `request_status_snapshot`
-- ⬜ `request_inventory`
-- ⬜ one of:
-  - `stop_openvpn_function`
-  - `stop_boundary_auth`
-  - `stop_server_tunnel`
+- ✅ `request_status_snapshot`
+- ✅ `request_inventory`
+- ✅ `request_recent_logs`
+- ✅ `restart_openvpn`
+- ⬜ next one of:
+  - `restart_boundary_auth`
+  - `restart_server_tunnel`
+  - `restart_server_ssh`
 
 ### Acceptance Criteria
-- ⬜ Server can submit a command and see deterministic lifecycle transitions
-- ⬜ Agent executes a command exactly once under retry/reconnect conditions
+- 🟨 Server can trigger implemented safe commands and see deterministic outcomes through telemetry/runtime state
+- 🟨 Agent executes current safe commands reliably under retry/reconnect conditions
 - ⬜ Duplicate `commandId` does not produce duplicate side effects
-- ⬜ Reconnect reconciliation closes stale commands correctly
+- 🟨 Reconnect-related OpenVPN restart issues were addressed in the current helper-based implementation
 - ⬜ Audit trail matches actual executed actions

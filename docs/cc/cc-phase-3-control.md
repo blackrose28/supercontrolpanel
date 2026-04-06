@@ -1,8 +1,8 @@
 # Phase 3 — Control (Low-Risk)
 
-## Current starting point
+## Current implementation status
 
-Phase 3 begins from a stronger base than the original draft assumed:
+Phase 3 began from a stronger base than the original draft assumed, and part of the low-risk control slice is now already implemented:
 
 - agent ↔ server websocket connection is already established
 - telemetry/history/admin visibility is already implemented
@@ -13,37 +13,61 @@ Phase 3 begins from a stronger base than the original draft assumed:
   - `nack`
   - `heartbeat`
   - `status_snapshot`
+  - `inventory`
+  - `recent_logs`
+  - `request_status_snapshot`
+  - `request_inventory`
+  - `request_recent_logs`
+  - `request_restart_openvpn`
   - `function-status`
 
-That means Phase 3 should focus specifically on **server → agent command delivery** and **command lifecycle**, not on rebuilding connection/admin primitives.
+Implemented control slices so far:
 
-## Recommended first slice
+- `request_status_snapshot`
+- `request_inventory`
+- `request_recent_logs`
+- `restart_openvpn`
 
-Start with the smallest safe vertical slice:
+Windows-specific restart behavior now implemented:
 
-1. add command persistence and audit trail on the server
-2. add server → agent command envelope handling
-3. implement `request_status_snapshot`
-4. implement `request_inventory`
-5. implement one safe stop command backed by an existing Tauri command
+- first OpenVPN start still requires the elevated helper / UAC prompt
+- later CC-triggered restarts reuse the already-running elevated helper
+- helper restart is performed through a helper control file, not by relaunching the elevated helper
+- helper status-file writes, reconnect cancellation, and log-tail reset behavior were hardened during restart work
 
-This keeps the first control milestone low-risk while proving:
+That means the remaining Phase 3 work should focus on **additional safe commands** and optionally a fuller command/audit model, not on rebuilding connection/admin primitives.
 
-- dispatch
-- acknowledgement
-- execution
-- result reporting
-- idempotency
-- reconnect reconciliation
+## Recommended next slice
+
+The next smallest safe vertical slices are:
+
+1. `restart_boundary_auth`
+2. `restart_server_tunnel`
+3. `restart_server_ssh`
+4. optionally add server-side command persistence and audit trail
+
+The current implementation has already proven:
+
+- server → agent command delivery
+- acknowledgement through the existing websocket flow
+- low-risk data refresh commands
+- one real state-changing control action (`restart_openvpn`)
 
 ## Scope
-- Execute non-interactive start/stop commands via CC.
+- Execute non-interactive safe control commands via CC.
 
 ## Commands
-- `start_openvpn_function`, `stop_openvpn_function`
-- `start_boundary_auth`, `stop_boundary_auth`
-- `start_server_tunnel`, `stop_server_tunnel`
-- `start_server_ssh`, `stop_server_ssh`
+
+### Already implemented
+- `request_status_snapshot`
+- `request_inventory`
+- `request_recent_logs`
+- `restart_openvpn`
+
+### Candidate next commands
+- `restart_boundary_auth`
+- `restart_server_tunnel`
+- `restart_server_ssh`
 
 ## Command lifecycle
 - States: `queued` → `dispatched` → `executing` → `succeeded` | `failed` | `canceled`.
@@ -68,10 +92,14 @@ This keeps the first control milestone low-risk while proving:
 - Strict schema validation per command; reject with explicit error codes: `invalid_params`, `unauthorized`, `conflict`, `rate_limited`.
 - RBAC gates all commands; some commands may require Phase 6 approval before dispatch.
 
-## CC
-- `POST /v1/commands` enqueues; returns the created record.
-- WS push to agent; await `ack`/`nack` for dispatch, then a terminal event.
-- Full audit trail with before/after snapshots of relevant runtime state (secrets redacted).
+## Current CC / Admin surface
+- existing device-scoped endpoints:
+  - `POST /v1/devices/:id/request-status-snapshot`
+  - `POST /v1/devices/:id/request-inventory`
+  - `POST /v1/devices/:id/request-recent-logs`
+  - `POST /v1/devices/:id/request-restart-openvpn`
+- admin/devices already exposes buttons for these actions
+- full generic `/v1/commands` persistence / audit is still deferred
 
 ## Agent
 - Dispatcher maps control → existing Rust commands.
@@ -79,10 +107,10 @@ This keeps the first control milestone low-risk while proving:
 - Structured error surfacing with stable `reason` codes.
 
 ## Acceptance Criteria
-- Commands succeed/fail deterministically with stable `reason` codes.
-- Duplicate commands do not cause duplicate effects (verified by re-submission and reconnect replay tests).
-- Reconnect reconciliation closes out stale in-flight commands correctly.
-- Audit list matches executed actions with lifecycle state transitions.
+- implemented commands succeed/fail deterministically through existing telemetry/runtime reporting
+- `request_status_snapshot`, `request_inventory`, and `request_recent_logs` surface results in admin telemetry/history
+- Windows `restart_openvpn` restarts through the existing elevated helper without requiring a new UAC prompt once helper is already running
+- helper restart continues surfacing updated logs and function state after restart
 
 ## Risks
 - State drift after reconnect → mitigated by `status_snapshot` and terminalization of stale commands.

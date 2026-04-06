@@ -11,8 +11,14 @@
 - Current implementation uses SQLite; ClickHouse remains a later upgrade path if volume demands it.
 
 ## Phase 3 — Core Control
-- Implement `start/stop_*` for OpenVPN/Boundary/tunnel/ssh.
-- Add RBAC and audit trail.
+- Implement low-risk server → agent control commands first.
+- Current implemented slice:
+  - `request_status_snapshot`
+  - `request_inventory`
+  - `request_recent_logs`
+  - `restart_openvpn`
+- On Windows, `restart_openvpn` now reuses the already-running elevated helper so restart does not require a fresh UAC prompt.
+- Remaining work can expand to Boundary / tunnel / SSH restart controls and, later, a fuller audit / command-store model.
 
 ## Phase 4 — Interactive PTY
 - Remote PTY control; admin live terminal view.

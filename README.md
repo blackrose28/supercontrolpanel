@@ -50,6 +50,14 @@ Super Control Panel is a PTY-driven desktop control panel where each feature can
   - `pty-exit` with exit code + reason
   - `function-status` (`boundaryTokenSource` is included for Boundary auth status updates)
   - `openvpn-log` (elevated helper log stream)
+- Control Plane / CC integration:
+  - outbound CC websocket connection with reconnect + heartbeat
+  - telemetry upload/history/admin visibility
+  - implemented safe server-triggered actions:
+    - request fresh status snapshot
+    - request inventory
+    - request recent logs
+    - restart OpenVPN
 
 ### Status page behavior
 
@@ -157,6 +165,7 @@ Pre-MCP refactor planning docs live under `docs/refactor/`:
 - One concrete function worker: `openvpn-connect`.
 - Config page provides OpenVPN executable **Browse** + **Auto detect** helpers.
 - OpenVPN runs via elevated helper process on Windows (UAC prompt).
+- Once the elevated helper is already running on Windows, a later CC-triggered OpenVPN restart reuses that helper and restarts only the OpenVPN child process without requiring another UAC prompt.
 - OpenVPN runs via `sudo` inside PTY on Linux/macOS.
 - OpenVPN launch is built from config (`executablePath` + `ovpnPath` + `extraArgs`).
 - OpenVPN auth password is sent as `6-digit OTP + password` when OTP secret is configured.
