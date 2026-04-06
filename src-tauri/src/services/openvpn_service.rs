@@ -1287,6 +1287,9 @@ pub fn start_openvpn_admin_worker(
                 Ok(bytes) => bytes,
                 Err(_) => continue,
             };
+            if out_bytes.len() < out_offset {
+                out_offset = 0;
+            }
             if out_bytes.len() > out_offset {
                 let chunk = String::from_utf8_lossy(&out_bytes[out_offset..]).to_string();
                 out_offset = out_bytes.len();
@@ -1294,6 +1297,9 @@ pub fn start_openvpn_admin_worker(
             }
 
             let err_bytes = fs::read(&err_path).unwrap_or_default();
+            if err_bytes.len() < err_offset {
+                err_offset = 0;
+            }
             if err_bytes.len() > err_offset {
                 let chunk = String::from_utf8_lossy(&err_bytes[err_offset..]).to_string();
                 err_offset = err_bytes.len();
