@@ -96,6 +96,11 @@ type SyncSettings = {
   mcpAuthToken?: string;
   mcpAllowedToolCategories?: string[];
   mcpSensitiveActionPolicy?: string;
+  ccEnabled?: boolean;
+  ccServerUrl?: string;
+  ccAuthMode?: string;
+  ccAgentToken?: string;
+  ccDeviceId?: string;
 };
 
 type ServerService = { name: string; port: number };
@@ -314,6 +319,14 @@ const cfgMcpAllowedConfigMutation = mustElement<HTMLInputElement>("#cfg-mcp-allo
 const cfgMcpSensitivePolicy = mustElement<HTMLSelectElement>("#cfg-mcp-sensitive-policy");
 const cfgMcpStatus = mustElement<HTMLElement>("#cfg-mcp-status");
 const cfgMcpSnippet = mustElement<HTMLElement>("#cfg-mcp-snippet");
+const cfgCcEnabled = mustElement<HTMLInputElement>("#cfg-cc-enabled");
+const cfgCcServerUrl = mustElement<HTMLInputElement>("#cfg-cc-server-url");
+const cfgCcAuthMode = mustElement<HTMLSelectElement>("#cfg-cc-auth-mode");
+const cfgCcAgentToken = mustElement<HTMLInputElement>("#cfg-cc-agent-token");
+const cfgCcDeviceId = mustElement<HTMLInputElement>("#cfg-cc-device-id");
+const cfgCcStatus = mustElement<HTMLElement>("#cfg-cc-status");
+const cfgCcSaveBtn = mustElement<HTMLButtonElement>("#cfg-cc-save");
+const cfgCcReinitBtn = mustElement<HTMLButtonElement>("#cfg-cc-reinit");
 
 const serversTbody = mustElement<HTMLElement>("#servers-tbody");
 const serversStatus = mustElement<HTMLElement>("#servers-status");
@@ -1052,6 +1065,58 @@ async function saveSyncSettingsPatch(next: Partial<SyncSettings>) {
   await refreshMcpRuntimeStatus();
 }
 
+function readCcSettingsForm(): Partial<SyncSettings> {
+  return {
+    ccEnabled: cfgCcEnabled.checked,
+    ccServerUrl: cfgCcServerUrl.value.trim(),
+    ccAuthMode: cfgCcAuthMode.value,
+    ccAgentToken: cfgCcAgentToken.value.trim(),
+    ccDeviceId: cfgCcDeviceId.value.trim(),
+  };
+}
+
+async function refreshCcStatus() {
+  try {
+    const status = await invoke<{
+      enabled: boolean;
+      serverUrl: string;
+      authMode?: string;
+      deviceId: string;
+      connected: boolean;
+    }>("get_cc_status");
+    if (!status.enabled) {
+      cfgCcStatus.textContent = "Disabled.";
+      return;
+    }
+    const deviceId = status.deviceId || "(no device)";
+    cfgCcStatus.textContent = status.connected
+      ? `Connected as ${deviceId}.`
+      : `Configured for ${deviceId} at ${status.serverUrl || "(no server)"}.`;
+  } catch (error) {
+    cfgCcStatus.textContent = `Status unavailable: ${String(error)}`;
+  }
+}
+
+async function saveCcSettings() {
+  try {
+    await saveSyncSettingsPatch(readCcSettingsForm());
+    cfgCcStatus.textContent = "CC settings saved.";
+  } catch (error) {
+    cfgCcStatus.textContent = `Save failed: ${String(error)}`;
+  }
+}
+
+async function reinitCcConnection() {
+  try {
+    await saveSyncSettingsPatch(readCcSettingsForm());
+    const result = await invoke<string>("init_cc_connection");
+    cfgCcStatus.textContent = result;
+    await refreshCcStatus();
+  } catch (error) {
+    cfgCcStatus.textContent = `Re-init failed: ${String(error)}`;
+  }
+}
+
 function renderConfigForm() {
   if (!appConfig) {
     return;
@@ -1116,8 +1181,14 @@ function renderConfigForm() {
     syncSettings?.mcpSensitiveActionPolicy === "allow-with-token"
       ? "allow-with-token"
       : "require-ui-approval";
+  cfgCcEnabled.checked = syncSettings?.ccEnabled === true;
+  cfgCcServerUrl.value = syncSettings?.ccServerUrl ?? "";
+  cfgCcAuthMode.value = syncSettings?.ccAuthMode ?? "token";
+  cfgCcAgentToken.value = syncSettings?.ccAgentToken ?? "";
+  cfgCcDeviceId.value = syncSettings?.ccDeviceId ?? "";
   renderMcpSnippet();
   void refreshMcpRuntimeStatus();
+  void refreshCcStatus();
   renderConfigPreview();
 }
 
@@ -1256,8 +1327,14 @@ async function loadSyncSettings() {
     syncSettings.mcpSensitiveActionPolicy === "allow-with-token"
       ? "allow-with-token"
       : "require-ui-approval";
+  cfgCcEnabled.checked = syncSettings.ccEnabled === true;
+  cfgCcServerUrl.value = syncSettings.ccServerUrl ?? "";
+  cfgCcAuthMode.value = syncSettings.ccAuthMode ?? "token";
+  cfgCcAgentToken.value = syncSettings.ccAgentToken ?? "";
+  cfgCcDeviceId.value = syncSettings.ccDeviceId ?? "";
   renderMcpSnippet();
   await refreshMcpRuntimeStatus();
+  await refreshCcStatus();
 }
 
 type ConfigPaths = {
@@ -3731,6 +3808,14 @@ cfgMcpSensitivePolicy.addEventListener("change", () => {
   void saveSyncSettingsPatch({
     mcpSensitiveActionPolicy: cfgMcpSensitivePolicy.value,
   }).catch(() => {});
+});
+
+cfgCcSaveBtn.addEventListener("click", () => {
+  void saveCcSettings();
+});
+
+cfgCcReinitBtn.addEventListener("click", () => {
+  void reinitCcConnection();
 });
 
 void attachListeners();

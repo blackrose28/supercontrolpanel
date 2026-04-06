@@ -1,0 +1,81 @@
+# Phase 1 — Bootstrap
+
+## Goals
+- Establish secure outbound WS connection from agent to CC.
+- Stream  and  telemetry.
+- Provide minimal Admin API + in-memory registry to view devices.
+
+## Deliverables
+- CC Server (default: NestJS)
+  - WebSocket `/agent` (subprotocol `scp.cc.v1`, localhost-only dev default)
+  - HTTP Admin (Phase 1 minimal): `GET /v1/devices`, `GET /v1/devices/:id`, `GET /v1/health`
+  - In-memory stores for `devices`, `sessions` (durable persistence is deferred to Phase 2)
+  - Simple Admin page (server-rendered) listing devices with columns: `id`, `name`, `lastSeenAt`, `status`
+- Agent (this app)
+  - New module `src-tauri/src/cc/` with `connection.rs`, `protocol.rs`, `dispatcher.rs`
+  - Config in `sync-local.json`: `ccEnabled` (bool), `ccServerUrl` (string), `ccAuthMode` (`mtls`|`token`), `ccAgentToken?` (string), `ccDeviceId?` (string)
+  - Heartbeat every 15s: `heartbeat { uptimeSec, versions }`
+  - Initial `status_snapshot` on connect: `{ activeSessions, lastSeqByStream }`
+  - Forward `function-status` events to CC (telemetry)
+  - Reconnect with jittered exponential backoff (base 500ms, max 30s)
+- Frontend
+  - Config page: Control plane section (URL, token, enable toggle)
+  - Status pill: CC connection state
+## Enrollment and Device Identity
+
+### Enrollment UX
+- Bootstrap token flow (Phase 1): Admin generates a one-time bootstrap token scoped to org (expiry ≤ 24h). The agent accepts either paste-in token or QR scan of `ccServerUrl` + token.
+- Token exchange: agent calls `POST /v1/enroll` with the bootstrap token and a proposed `deviceName`; server returns `{ ccAgentToken, deviceId }`.
+- One-time code fallback: when QR/paste not possible, allow short code entry (server maps code → bootstrap token).
+
+### Device identity and naming
+- `deviceId`: UUID v7 generated server-side on first enrollment; persisted on the agent in `sync-local.json` as `ccDeviceId`.
+- `deviceName`: default to OS hostname; sanitize to `[a-zA-Z0-9._-]{1,64}`; if taken, server appends `-N` to ensure uniqueness (client stores canonical name returned by server).
+- Re-enrollment: clearing `ccAgentToken` or `ccDeviceId` triggers re-enrollment; server treats a new enrollment as a distinct device record.
+
+### Duplicate devices and concurrent connections
+- Policy: single active WS per `deviceId`.
+  - Same device reconnect: new connection takes over; server evicts the old session with reason `replaced_by_new_connection`.
+  - Different device claiming same `deviceId`: reject with `nack { code: "device_id_conflict" }` and require re-enrollment.
+
+### Sequence/offset resume semantics
+- Agent maintains per-stream `seq` and a bounded offline buffer (see Phase 2 for sizes/policies).
+- On connect, agent sends `status_snapshot { lastSeqByStream }`.
+- Server responds with `resume_from { lastAckedByStream }`; agent replays buffered events with `seq > lastAcked` and ignores server-side duplicates keyed by `(deviceId, seq)`.
+
+### Deliverables (Phase 1 scope)
+- Implement `POST /v1/enroll` (in-memory store) returning `{ deviceId, ccAgentToken }`.
+- Add agent enrollment UI (Config page): `Enroll` button, paste/QR, and display of assigned `deviceName`.
+- Persist `ccDeviceId`, `ccAgentToken` in `sync-local.json` after successful enrollment.
+- Enforce single active connection per `deviceId` on the server.
+
+
+## Acceptance Criteria (Phase 1)
+
+## Acceptance Criteria (Phase 1)
+
+- Secure WS connect succeeds with valid token; rejected with clear error when invalid/expired.
+- Device appears in Admin list within 5s with `lastSeenAt` updating; status reflects WS up/down.
+- Heartbeat every 15s received for connected devices; jitter/backoff respects limits on reconnect storms.
+- Duplicate connection policy enforced: new connection evicts old for same `deviceId`; audit reflects eviction reason.
+- `status_snapshot` sent on connect with `{ activeSessions, lastSeqByStream }`; server stores and renders current state.
+- Telemetry forwarding (at least `function-status`) flows end-to-end and is visible in Admin logs/feed.
+
+## Error Taxonomy (Phase 1)
+
+| Code | Meaning | Agent action |
+|------|---------|--------------|
+| `BOOTSTRAP_TOKEN_INVALID` | Token not found, expired, or already used | Do not retry; surface error to user |
+| `BOOTSTRAP_TOKEN_EXPIRED` | Token TTL exceeded | Same as above |
+| `DEVICE_ID_CONFLICT` | Another device claims same `deviceId` | Prompt re-enrollment; clear `ccAgentToken` |
+| `AUTH_FAILED` | Token/mTLS handshake failed | Retry with backoff; after 3 failures surface error |
+| `CC_SERVER_UNREACHABLE` | WS connection refused/timeout | Exponential backoff; max 30s |
+| `SESSION_EVICTED` | Server closed old session for this `deviceId` | Reconnect immediately (new session takes over) |
+| `INVALID_PARAMS` | Malformed enroll/connect request | Surface error; do not auto-retry |
+
+### Error surfacing rules
+- Structured `{ code, message, details? }` in all error responses.
+- Codes starting with `BOOTSTRAP_` are terminal; agent must prompt user.
+- Codes starting with `AUTH_`, `CC_SERVER_`, `SESSION_` are retriable with backoff.
+- `INVALID_PARAMS` is always terminal with explicit field-level message.
+

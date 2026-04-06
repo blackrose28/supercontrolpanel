@@ -46,6 +46,16 @@ pub struct SyncSettings {
     pub mcp_allowed_tool_categories: Vec<String>,
     #[serde(default = "default_mcp_sensitive_action_policy")]
     pub mcp_sensitive_action_policy: String,
+    #[serde(default)]
+    pub cc_enabled: bool,
+    #[serde(default)]
+    pub cc_server_url: String,
+    #[serde(default)]
+    pub cc_auth_mode: String,
+    #[serde(default)]
+    pub cc_agent_token: String,
+    #[serde(default)]
+    pub cc_device_id: String,
 }
 
 impl Default for SyncSettings {
@@ -62,6 +72,11 @@ impl Default for SyncSettings {
             mcp_auth_token: generate_mcp_auth_token(),
             mcp_allowed_tool_categories: default_mcp_allowed_tool_categories(),
             mcp_sensitive_action_policy: default_mcp_sensitive_action_policy(),
+            cc_enabled: false,
+            cc_server_url: String::new(),
+            cc_auth_mode: String::from("token"),
+            cc_agent_token: String::new(),
+            cc_device_id: String::new(),
         }
     }
 }
@@ -91,6 +106,16 @@ pub struct SyncSettingsPatch {
     pub mcp_allowed_tool_categories: Option<Vec<String>>,
     #[serde(default)]
     pub mcp_sensitive_action_policy: Option<String>,
+    #[serde(default)]
+    pub cc_enabled: Option<bool>,
+    #[serde(default)]
+    pub cc_server_url: Option<String>,
+    #[serde(default)]
+    pub cc_auth_mode: Option<String>,
+    #[serde(default)]
+    pub cc_agent_token: Option<String>,
+    #[serde(default)]
+    pub cc_device_id: Option<String>,
 }
 
 #[derive(Serialize)]

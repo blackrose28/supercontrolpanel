@@ -50,3 +50,47 @@
 ## Risks
 - Large file memory pressure → stream + chunked progress; avoid buffering whole files.
 - Stale tunnel detection → explicit precheck and clear retry guidance.
+
+## SLOs (Phase 5 File Ops)
+
+## Test plan (Phase 5 File Ops)
+
+## Test plan (Phase 5 File Ops)
+
+- Resume/retry
+  - Simulate network interruption mid-transfer (50% complete); verify resume from last verified chunk and final success.
+  - Exhaust retry attempts (3); verify final `failed` status with stable `reason` code.
+- Checksum verification
+  - Corrupt a transferred file; verify `checksum_mismatch` detection and rollback (no partial file at destination).
+- Atomic writes
+  - Monitor destination during upload; assert temp file present, final file appears only after rename; no partial reads possible.
+- Overwrite policy
+  - `prompt`: verify UI confirmation required; `force`: overwrite without prompt; `skip`: existing file preserved.
+- Symlink handling
+  - Upload with `no_follow` (default): symlink rejected. With `follow` flag: target followed and audited.
+  - Download with `follow` (default): symlink target downloaded.
+- Sparse files
+  - Transfer a sparse file; verify sparseness preserved on supported FS; dense fallback on unsupported.
+- Windows path normalization
+  - Test reserved names (`CON`, `NUL`), invalid chars; verify rejection with explicit error.
+- Quotas and rate limits
+  - Exceed per-tenant daily quota; verify `nack rate_limited` at 100% threshold and soft warning at 80%.
+  - Apply per-transfer rate limit; verify throughput capped and progress updates reflect throttling.
+- Boundary tunnel precheck
+  - Attempt SCP with tunnel stopped; verify `failed: tunnel_not_running` with action hint.
+  - Start tunnel, retry; verify success.
+- Remote browser session
+  - Open browser, list/stat/create/delete; verify SFTP session persists across ops and closes on modal close.
+- Progress and history
+  - Transfer 50 MB file; verify progress updates ≥ 1 Hz and final history entry with success/error status.
+
+
+## SLOs (Phase 5 File Ops)
+
+- Transfer throughput: P50 ≥ 1 MB/s, P95 ≥ 500 KB/s (WAN, typical file sizes 1–100 MB)
+- Progress update frequency: ≥ 1 Hz for transfers > 10 MB
+- Resume/retry: successful resume within 3 attempts for transient network failures
+- Checksum verification: 100% detection of corrupted transfers when enabled
+- Atomic rename: 0% partial files visible at destination on success path
+- Boundary tunnel precheck: 100% rejection with actionable error when tunnel not running
+

@@ -12,6 +12,8 @@ use std::{
     time::Duration,
 };
 
+mod cc;
+use cc::{get_cc_status, init_cc_connection};
 use portable_pty::{CommandBuilder, PtySize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -896,6 +898,23 @@ pub(crate) fn save_sync_settings_action(
         if !mcp_sensitive_action_policy.trim().is_empty() {
             merged.mcp_sensitive_action_policy = mcp_sensitive_action_policy;
         }
+    }
+    if let Some(cc_enabled) = settings.cc_enabled {
+        merged.cc_enabled = cc_enabled;
+    }
+    if let Some(cc_server_url) = settings.cc_server_url {
+        merged.cc_server_url = cc_server_url;
+    }
+    if let Some(cc_auth_mode) = settings.cc_auth_mode {
+        if !cc_auth_mode.trim().is_empty() {
+            merged.cc_auth_mode = cc_auth_mode;
+        }
+    }
+    if let Some(cc_agent_token) = settings.cc_agent_token {
+        merged.cc_agent_token = cc_agent_token;
+    }
+    if let Some(cc_device_id) = settings.cc_device_id {
+        merged.cc_device_id = cc_device_id;
     }
     save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
     let _ = sync_mcp_runtime_from_settings(&app, &mcp_state, &merged, now_ms);
@@ -2413,6 +2432,14 @@ fn main() {
             let state = app.state::<McpRuntimeState>();
             let settings = load_sync_settings_from_disk(app.handle(), SYNC_SETTINGS_FILE_NAME)?;
             let _ = sync_mcp_runtime_from_settings(app.handle(), &state, &settings, now_ms);
+            if settings.cc_enabled {
+                let app_handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(err) = init_cc_connection(app_handle).await {
+                        eprintln!("CC startup init failed: {err}");
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2432,6 +2459,8 @@ fn main() {
             mcp_read_resource_command,
             get_sync_settings,
             save_sync_settings,
+            init_cc_connection,
+            get_cc_status,
             save_app_config,
             detect_openvpn_executable,
             start_openvpn_function,

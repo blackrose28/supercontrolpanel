@@ -749,6 +749,59 @@
                         </div>
                     </div>
 
+                    <h3>Control plane</h3>
+                    <p class="hint">
+                        Connect this app to the CC server for enrollment,
+                        heartbeats, and remote fleet visibility.
+                    </p>
+                    <div class="form-grid">
+                        <div class="form-grid-span">
+                            <label
+                                for="cfg-cc-enabled"
+                                class="openvpn-terminate-check"
+                            >
+                                <input id="cfg-cc-enabled" type="checkbox" />
+                                <span><strong>Enable CC</strong></span>
+                            </label>
+                        </div>
+                        <label for="cfg-cc-server-url">Server URL</label>
+                        <input
+                            id="cfg-cc-server-url"
+                            type="text"
+                            placeholder="http://localhost:3000"
+                            autocomplete="off"
+                        />
+                        <label for="cfg-cc-auth-mode">Auth mode</label>
+                        <select id="cfg-cc-auth-mode">
+                            <option value="token">Token</option>
+                        </select>
+                        <label for="cfg-cc-agent-token">Agent token</label>
+                        <input
+                            id="cfg-cc-agent-token"
+                            type="text"
+                            class="masked-secret"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                        <label for="cfg-cc-device-id">Device ID</label>
+                        <input
+                            id="cfg-cc-device-id"
+                            type="text"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                        <div class="form-grid-span hint">
+                            CC status:
+                            <span id="cfg-cc-status">Not initialized.</span>
+                        </div>
+                    </div>
+                    <div class="actions">
+                        <button id="cfg-cc-save" type="button">Save CC</button>
+                        <button id="cfg-cc-reinit" type="button">
+                            Re-init CC
+                        </button>
+                    </div>
+
                     <h3>Caddy</h3>
                     <div class="form-grid">
                         <label for="cfg-caddy-folder">Caddy folder</label>

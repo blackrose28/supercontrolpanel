@@ -38,3 +38,696 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
 - Acknowledgements: batching allowed (10–50 ms or 8–16 KB); server `ack{ reqSeq }` / `nack{ reqSeq, retryAfterMs }`.
 - Compression: gzip permitted when frames > 8 KB if `welcome.capabilities.gzip=true`.
 - Chunking: oversize events include `{ chunkIndex, totalChunks }` if `welcome.capabilities.chunking=true`.
+
+## API design and schema hygiene
+This section specifies the message envelope, command/event/reply payload shapes, and validation conventions. All data is JSON. Unless noted, all fields are required.
+
+### Envelope
+
+All frames (WS or queued) are wrapped in a common envelope.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supercontrolpanel.dev/schemas/cc/envelope.schema.json",
+  "title": "CC Envelope v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "type": { "type": "string", "minLength": 1 },
+    "deviceId": { "type": "string", "minLength": 1 },
+    "seq": { "type": "integer", "minimum": 1 },
+    "ts": { "type": "string", "format": "date-time" },
+    "payload": { "type": ["object", "null"] },
+    "commandId": { "type": "string", "format": "uuid" },
+    "reqSeq": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["type", "deviceId", "seq", "ts"]
+}
+```
+
+- **type**: message kind (see catalogs below)
+- **commandId**: present on CC → Agent control commands for idempotency
+- **reqSeq**: carried on replies to point back to the original `seq`
+
+Minimal example:
+
+```json
+{
+  "type": "heartbeat",
+  "deviceId": "dev-123",
+  "seq": 42,
+  "ts": "2026-04-05T03:30:00Z",
+  "payload": { "uptimeSec": 3600, "versions": {"app": "2.1.0"} }
+}
+```
+
+### Catalogs (message types)
+
+- **Agent → CC (telemetry/events)**: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`, `heartbeat`
+- **CC → Agent (control/commands)**: `start_openvpn_function`, `stop_openvpn_function`, `start_boundary_auth`, `stop_boundary_auth`, `boundary_search_targets`, `list_servers`, `upsert_server`, `delete_server`, `start_server_tunnel`, `stop_server_tunnel`, `start_server_ssh`, `stop_server_ssh`, `start_server_rdp`, `open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `scp_upload`, `scp_download`, `start_scp_upload`, `start_scp_download`, `list_function_statuses`, `get_app_config`, `save_app_config`, `detect_openvpn_executable`, `get_config_paths`, `sync_config_pull`, `sync_config_push`, `save_sync_settings`
+- **Replies**: `ack`, `nack`
+
+### Common scalar types
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/common.scalars.json",
+  "type": "object",
+  "definitions": {
+    "Id": { "type": "string", "minLength": 1 },
+    "UUID": { "type": "string", "format": "uuid" },
+    "Path": { "type": "string", "minLength": 1 },
+    "Cols": { "type": "integer", "minimum": 1 },
+    "Rows": { "type": "integer", "minimum": 1 }
+  }
+}
+```
+
+### Commands (CC → Agent)
+
+Representative schemas; new commands should follow the same pattern.
+
+- `start_openvpn_function`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.start_openvpn_function.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "command": { "type": "string", "minLength": 1 },
+    "username": { "type": ["string", "null"] },
+    "password": { "type": ["string", "null"] }
+  },
+  "required": ["command"]
+}
+```
+
+- `start_boundary_auth`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.start_boundary_auth.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "cols": { "type": "integer", "minimum": 1 },
+    "rows": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["cols", "rows"]
+}
+```
+
+- `start_server_ssh`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.start_server_ssh.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "serverId": { "type": "string", "minLength": 1 },
+    "cols": { "type": "integer", "minimum": 1 },
+    "rows": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["serverId", "cols", "rows"]
+}
+```
+
+- `scp_upload`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.scp_upload.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "serverId": { "type": "string", "minLength": 1 },
+    "localPath": { "type": "string", "minLength": 1 },
+    "remotePath": { "type": "string", "minLength": 1 },
+    "recursive": { "type": "boolean", "default": false }
+  },
+  "required": ["serverId", "localPath", "remotePath"]
+}
+```
+
+### Events (Agent → CC)
+
+- `function-status`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/evt.function_status.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "functionId": { "type": "string" },
+    "state": { "type": "string", "enum": ["idle", "running", "error"] },
+    "message": { "type": ["string", "null"] },
+    "boundaryTokenSource": { "type": ["string", "null"], "enum": ["app", "cli", null] },
+    "sessionId": { "type": ["string", "null"] },
+    "updatedAtMs": { "type": "integer", "minimum": 0 }
+  },
+  "required": ["functionId", "state", "updatedAtMs"]
+}
+```
+
+- `pty-output`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/evt.pty_output.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "data": { "type": "string" }
+  },
+  "required": ["id", "data"]
+}
+```
+
+- `pty-exit`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/evt.pty_exit.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "exitCode": { "type": ["integer", "null"] },
+    "reason": { "type": "string", "enum": ["exit", "signal", "unknown"] }
+  },
+  "required": ["id", "reason"]
+}
+```
+
+- `openvpn-log`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/evt.openvpn_log.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "functionId": { "type": "string" },
+    "sessionId": { "type": "string" },
+    "data": { "type": "string" }
+  },
+  "required": ["functionId", "sessionId", "data"]
+}
+```
+
+- `heartbeat`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/evt.heartbeat.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "uptimeSec": { "type": "integer", "minimum": 0 },
+    "versions": { "type": "object", "additionalProperties": { "type": "string" } }
+  },
+  "required": ["uptimeSec"]
+}
+```
+
+### Replies
+
+- `ack`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/reply.ack.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reqSeq": { "type": "integer", "minimum": 1 },
+    "status": { "type": "string", "enum": ["ok"] },
+    "result": { "type": ["object", "array", "string", "number", "boolean", "null"] }
+  },
+  "required": ["reqSeq", "status"]
+}
+```
+
+- `nack`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/reply.nack.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reqSeq": { "type": "integer", "minimum": 1 },
+    "status": { "type": "string", "enum": ["error"] },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "details": { "type": ["object", "null"] }
+      },
+      "required": ["code", "message"]
+    }
+  },
+  "required": ["reqSeq", "status", "error"]
+}
+```
+
+### Conventions and hygiene
+
+- **Extensibility**: prefer adding optional fields over breaking changes. Use `additionalProperties: false` by default; when extension points are needed, add a namespaced map (e.g., `ext: { "vendor.x": ... }`).
+- **Timestamps**: RFC 3339 UTC (`format: date-time`). For high-frequency events, include `updatedAtMs` as integer epoch millis in payloads.
+- **Ids**: use stable strings; when a true UUID is required, declare `format: uuid`.
+- **Security**: redact credentials in all telemetry/events. Replies that include config must omit secrets or replace them with `"***"`.
+- **Idempotency**: commands include `commandId` (UUID). Duplicate `commandId` for the same logical action must be safe to retry.
+- **Error taxonomy**: use structured error codes (e.g., `BOUNDARY_AUTH_FAILED`, `PTY_SPAWN_ERROR`, `SFTP_NOT_CONNECTED`).
+- **Compatibility**: protocol is versioned via WS subprotocol `scp.cc.v1`; breaking changes require `v2` and feature negotiation via a capabilities message.
+
+## API design/schema
+
+This section defines the canonical schemas for Control Plane transport. REST endpoints (`/v1/*`) are described via OpenAPI; WebSocket frames use JSON Schema with a common envelope.
+
+### Envelope
+
+All WS frames share the same envelope. `type` determines the `payload` schema.
+
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://supercontrolpanel.dev/schemas/cc/envelope.json",
+  "type": "object",
+  "required": ["type", "deviceId", "seq", "ts", "payload"],
+  "additionalProperties": false,
+  "properties": {
+    "type": { "type": "string", "minLength": 1 },
+    "deviceId": { "type": "string", "minLength": 1 },
+    "seq": { "type": "integer", "minimum": 0 },
+    "ts": { "type": "string", "format": "date-time" },
+    "reqSeq": { "type": "integer", "minimum": 0, "description": "Present in replies (ack/nack) to link request sequence." },
+    "payload": { "type": "object" }
+  }
+}
+```
+
+### Event payloads (Agent → CC)
+
+- `function-status`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/function-status.json",
+  "type": "object",
+  "required": ["functionId", "state", "updatedAtMs"],
+  "additionalProperties": false,
+  "properties": {
+    "functionId": { "type": "string" },
+    "state": { "type": "string", "enum": ["idle", "starting", "running", "stopping", "error"] },
+    "message": { "type": "string" },
+    "boundaryTokenSource": { "type": "string", "enum": ["app", "cli"], "nullable": true },
+    "sessionId": { "type": "string" },
+    "updatedAtMs": { "type": "integer", "minimum": 0 }
+  }
+}
+```
+
+- `pty-output`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/pty-output.json",
+  "type": "object",
+  "required": ["id", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "data": { "type": "string" }
+  }
+}
+```
+
+- `pty-exit`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/pty-exit.json",
+  "type": "object",
+  "required": ["id", "exitCode", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string" },
+    "exitCode": { "type": "integer" },
+    "reason": { "type": "string" }
+  }
+}
+```
+
+- `openvpn-log`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/openvpn-log.json",
+  "type": "object",
+  "required": ["functionId", "sessionId", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "functionId": { "type": "string" },
+    "sessionId": { "type": "string" },
+    "data": { "type": "string" }
+  }
+}
+```
+
+- `heartbeat`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/heartbeat.json",
+  "type": "object",
+  "required": ["uptimeSec", "versions"],
+  "additionalProperties": false,
+  "properties": {
+    "uptimeSec": { "type": "integer", "minimum": 0 },
+    "versions": {
+      "type": "object",
+      "required": ["agent", "rust", "tauri"],
+      "properties": {
+        "agent": { "type": "string" },
+        "rust": { "type": "string" },
+        "tauri": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}
+```
+
+### Control commands (CC → Agent)
+
+- `start_openvpn_function`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_openvpn_function.json",
+  "type": "object",
+  "required": ["commandId", "command", "username", "password"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "command": { "type": "string" },
+    "username": { "type": "string" },
+    "password": { "type": "string" }
+  }
+}
+```
+
+- `stop_openvpn_function`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/stop_openvpn_function.json",
+  "type": "object",
+  "required": ["commandId"],
+  "additionalProperties": false,
+  "properties": { "commandId": { "type": "string", "format": "uuid" } }
+}
+```
+
+- `start_boundary_auth` / `stop_boundary_auth`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_boundary_auth.json",
+  "type": "object",
+  "required": ["commandId", "cols", "rows"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "cols": { "type": "integer", "minimum": 1 },
+    "rows": { "type": "integer", "minimum": 1 }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/stop_boundary_auth.json",
+  "type": "object",
+  "required": ["commandId"],
+  "additionalProperties": false,
+  "properties": { "commandId": { "type": "string", "format": "uuid" } }
+}
+```
+
+- Server management (`serverId` is a stable UUID)
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_server_tunnel.json",
+  "type": "object",
+  "required": ["commandId", "serverId", "cols", "rows"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" },
+    "cols": { "type": "integer", "minimum": 1 },
+    "rows": { "type": "integer", "minimum": 1 }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/stop_server_tunnel.json",
+  "type": "object",
+  "required": ["commandId", "serverId"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_server_ssh.json",
+  "type": "object",
+  "required": ["commandId", "serverId", "cols", "rows"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" },
+    "cols": { "type": "integer", "minimum": 1 },
+    "rows": { "type": "integer", "minimum": 1 }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/stop_server_ssh.json",
+  "type": "object",
+  "required": ["commandId", "serverId"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" }
+  }
+}
+```
+
+- Remote browser session (SFTP-backed while modal open)
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/open_remote_browser.json",
+  "type": "object",
+  "required": ["commandId", "serverId"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/close_remote_browser.json",
+  "type": "object",
+  "required": ["commandId", "browserId"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "browserId": { "type": "string" }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/list_remote_browser_children.json",
+  "type": "object",
+  "required": ["commandId", "browserId", "path"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "browserId": { "type": "string" },
+    "path": { "type": "string" }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/stat_remote_browser_path.json",
+  "type": "object",
+  "required": ["commandId", "browserId", "path"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "browserId": { "type": "string" },
+    "path": { "type": "string" }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/create_remote_browser_directory.json",
+  "type": "object",
+  "required": ["commandId", "browserId", "path"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "browserId": { "type": "string" },
+    "path": { "type": "string" }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/delete_remote_browser_path.json",
+  "type": "object",
+  "required": ["commandId", "browserId", "path"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "browserId": { "type": "string" },
+    "path": { "type": "string" },
+    "recursive": { "type": "boolean", "default": false }
+  }
+}
+```
+
+- SCP transfers
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/scp_upload.json",
+  "type": "object",
+  "required": ["commandId", "serverId", "localPath", "remotePath"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" },
+    "localPath": { "type": "string" },
+    "remotePath": { "type": "string" },
+    "recursive": { "type": "boolean", "default": false }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/scp_download.json",
+  "type": "object",
+  "required": ["commandId", "serverId", "remotePath", "localPath"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" },
+    "remotePath": { "type": "string" },
+    "localPath": { "type": "string" },
+    "recursive": { "type": "boolean", "default": false }
+  }
+}
+```
+
+- Progress-aware SCP (PTY-backed)
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_scp_upload.json",
+  "type": "object",
+  "required": ["commandId", "serverId", "localPath", "remotePath"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" },
+    "localPath": { "type": "string" },
+    "remotePath": { "type": "string" },
+    "recursive": { "type": "boolean", "default": false }
+  }
+}
+```
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_scp_download.json",
+  "type": "object",
+  "required": ["commandId", "serverId", "remotePath", "localPath"],
+  "additionalProperties": false,
+  "properties": {
+    "commandId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" },
+    "remotePath": { "type": "string" },
+    "localPath": { "type": "string" },
+    "recursive": { "type": "boolean", "default": false }
+  }
+}
+```
+
+### Replies
+
+- `ack` / `nack`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/replies/ack.json",
+  "type": "object",
+  "required": ["reqSeq", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "reqSeq": { "type": "integer", "minimum": 0 },
+    "status": { "type": "string", "enum": ["ok", "error"] },
+    "error": { "type": "string" }
+  }
+}
+```
+
+### Examples
+
+- Envelope + `function-status` event
+
+```json
+{
+  "type": "function-status",
+  "deviceId": "agent-2a1c",
+  "seq": 42,
+  "ts": "2026-04-05T10:15:30.000Z",
+  "payload": {
+    "functionId": "server-ssh-3b7a",
+    "state": "running",
+    "message": "SSH session active",
+    "sessionId": "pty-9f1e",
+    "updatedAtMs": 1743848130000
+  }
+}
+```

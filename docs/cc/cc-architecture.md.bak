@@ -1,0 +1,83 @@
+﻿# Control Plane Architecture
+
+## Goal
+Centralize control and telemetry for multiple SuperControlPanel clients via a secure outbound control plane.
+
+## Components
+- **Agent (SuperControlPanel app)**: Maintains outbound encrypted WebSocket to CC, streams logs/events, and executes approved commands via existing PTY + function runtime.
+- **CC Server**: Multi-tenant control plane exposing REST + WebSocket, persistence, authZ, audit, and live log streaming.
+- **Admin UI**: Fleet view, per-device control, and live terminals/logs.
+
+## Transport
+- Outbound-only from agent: `wss://<cc-host>/agent` (NAT-friendly).
+- Auth: mTLS or Bearer token with rotation; one-time enrollment.
+- Reliability: pings, sequence ids, resumable control, batched telemetry.
+
+## Security
+- Default-deny, RBAC, approvals for sensitive actions.
+- Redact secrets (align with MCP redaction).
+- Full audit of control messages and outcomes.
+
+## Agent Integration (Rust)
+- New `src-tauri/src/cc/`: `connection.rs`, `protocol.rs`, `dispatcher.rs`, `telemetry.rs`.
+- Wire in `src-tauri/src/main.rs`; forward Tauri events to CC.
+- Config in `sync-local.json`: `ccEnabled`, `ccServerUrl`, `ccAuthMode`, `ccAgentToken?`, `ccDeviceId?`.
+
+## Data Model (Server)
+- `devices`, `commands`, `events` (logs), `sessions` (+ optional orgs/users/rbac).
+
+## Observability
+- OpenTelemetry, structured JSON logs, Sentry for server.
+
+## Cross-Cutting Concerns
+- Retention and Storage
+    - Events: 30 days hot (Postgres), 180 days warm (object store/ClickHouse), configurable per org.
+    - Commands and audits: 365 days.
+    - PTY/log chunks capped at 16KB per frame; per-session max 50MB before truncation with notice.
+
+- Rate Limits and Quotas
+    - Per-device: 100 control msgs/min, 256KB/s telemetry soft cap with leaky-bucket.
+    - Per-org burst/window: 10k msgs/5m and 1GB/day telemetry (configurable).
+    - Backpressure signaled via `nack` with `rate_limited=true` and `retryAfterMs`.
+
+- Disaster Recovery
+    - Postgres PITR snapshots hourly; object-store versioning on.
+    - Restore runbooks: RPO ≤ 15m, RTO ≤ 1h; periodic game days.
+
+- Secrets Lifecycle
+    - Agent token rotation: max TTL 30d; revocation propagates within 60s.
+    - mTLS device certs: 1y validity, 60d early-rotation window; pubkey pinning.
+    - Redaction at source: passwords, tokens, etc...
+
+## Admin/UI flows
+
+- Approvals UX: Pending approvals list with context/diff (e.g., target file path, overwrite policy, tunnel target). Show requester, approvers required, expiry, and reason. Actions: approve/deny with comment; audit all decisions. Escalation when nearing expiry; revoke if risk signals change.
+- RBAC modeling: Role- and scope-aware UI. Clearly surface current actor’s effective permissions per device/session. Guard sensitive actions behind explicit confirmation + approval policy badges.
+- Fleet search/filter: Search by device name, tags, platform, version, status, and active sessions. Client-side quick filter + server-backed advanced filter with pagination.
+- Change review displays: For risky file ops, show before/after metadata and overwrite confirmation. For commands, render parameters with redaction and stable reason codes on failure.
+- Live terminals/logs: Per-session ACLs. Privacy banner and recording indicator when session recording is enabled. Scrollback replay size and truncation notice.
+- Error/reporting: Surface structured errors `{ code, message }` with remediation hints; link to runbooks. Inline toast + per-row status indicators.
+- Accessibility/i18n: Keyboard navigable controls, ARIA roles, and localization-ready strings.
+
+
+## Boundary/OpenVPN specifics
+
+## Boundary/OpenVPN specifics
+
+### Tunnel state reconciliation and auto-repair
+- Agent monitors tunnel health via periodic health checks (every 30s); if tunnel down, attempt restart with exponential backoff (base 5s, max 60s).
+- Server tracks expected tunnel state per device; on mismatch (agent reports down, server expects up), trigger reconciliation: query agent status, attempt restart if needed, surface actionable error if persistent failure.
+- Auto-repair policy: max 3 restart attempts within 5 min; after exhaustion, mark tunnel as `failed` and require manual intervention (operator approval to retry).
+- Audit: all tunnel state changes (start, stop, restart, failure) logged with actor, device, reason codes, timestamps.
+
+### Credential/token refresh and failure-mode UX
+- Boundary token refresh: agent monitors token expiry (via `boundary token renew`); refresh at 80% TTL; if refresh fails, surface error in Admin UI with action hint (re-authenticate).
+- OpenVPN credential refresh: if using dynamic credentials (e.g., LDAP), agent re-authenticates on connection failure; if auth fails, surface error with action hint (update credentials in config).
+- Failure-mode UX: Admin UI shows tunnel status with clear error messages (e.g., `BOUNDARY_TOKEN_EXPIRED`, `OPENVPN_AUTH_FAILED`); action buttons (Re-authenticate, Update Credentials, Restart Tunnel).
+- Graceful degradation: if tunnel down, dependent operations (e.g., SCP) are blocked with clear error (`tunnel_not_running`) and action hint (start tunnel first).
+
+### Acceptance Criteria
+- Tunnel health checks detect failures within 30s; auto-repair succeeds within 3 attempts for transient failures.
+- Token/credential refresh succeeds at 80% TTL; failures surface actionable errors in Admin UI.
+- Audit trail includes all tunnel state changes with reason codes and timestamps.
+

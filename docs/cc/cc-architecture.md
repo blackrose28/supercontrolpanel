@@ -48,3 +48,64 @@ Centralize control and telemetry for multiple SuperControlPanel clients via a se
     - Agent token rotation: max TTL 30d; revocation propagates within 60s.
     - mTLS device certs: 1y validity, 60d early-rotation window; pubkey pinning.
     - Redaction at source: passwords, tokens, etc...
+
+## Admin/UI flows
+
+- Approvals UX: Pending approvals list with context/diff (e.g., target file path, overwrite policy, tunnel target). Show requester, approvers required, expiry, and reason. Actions: approve/deny with comment; audit all decisions. Escalation when nearing expiry; revoke if risk signals change.
+- RBAC modeling: Role- and scope-aware UI. Clearly surface current actor’s effective permissions per device/session. Guard sensitive actions behind explicit confirmation + approval policy badges.
+- Fleet search/filter: Search by device name, tags, platform, version, status, and active sessions. Client-side quick filter + server-backed advanced filter with pagination.
+- Change review displays: For risky file ops, show before/after metadata and overwrite confirmation. For commands, render parameters with redaction and stable reason codes on failure.
+- Live terminals/logs: Per-session ACLs. Privacy banner and recording indicator when session recording is enabled. Scrollback replay size and truncation notice.
+- Error/reporting: Surface structured errors `{ code, message }` with remediation hints; link to runbooks. Inline toast + per-row status indicators.
+- Accessibility/i18n: Keyboard navigable controls, ARIA roles, and localization-ready strings.
+
+
+## Boundary/OpenVPN specifics
+
+### Compliance and data lifecycle
+
+## Compliance and data lifecycle
+
+### Data retention per type
+- Telemetry events: hot 14d (ClickHouse), warm 90d (object store or cold tier), configurable per-org overrides.
+- Command audit: 365d minimum; legal hold extends indefinitely until released.
+- PTY recordings: 7d default; org-configurable up to 90d; auto-delete after retention period unless legal hold.
+- Agent tokens: revoked tokens retained in audit for 90d; active tokens max TTL 30d.
+- Deletion jobs: run daily; safeguards prevent accidental deletion (require explicit confirmation for bulk deletes).
+
+### Legal hold and tenant overrides
+- Legal hold: per-org flag; when enabled, all data (events, audits, recordings) exempt from auto-deletion; manual release required.
+- Tenant overrides: orgs can extend retention (up to platform max: 365d for events, indefinite for audits); cannot reduce below platform minimums.
+- Audit: all retention policy changes logged with actor, org, old/new values, timestamps.
+
+### Right-to-erasure handling
+- GDPR/CCPA compliance: user requests erasure via Admin UI; request queued and processed within 30d.
+- Erasure scope: PII in events (redact actor, device names, paths); audit entries (redact actor but preserve action/outcome for integrity); recordings (delete file, retain metadata stub).
+- Audit redaction rules: replace PII with `[REDACTED]`; preserve structure and reason codes; hash chain updated with redaction marker.
+- Exceptions: legal hold overrides erasure; audit integrity preserved (redaction logged, not deleted).
+
+### Acceptance Criteria
+- Retention policies enforced; deletion jobs run daily with safeguards.
+- Legal hold prevents auto-deletion; manual release required.
+- Right-to-erasure requests processed within 30d; PII redacted/deleted per scope; audit integrity preserved.
+
+
+## Boundary/OpenVPN specifics
+
+### Tunnel state reconciliation and auto-repair
+- Agent monitors tunnel health via periodic health checks (every 30s); if tunnel down, attempt restart with exponential backoff (base 5s, max 60s).
+- Server tracks expected tunnel state per device; on mismatch (agent reports down, server expects up), trigger reconciliation: query agent status, attempt restart if needed, surface actionable error if persistent failure.
+- Auto-repair policy: max 3 restart attempts within 5 min; after exhaustion, mark tunnel as `failed` and require manual intervention (operator approval to retry).
+- Audit: all tunnel state changes (start, stop, restart, failure) logged with actor, device, reason codes, timestamps.
+
+### Credential/token refresh and failure-mode UX
+- Boundary token refresh: agent monitors token expiry (via `boundary token renew`); refresh at 80% TTL; if refresh fails, surface error in Admin UI with action hint (re-authenticate).
+- OpenVPN credential refresh: if using dynamic credentials (e.g., LDAP), agent re-authenticates on connection failure; if auth fails, surface error with action hint (update credentials in config).
+- Failure-mode UX: Admin UI shows tunnel status with clear error messages (e.g., `BOUNDARY_TOKEN_EXPIRED`, `OPENVPN_AUTH_FAILED`); action buttons (Re-authenticate, Update Credentials, Restart Tunnel).
+- Graceful degradation: if tunnel down, dependent operations (e.g., SCP) are blocked with clear error (`tunnel_not_running`) and action hint (start tunnel first).
+
+### Acceptance Criteria
+- Tunnel health checks detect failures within 30s; auto-repair succeeds within 3 attempts for transient failures.
+- Token/credential refresh succeeds at 80% TTL; failures surface actionable errors in Admin UI.
+- Audit trail includes all tunnel state changes with reason codes and timestamps.
+
