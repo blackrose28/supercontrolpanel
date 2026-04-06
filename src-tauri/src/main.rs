@@ -1419,6 +1419,7 @@ pub(crate) fn restart_openvpn_action(app: AppHandle) -> Result<(), String> {
     {
         let admin_store = app.state::<OpenVpnAdminStore>();
         if let Some(active) = get_openvpn_admin_session(&admin_store)? {
+            reset_openvpn_reconnect(&app, false);
             let _ = fs::remove_file(&active.stop_path);
             match fs::write(&active.control_path, "restart") {
                 Ok(_) => {
