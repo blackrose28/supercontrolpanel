@@ -15,7 +15,7 @@ use tauri::AppHandle;
 
 use super::protocol::{Envelope, MessageType};
 use super::telemetry::recent_log_events;
-use crate::restart_openvpn_action;
+use crate::commands::openvpn::restart_openvpn_action;
 use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
 
 pub struct CcConnection {
