@@ -118,5 +118,5 @@ Do not begin the MCP skeleton until at least:
 
 - `main.rs` is now primarily bootstrap, Tauri command wiring, and thin wrappers
 - Boundary, OpenVPN, server, remote browser, and SCP logic all have service-module homes
-- Remaining warnings are mostly deferred platform-specific or future-path cleanup items, not blockers for the refactor milestone
-- The warning-focused cleanup pass is complete; `cargo check` is currently clean
+- Remaining warnings are minor cleanup items and do not block the refactor milestone
+- `cargo check` currently passes, but the tree still has a small set of warnings to clean up separately

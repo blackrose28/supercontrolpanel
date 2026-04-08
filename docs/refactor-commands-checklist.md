@@ -156,15 +156,15 @@ These reference `handle_openvpn_terminal_state` which is still in main.rs — pa
 2. Move it to `commands/mod.rs` too (it uses `load_app_config_from_disk` which will be in config.rs)
 3. Use a trait/dynamic dispatch
 
-Best approach: Move `handle_openvpn_terminal_state` and related reconnect helpers to `commands/mod.rs` alongside the glue functions, since they're cross-cutting. They can reference `commands::config::load_app_config_from_disk`.
+Implemented approach: keep the shared status/session-exit glue in `commands/mod.rs`, and place the OpenVPN reconnect helpers with the rest of the OpenVPN orchestration in `commands/openvpn.rs`.
 
 Actions:
-- [ ] Move `upsert_function_status`, `update_functions_for_session_exit`, `upsert_boundary_status`, `boundary_token_summary` to `commands/mod.rs`
-- [ ] Move `handle_openvpn_terminal_state` and reconnect helpers (`compute_openvpn_reconnect_delay_secs`, `mark_openvpn_connected`, `reset_openvpn_reconnect`, `prepare_openvpn_manual_start`) to `commands/mod.rs` too
-- [ ] Re-export from `commands/mod.rs`: `pub(crate)` or via `pub use`
-- [ ] Update main.rs to use `commands::*` or `crate::commands::*` for these
-- [ ] Update caddy.rs, remote_browser.rs, scp.rs, server.rs imports to use `super::` for the glue functions
-- [ ] `cargo check` passes
+- [x] Move `upsert_function_status`, `update_functions_for_session_exit`, `upsert_boundary_status`, `boundary_token_summary` to `commands/mod.rs`
+- [x] Keep `handle_openvpn_terminal_state` and reconnect helpers (`compute_openvpn_reconnect_delay_secs`, `mark_openvpn_connected`, `reset_openvpn_reconnect`, `prepare_openvpn_manual_start`) in `commands/openvpn.rs`
+- [x] Re-export command modules via `commands/mod.rs`
+- [x] Update main.rs to use `commands::*` / `crate::commands::*`
+- [x] Update command modules to import shared glue via `super::` where applicable
+- [x] `cargo check` passes
 
 ## Step 7: Extract `commands/pty.rs` ✅
 
