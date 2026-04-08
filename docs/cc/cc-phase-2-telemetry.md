@@ -15,8 +15,8 @@ The current implementation diverges from the original Phase 2 storage plan:
   - agent-side gzip compression for oversized HTTP ingest bodies (`> 8 KB`) sent to `POST /v1/logs`
   - agent-side chunking for oversized telemetry events, emitted as ordered chunk records with `{ chunkIndex, totalChunks }`
   - agent-side redaction before enqueue for structured secret fields and common password/OTP/token text patterns
-  - agent retry/buffering queue in memory
-  - durable queue scaffolding: app-config disk layout, manifest, active append-only segment, and partial-tail recovery
+  - agent retry/buffering queue now persists redacted records to disk and reads ready batches/retry metadata from the disk queue during send/retry/ack
+  - durable queue now has app-config disk layout, manifest, append-only rotated segments, partial-tail recovery, atomic manifest rewrites, queue stats, compaction that removes fully acked old segments, AES-256-GCM encryption at rest, and bounded-capacity shedding with a 128 MB hard cap / 90% high-watermark
   - CC ingest endpoint: `POST /v1/logs`
   - persisted telemetry/history in SQLite
   - SSE stream: `GET /v1/logs/stream`
@@ -24,16 +24,15 @@ The current implementation diverges from the original Phase 2 storage plan:
   - admin telemetry UI with filters, search, export, alerts, and runtime summaries
 - Still deferred:
   - ClickHouse
-  - persisted enqueue/send/ack on the disk-backed encrypted agent queue
   - negotiated WS gzip capability and server-side chunk reassembly
   - explicit `nack`/server backpressure protocol
   - full redaction matrix parity with the original Phase 2 design
 
-Use this document as the target design, but treat SQLite + in-memory agent retry as the current Phase 2 baseline. The disk queue layout now exists on disk, but live telemetry replay still depends on the in-memory queue until persisted enqueue/send/ack is wired in.
+Use this document as the target design, but treat SQLite + the current rotated encrypted disk queue as the current Phase 2 baseline. Redacted telemetry records are now persisted on enqueue and used as the source of truth for ready-batch selection, retry metadata, and ack/drop. Rotation, compaction, encryption, bounded-capacity shedding, and validation coverage are now implemented.
 
 ## Deliverables
 - Agent: batching implemented at 15 ms / 16 KB max batch size; tags `{functionId, sessionId}`.
-- Durable agent queue: disk-backed, bounded (default 50 MB), AES-GCM encrypted at rest; drop-oldest policy beyond high-watermark; flush-on-reconnect with de-dupe by `(deviceId, seq)`.
+- Durable agent queue: disk-backed, bounded (default 128 MB), AES-GCM encrypted at rest; drop-oldest for non-critical telemetry beyond the 90% high-watermark; flush-on-reconnect with de-dupe by `(deviceId, seq)`.
   - Implementation checklist: `docs/cc/cc-phase-2-durable-queue-checklist.md`
 - CC (ingest + storage):
   - Ingest: `POST /v1/logs` (internal), `GET /v1/logs/stream?deviceId=...` (SSE)
@@ -45,7 +44,8 @@ Use this document as the target design, but treat SQLite + in-memory agent retry
 - Inventory publish: cadence 5m or on change; fields `{ serversListHash, serversCount }`.
 ## Checklists
 - Agent: subscribe to Tauri events: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`.
-- Agent: retry/buffer queue implemented in memory; durable disk layout/manifest scaffold is implemented, but offline replay across process restarts is still pending.
+- Agent: redacted telemetry is persisted to the disk queue before it becomes sendable, and the live sender/retry path now reads ready records plus retry metadata from disk; segment rotation, compaction, AES-256-GCM at-rest encryption, and bounded-capacity shedding are implemented.
+- Agent: queue validation now covers restart replay, offline growth/reconnect flush, per-stream ordering, corruption skip-and-continue behavior, auth-failure drop semantics, disk-pressure shedding, and disk-artifact secret checks.
 - CC: ingest → durable store implemented with SQLite; backpressure handling still pending.
 - CC: SSE/history fanout per-device implemented.
 - Redaction parity with MCP (no secrets at-rest/in-flight).
@@ -57,7 +57,7 @@ Use this document as the target design, but treat SQLite + in-memory agent retry
 - Agent adaptive throttling
   - Implemented baseline: local leaky-bucket with a 256KB/s soft cap and up to 5s burst budget, plus temporary cooldown when ingest returns HTTP `429` or `5xx`.
   - Deferred from the original design: protocol-level `nack { rate_limited, retryAfterMs }` handling and dynamic batch-window resizing tied to negotiated backpressure signals.
-- Offline buffer policy: drop-oldest when disk queue near full; emit health warning and include dropped count in next `heartbeat`.
+- Offline buffer policy: drop oldest non-critical telemetry when the disk queue projects above the 90% high-watermark; emit a local `cc-telemetry-health` signal and queue-pressure logs when shedding occurs.
 - Compression and chunking
   - Implemented baseline: gzip HTTP ingest bodies when the serialized batch exceeds 8 KB.
   - Implemented baseline: oversize telemetry events are split into sequential chunk records that carry `{ chunkIndex, totalChunks, chunked: true }`.
@@ -123,8 +123,9 @@ Notes
 ## Backpressure and throttling
 - Server backpressure: when ingest/DB is saturated, respond with `nack { reqSeq, rate_limited: true, retryAfterMs }` on control paths and slow SSE fanout; log a structured event.
 - Agent adaptive throttling: leaky-bucket per device (default 256KB/s soft cap for telemetry; bursts up to 1MB over 5s). When `nack.rate_limited=true` or socket write backs up, agent increases batch window (up to 100ms) and reduces send rate.
-- Queue near-full policy: disk-backed queue maintains a high-watermark (e.g., 64MB). When >90%, drop-oldest for non-critical telemetry; never drop `function-status`/terminal events.
-- Health signals: agent emits `telemetry_health { queueBytes, droppedCount, throttled: true/false }` periodically (min interval 10s when degraded) to aid diagnostics.
+- Queue near-full policy: disk-backed queue uses a 128 MB hard cap and a 90% high-watermark. When projected usage crosses the watermark, it drops the oldest non-critical telemetry first; it never intentionally sheds `function-status`, `pty-exit`, or terminal lifecycle events.
+- Health signals: current implementation emits a local Tauri `cc-telemetry-health` event and queue-pressure log entries when records are shed. A periodic server-visible degraded heartbeat remains deferred.
+- Corruption handling: if one persisted record cannot be decoded or decrypted, the agent skips that record, logs the issue, and continues reading later records from the queue.
 - Retry with jitter: exponential backoff (base 250ms, cap 5s) for transient HTTP ingest errors; dedupe by `(deviceId, seq)` prevents duplicates on re-send.
 
 
@@ -149,7 +150,7 @@ Notes
 
 ## Acceptance Criteria
 - Live logs appear in Admin UI end-to-end. Current implementation verified manually.
-- Backfill: reconnect replays from current in-memory queue; durable queue layout exists, but replay across agent restarts is still pending until persisted enqueue/send/ack lands.
+- Backfill: reconnect and restart replay now come from the persisted rotated encrypted disk queue, and queue validation covers replay, corruption skip, auth-failure drop semantics, and disk-pressure shedding.
 - Queries by device/time/type return expected events and respect redaction rules.
 - Ordering holds per `(deviceId, sessionId, type)` under burst conditions.
 
@@ -185,8 +186,8 @@ These items were implemented earlier than the original phased docs suggested:
 - Key source: random 256-bit key stored via OS keyring; key alias `scp.cc.telemetry.queue`; fallback to local encrypted file only if keyring unavailable.
 - Rotation: generate new key on admin request; re-encrypt lazily on compaction; old key kept until compaction completes (max 24h) then wiped.
 - Format: append-only segments with small index; each record `{nonce, ciphertext, tag}`; header includes key id and segment salt.
-- Limits: default max on-disk size 128 MB; drop-oldest when 90% full and backpressure active.
-- Failure behavior: if decryption fails (corrupt), skip record, count, and continue; emit `nack { code: "QUEUE_CORRUPT" }` metric and raise alert threshold if consecutive.
+- Limits: default max on-disk size 128 MB; begin shedding oldest non-critical telemetry when projected usage exceeds 90% of that budget.
+- Failure behavior: if decryption fails (corrupt), skip the record, log the corruption locally, and continue reading the rest of the queue. Server-visible corruption metrics/alerts remain deferred.
 - Privacy: secrets already redacted at source; encryption here defends device compromise at-rest; does not replace transport TLS.
 
 ## Test plan (Phase 2 Telemetry)

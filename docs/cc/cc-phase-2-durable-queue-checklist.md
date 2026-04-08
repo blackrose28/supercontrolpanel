@@ -60,57 +60,58 @@ Replace the current in-memory-only retry queue with a disk-backed encrypted queu
 - [x] Add startup recovery for partially written tail records
 
 ### 3. Persisted enqueue
-- [ ] Write redacted telemetry records to disk before they are eligible for sending
-- [ ] Preserve current enqueue ordering semantics
-- [ ] Ensure chunked events are written as separate ordered records
-- [ ] Ensure only already-redacted payloads are written to disk
-- [ ] Keep `recent_log_events()` behavior intact for current CC control flows
+- [x] Write redacted telemetry records to disk before they are eligible for sending
+- [x] Preserve current enqueue ordering semantics
+- [x] Ensure chunked events are written as separate ordered records
+- [x] Ensure only already-redacted payloads are written to disk
+- [x] Keep `recent_log_events()` behavior intact for current CC control flows
 
 ### 4. Read/send/ack flow
-- [ ] Read ready records from disk into batch assembly
-- [ ] Keep existing batching/throttling/compression behavior on the send path
-- [ ] Mark records acked only after successful `/v1/logs` response
-- [ ] Persist retry metadata needed after restart
-- [ ] Ensure unauthorized responses still drop records intentionally
+- [x] Read ready records from disk into batch assembly
+- [x] Keep existing batching/throttling/compression behavior on the send path
+- [x] Mark records acked only after successful `/v1/logs` response
+- [x] Persist retry metadata needed after restart
+- [x] Ensure unauthorized responses still drop records intentionally
 
 ### 5. Compaction and rotation
-- [ ] Rotate segments when size threshold is reached
-- [ ] Delete fully acked old segments
-- [ ] Keep manifest/cursor updates crash-tolerant
-- [ ] Add queue stats helper:
+- [x] Rotate segments when size threshold is reached
+- [x] Delete fully acked old segments
+- [x] Keep manifest/cursor updates crash-tolerant
+- [x] Add queue stats helper:
   - queued records
   - queued bytes
   - oldest queued age
 
 ### 6. Encryption at rest
-- [ ] Generate random queue encryption key
-- [ ] Store key in OS keyring
-- [ ] Encrypt each record with AES-256-GCM
-- [ ] Store nonce + ciphertext + tag per record
-- [ ] Version the on-disk format for future migration
-- [ ] Define behavior if keyring is unavailable
+- [x] Generate random queue encryption key
+- [x] Store key in OS keyring
+- [x] Encrypt each record with AES-256-GCM
+- [x] Store nonce + ciphertext + tag per record
+- [x] Version the on-disk format for future migration
+- [x] Define behavior if keyring is unavailable
   - recommended initial policy: fail closed for durable mode and fall back explicitly to in-memory only
 
 ### 7. Capacity and drop policy
-- [ ] Add maximum on-disk queue size
-  - recommended initial default: `128 MB`
-- [ ] Add high-watermark behavior
-  - recommended: start degraded handling at `90%`
-- [ ] Drop oldest non-critical telemetry first when near full
-- [ ] Never drop:
+- [x] Add maximum on-disk queue size
+  - implemented default: `128 MB`
+- [x] Add high-watermark behavior
+  - implemented: degraded shedding starts at `90%`
+- [x] Drop oldest non-critical telemetry first when near full
+- [x] Never drop:
   - `function-status`
   - `pty-exit`
   - terminal lifecycle signals
-- [ ] Emit degraded-health signal/log when dropping occurs
+- [x] Emit degraded-health signal/log when dropping occurs
+  - current implementation emits a local `cc-telemetry-health` Tauri event and writes a queue-pressure log line
 
 ### 8. Validation
-- [ ] Restart test: queue survives app restart and replays remaining records
-- [ ] Offline test: queue grows while server is unavailable, then flushes on reconnect
-- [ ] Ordering test: per `(deviceId, sessionId, type)` ordering still holds
-- [ ] Corruption test: one bad record is skipped or quarantined without blocking the queue
-- [ ] Auth failure test: `401` / `403` still drop queued records as intended
-- [ ] Disk full test: degraded policy triggers without crashing the app
-- [ ] Verify no unredacted secret reaches disk artifacts
+- [x] Restart test: queue survives app restart and replays remaining records
+- [x] Offline test: queue grows while server is unavailable, then flushes on reconnect
+- [x] Ordering test: per `(deviceId, sessionId, type)` ordering still holds
+- [x] Corruption test: one bad record is skipped without blocking the queue
+- [x] Auth failure test: `401` / `403` still drop queued records as intended
+- [x] Disk full test: degraded policy triggers without crashing the app
+- [x] Verify no unredacted secret reaches disk artifacts
 
 ## Suggested file split
 

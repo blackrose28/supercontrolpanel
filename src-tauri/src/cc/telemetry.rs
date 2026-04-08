@@ -17,7 +17,7 @@ use tauri::AppHandle;
 use super::telemetry_queue::{
     telemetry_queue, ReadyTelemetryBatch, TelemetryQueue, TelemetryQueueRecord,
 };
-use super::telemetry_queue_disk::ensure_disk_queue_layout;
+use super::telemetry_queue_disk::{append_telemetry_record, ensure_disk_queue_layout};
 use crate::services::load_sync_settings_from_disk;
 
 const SYNC_SETTINGS_FILE_NAME: &str = "sync-local.json";
@@ -169,10 +169,7 @@ fn ensure_telemetry_worker_started(app: AppHandle) {
                     clear_server_backoff();
                     queue.drop_sent(batch.count);
                 }
-                Ok(response)
-                    if response.status() == reqwest::StatusCode::UNAUTHORIZED
-                        || response.status() == reqwest::StatusCode::FORBIDDEN =>
-                {
+                Ok(response) if should_drop_batch_after_status(response.status()) => {
                     clear_server_backoff();
                     queue.drop_sent(batch.count);
                     eprintln!(
@@ -299,6 +296,13 @@ fn parse_retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     Some(seconds.saturating_mul(1_000))
 }
 
+fn should_drop_batch_after_status(status: reqwest::StatusCode) -> bool {
+    matches!(
+        status,
+        reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+    )
+}
+
 fn schedule_retry(queue: &dyn TelemetryQueue, count: usize, reason: String) {
     let schedule = queue.schedule_retry(count, TELEMETRY_MAX_BACKOFF_SECS);
     eprintln!(
@@ -337,10 +341,33 @@ pub fn forward_log_event<T: Serialize>(
     for body in bodies {
         record_recent_telemetry(&body);
         let seq = body.get("seq").and_then(Value::as_u64).unwrap_or(0);
-        queue.enqueue(
-            TelemetryQueueRecord::new(seq, body),
-            MAX_QUEUED_TELEMETRY_EVENTS,
-        );
+        let record = TelemetryQueueRecord::new(seq, body);
+        match append_telemetry_record(app, &record) {
+            Ok(outcome) => {
+                queue.forget_local_ids(&outcome.dropped_local_ids);
+                if outcome.dropped_records > 0 {
+                    eprintln!(
+                        "CC telemetry queue shed {} record(s) / {} byte(s); queue now at {} bytes",
+                        outcome.dropped_records, outcome.dropped_bytes, outcome.queue_bytes
+                    );
+                }
+                if !outcome.persisted {
+                    eprintln!(
+                        "CC telemetry dropped incoming event under queue pressure; queue remains at {} bytes",
+                        outcome.queue_bytes
+                    );
+                    continue;
+                }
+            }
+            Err(err) => {
+                eprintln!(
+                    "CC telemetry durable enqueue failed; falling back to in-memory queue only: {err}"
+                );
+                queue.enqueue(record, MAX_QUEUED_TELEMETRY_EVENTS);
+                continue;
+            }
+        }
+        queue.enqueue(record, MAX_QUEUED_TELEMETRY_EVENTS);
     }
     ensure_telemetry_worker_started(app.clone());
 }
@@ -513,6 +540,27 @@ fn redact_sensitive_string(input: &str) -> String {
         output = rule.replace_all(&output, "$prefix[redacted]").into_owned();
     }
     output
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_drop_batch_after_status;
+
+    #[test]
+    fn unauthorized_and_forbidden_drop_queued_records() {
+        assert!(should_drop_batch_after_status(
+            reqwest::StatusCode::UNAUTHORIZED
+        ));
+        assert!(should_drop_batch_after_status(
+            reqwest::StatusCode::FORBIDDEN
+        ));
+        assert!(!should_drop_batch_after_status(
+            reqwest::StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(!should_drop_batch_after_status(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR
+        ));
+    }
 }
 
 fn telemetry_redaction_rules() -> &'static [Regex] {

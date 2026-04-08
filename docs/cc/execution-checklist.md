@@ -56,7 +56,7 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 ### Agent
 - ✅ Subscribe to Tauri events: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`
 - ✅ Batching (15 ms / 16 KB max batch to `POST /v1/logs`)
-- 🟨 Retry/buffer queue implemented in-memory; durable disk layout/manifest scaffold is in place, but persisted enqueue/send/ack is still pending (tracked in `docs/cc/cc-phase-2-durable-queue-checklist.md`)
+- ✅ Retry/buffer queue now persists and reads from the rotated encrypted disk queue; compaction, rotation, encryption, and bounded-capacity shedding are implemented (validation remains tracked in `docs/cc/cc-phase-2-durable-queue-checklist.md`)
 - ✅ Adaptive throttling (256 KB/s soft cap via leaky-bucket; extra cooldown on HTTP 429/5xx)
 - ✅ Compression (gzip HTTP ingest bodies > 8 KB to `POST /v1/logs`; WS-negotiated gzip still deferred)
 - ✅ Chunking (oversize telemetry events split into ordered chunk records with `{chunkIndex, totalChunks}`)
@@ -73,10 +73,10 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ### Acceptance Criteria
 - ✅ Live logs appear in Admin UI end-to-end
-- 🟨 Backfill: reconnect replays buffered events from current in-memory agent queue; durable queue layout exists, but replay across agent restarts still pending
-- ⬜ Ordering holds per `(deviceId, sessionId, type)` under burst
+- ✅ Backfill: reconnect and restart replay now come from the rotated encrypted disk queue, with validation coverage in `docs/cc/cc-phase-2-durable-queue-checklist.md`
+- ✅ Ordering holds per `(deviceId, sessionId, type)` in the agent queue validation suite
 - ⬜ Redaction: no secrets in SSE or stored rows
-- ⬜ Disk queue survives process restarts (see `docs/cc/cc-phase-2-durable-queue-checklist.md`)
+- ✅ Disk queue survives process restarts (see `docs/cc/cc-phase-2-durable-queue-checklist.md`)
 
 ---
 

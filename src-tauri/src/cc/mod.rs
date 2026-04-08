@@ -4,6 +4,7 @@ pub mod dispatcher;
 pub mod protocol;
 pub mod telemetry;
 pub mod telemetry_queue;
+pub mod telemetry_queue_crypto;
 pub mod telemetry_queue_disk;
 
 pub(crate) use commands::sync_cc_status_from_settings;
