@@ -1,13 +1,13 @@
 use tauri::{AppHandle, State};
 
+use super::update_functions_for_session_exit;
 use crate::models::ScpTransferState;
 use crate::services::{
-    attach_scp_transfer_session, create_scp_transfer_entry, now_ms,
-    open_pty_with_command_builder, scp_download_service, scp_upload_service,
-    start_scp_download_service, start_scp_upload_service, update_scp_transfer_entry,
+    attach_scp_transfer_session, create_scp_transfer_entry, now_ms, open_pty_with_command_builder,
+    scp_download_service, scp_upload_service, start_scp_download_service, start_scp_upload_service,
+    update_scp_transfer_entry,
 };
 use crate::stores::{ScpTransferStore, SessionStore};
-use super::update_functions_for_session_exit;
 
 pub(crate) fn scp_upload_action(
     app: AppHandle,

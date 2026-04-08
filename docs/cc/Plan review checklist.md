@@ -63,8 +63,8 @@ Use this checklist to harden and complete the CC design before implementation. W
 
 ## API design and schema hygiene
 - [x] WS payload JSON Schemas documented in `docs/cc/cc-protocol.md` (see "API design and schema hygiene")
-- [ ] OpenAPI for REST endpoints; SDK generation
-- [ ] API versioning and deprecation policy
+- [x] OpenAPI for REST endpoints; SDK generation (see `docs/cc/cc-protocol.md` → "OpenAPI and SDK plan")
+- [x] API versioning and deprecation policy (see `docs/cc/cc-protocol.md` → "REST API versioning and deprecation")
 
 ## Deployment
 - [x] Containerization; database migrations (ClickHouse strategy) (see `docs/cc/cc-phase-7-ops.md` → "Deployment")

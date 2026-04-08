@@ -1,16 +1,16 @@
-use std::{
-    fs,
-    thread,
-    time::Duration,
-};
+use std::{fs, thread, time::Duration};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
 
-use crate::models::{PtyExitPayload, StartFunctionResult};
+use super::{
+    adapt_command_for_shell, load_app_config_from_disk, open_pty_internal,
+    update_functions_for_session_exit, upsert_function_status,
+};
 #[cfg(target_os = "windows")]
 use crate::models::{HelperStatusFile, OpenVpnLaunchConfig};
+use crate::models::{PtyExitPayload, StartFunctionResult};
 #[cfg(target_os = "windows")]
 use crate::services::build_openvpn_args_windows;
 use crate::services::prepare_openvpn_start;
@@ -21,14 +21,10 @@ use crate::services::start_openvpn_pty_session as start_openvpn_pty_session_serv
 #[cfg(not(target_os = "windows"))]
 use crate::services::stop_openvpn_pty_session as stop_openvpn_pty_session_service;
 use crate::services::{
-    add_watcher, close_pty_internal,
-    emit_pty_exit,
-    lock_err, now_ms,
-    write_pty_internal,
+    add_watcher, close_pty_internal, emit_pty_exit, lock_err, now_ms, write_pty_internal,
 };
 use crate::services::{
-    build_openvpn_command_unix, generate_openvpn_password,
-    normalized_openvpn_config,
+    build_openvpn_command_unix, generate_openvpn_password, normalized_openvpn_config,
 };
 #[cfg(target_os = "windows")]
 use crate::services::{
@@ -37,20 +33,14 @@ use crate::services::{
     start_openvpn_admin_worker as start_openvpn_admin_worker_service,
     write_openvpn_helper_script as write_openvpn_helper_script_service,
 };
-use crate::stores::{
-    FunctionStore, OpenVpnAdminStore, OpenVpnReconnectStore, SessionStore,
-};
 #[cfg(target_os = "windows")]
 use crate::stores::OpenVpnAdminSession;
+use crate::stores::{FunctionStore, OpenVpnAdminStore, OpenVpnReconnectStore, SessionStore};
+#[cfg(target_os = "windows")]
+use crate::CREATE_NO_WINDOW;
 use crate::OPENVPN_FUNCTION_ID;
 #[cfg(target_os = "windows")]
 use crate::OPENVPN_HELPER_SCRIPT_NAME;
-#[cfg(target_os = "windows")]
-use crate::CREATE_NO_WINDOW;
-use super::{
-    adapt_command_for_shell, load_app_config_from_disk, open_pty_internal,
-    update_functions_for_session_exit, upsert_function_status,
-};
 
 #[cfg(target_os = "windows")]
 fn is_windows_pid_running(pid: u32) -> bool {
@@ -543,12 +533,7 @@ pub(crate) fn restart_openvpn_action(app: AppHandle) -> Result<(), String> {
         let function_store = app.state::<FunctionStore>();
         let admin_store = app.state::<OpenVpnAdminStore>();
 
-        stop_openvpn_action(
-            app.clone(),
-            session_store,
-            function_store,
-            admin_store,
-        )?;
+        stop_openvpn_action(app.clone(), session_store, function_store, admin_store)?;
     } else {
         let function_store = app.state::<FunctionStore>();
         upsert_function_status(

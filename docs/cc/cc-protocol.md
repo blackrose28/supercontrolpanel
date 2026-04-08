@@ -32,6 +32,103 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
 - Feature negotiation: agent sends `hello{ agentVersion, supported: ["gzip", "chunking"] }`; server replies `welcome{ protocol: "scp.cc.v1", capabilities: { gzip: true, chunking: true } }`.
 - Backward/forward compatibility: additive payload fields are tolerated; breaking changes bump protocol or `schemaVersion` per type.
 
+## REST API versioning and deprecation
+
+This section applies to the HTTP API exposed by `cc-server`, especially the mobile/admin API surface.
+
+### Versioning model
+- REST endpoints are versioned in the path: `/v1/...`, `/v2/...`.
+- The first mobile/public contract is the `/v1` surface.
+- Additive changes are allowed within a version:
+  - adding optional response fields
+  - adding optional request fields
+  - adding new endpoints
+- Breaking changes require a new major path version:
+  - removing fields
+  - renaming fields
+  - changing field types
+  - changing auth requirements
+  - changing success/error envelope shape
+
+### Compatibility rules
+- Clients must ignore unknown response fields.
+- Servers must reject invalid required inputs with stable error codes.
+- Error responses should use:
+  - `{ code, message, details? }`
+- Browser-only auth endpoints and mobile-safe token endpoints may coexist, but each endpoint must document which auth modes it accepts.
+
+### Deprecation policy
+- Deprecations must be documented before removal.
+- Minimum deprecation window for mobile/public REST endpoints: 6 months.
+- Deprecated endpoints should return deprecation metadata when feasible:
+  - `Deprecation: true`
+  - `Sunset: <RFC 1123 date>`
+  - optional docs link header to migration notes
+- Migration notes must include:
+  - old endpoint
+  - replacement endpoint/version
+  - schema/auth differences
+  - removal date
+
+### Auth-mode rules for REST
+- Browser Admin UI:
+  - cookie session + CSRF
+- Mobile/Admin API:
+  - `Authorization: Bearer <adminApiToken>`
+  - no CSRF
+  - current reality: bearer token may be either a server-minted DB-backed admin API token or the optional static bootstrap env token
+- Agent ingest/auth:
+  - `Authorization: Bearer <agentToken>`
+- Agent tokens and admin API tokens must never be interchangeable.
+- Token lifecycle management for browser admins:
+  - `GET /admin/api-tokens`
+  - `POST /admin/api-tokens`
+  - `POST /admin/api-tokens/:tokenId/revoke`
+  - these lifecycle endpoints are browser-session only and are not part of the mobile SDK surface
+
+## OpenAPI and SDK plan
+
+### Goal
+- Publish an OpenAPI spec for the mobile-safe/admin REST surface first.
+- Treat browser-only HTML/session flows as documented separately, not as the mobile SDK contract.
+
+### First OpenAPI slice
+- `GET /v1/devices`
+- `GET /v1/devices/:id`
+- `GET /v1/device-summary`
+- `GET /v1/logs`
+- `GET /v1/logs/export`
+- `GET /v1/log-settings`
+- `POST /v1/devices/:id/request-status-snapshot`
+- `POST /v1/devices/:id/request-inventory`
+- `POST /v1/devices/:id/request-recent-logs`
+- `POST /v1/devices/:id/request-restart-openvpn`
+
+### Explicitly out of first OpenAPI slice
+- browser HTML pages under `/admin/...`
+- cookie-login/browser-session flows
+- websocket `/agent`
+- future remote PTY control endpoints until they are real and stable
+
+### OpenAPI requirements
+- Every mobile-safe endpoint must declare:
+  - auth scheme: bearer admin API token
+  - required scopes where applicable (`device:read`, `device:control`, `logs:read`, `logs:export`)
+  - request schema
+  - success schema
+  - error schema
+  - stability/version notes if non-final
+- Reusable components:
+  - `Error`
+  - `DeviceSummary`
+  - `TelemetryEvent`
+  - `RuntimeSummary`
+  - `RequestAccepted`
+- SDK generation:
+  - generate typed clients only from the mobile-safe OpenAPI spec
+  - do not generate SDK bindings from browser-only endpoints
+  - first targets: TypeScript for web/mobile shared code; optional Kotlin/Swift later if native clients need them
+
 ## Idempotency and Delivery Semantics
 - Idempotency: control commands carry `commandId` (UUID); duplicates must return the same result; the agent caches recent `commandId`s (TTL 10m).
 - Telemetry ordering: guaranteed per `(deviceId, sessionId, type)` keyed by `seq`; cross-stream interleaving allowed.

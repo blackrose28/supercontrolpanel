@@ -10,6 +10,51 @@
 - MFA: TOTP (RFC 6238) enforced per-org policy; backup codes (10, single-use) generated on enrollment.
 - CSRF/CORS: SameSite=Strict cookies; CORS allowlist per org; CSRF token on state-changing requests.
 
+### AuthN (Admin API / Mobile)
+- Public mobile/admin REST access uses bearer tokens, not browser cookies.
+- Transport: `Authorization: Bearer <adminApiToken>`.
+- Browser Admin UI and mobile/API clients are separate auth modes:
+  - browser Admin UI uses cookie session + CSRF
+  - mobile/admin API uses bearer token and does not use CSRF
+- Token classes:
+  - bootstrap option: one static environment-backed admin API token for early deployments
+  - implemented option: server-minted admin API tokens stored hashed at rest, individually revocable, labeled by client/app/device
+- Token metadata:
+  - `tokenId`
+  - `label`
+  - `createdAt`
+  - `expiresAt`
+  - `lastUsedAt`
+  - `revokedAt?`
+  - optional `scopes`
+- Expiry policy:
+  - default TTL 90 days for mobile clients
+  - support shorter TTL for high-risk orgs
+  - expired or revoked tokens return `401`
+- Scope model for first mobile slice:
+  - `device:read`
+  - `device:control`
+  - `logs:read`
+  - `logs:export`
+- Current server implementation status:
+  - browser Admin UI can mint, list, and revoke DB-backed admin API tokens
+  - static `CC_ADMIN_API_TOKEN` still works as an optional bootstrap/back-compat bearer token
+  - DB-backed token scopes are enforced on the current mobile-safe REST slice
+  - token-management endpoints remain browser-session only:
+    - `GET /admin/api-tokens`
+    - `POST /admin/api-tokens`
+    - `POST /admin/api-tokens/:tokenId/revoke`
+- Rotation and revocation:
+  - mobile app should support replacing a token without reinstall/re-enrollment
+  - server must allow overlap during rotation so the old and new tokens both work for a short grace window
+- Error shape for API auth failures:
+  - `401 { code: "ADMIN_API_AUTH_FAILED", message }`
+  - `403 { code: "ADMIN_API_FORBIDDEN", message, details? }`
+- Mobile-safe endpoints must explicitly document whether they accept:
+  - bearer admin API token only
+  - cookie session only
+  - or both
+
 ### AuthZ (RBAC)
 - Roles: `admin`, `operator`, `viewer` (default); custom roles with granular permissions.
 - Permissions: `device:read`, `device:control`, `session:attach`, `session:record`, `audit:export`, `approval:grant`, etc.
@@ -94,6 +139,7 @@
 - Rotating token works without disconnect storms (staggered refresh; tolerate ±2 min skew).
 - Approval flow blocks sensitive ops until consent; audited end-to-end.
 - All actions audited with actor + device; audit export verifies hash chain.
+- Mobile/admin API bearer tokens can call the documented REST surface without relying on cookies or CSRF.
 
 ## Risks
 - Clock skew on token expiry → allow grace window; show pre-expiry warnings.

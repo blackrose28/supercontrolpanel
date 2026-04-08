@@ -2,14 +2,30 @@
 
 ## Goals
 - Establish secure outbound WS connection from agent to CC.
-- Stream  and  telemetry.
-- Provide minimal Admin API + in-memory registry to view devices.
+- Stream status and runtime telemetry.
+- Provide minimal Admin API and device/session tracking to view devices.
+
+## Current implementation note
+
+This phase is only partially "Phase 1" in the original sense now because the paired `cc-server` repo moved ahead in some areas:
+
+- Implemented now:
+  - agent outbound WS connection with reconnect/backoff
+  - `POST /v1/enroll`
+  - `GET /v1/devices`, `GET /v1/devices/:id`, `GET /v1/health`
+  - duplicate-connection eviction for the same `deviceId`
+  - server-rendered admin devices page
+  - persisted devices in SQLite, with live WS sessions still in memory
+  - admin login/session + CSRF protection on the server
+- real connected/disconnected state exposed through `get_cc_status` and polled by the Config UI
+- Still incomplete in the app:
+  - agent-side enrollment UX is not implemented in this repo; setup is still manual via `sync-local.json` or the Config form fields
 
 ## Deliverables
 - CC Server (default: NestJS)
   - WebSocket `/agent` (subprotocol `scp.cc.v1`, localhost-only dev default)
   - HTTP Admin (Phase 1 minimal): `GET /v1/devices`, `GET /v1/devices/:id`, `GET /v1/health`
-  - In-memory stores for `devices`, `sessions` (durable persistence is deferred to Phase 2)
+  - Device records persisted in SQLite; active WS sessions remain in memory
   - Simple Admin page (server-rendered) listing devices with columns: `id`, `name`, `lastSeenAt`, `status`
 - Agent (this app)
   - New module `src-tauri/src/cc/` with `connection.rs`, `protocol.rs`, `dispatcher.rs`
@@ -20,7 +36,7 @@
   - Reconnect with jittered exponential backoff (base 500ms, max 30s)
 - Frontend
   - Config page: Control plane section (URL, token, enable toggle)
-  - Status pill: CC connection state
+  - Status page shows CC as a normal runtime status card with live connected/disconnected state
 ## Enrollment and Device Identity
 
 ### Enrollment UX
@@ -47,13 +63,10 @@
 - Server responds with `resume_from { lastAckedByStream }`; agent replays buffered events with `seq > lastAcked` and ignores server-side duplicates keyed by `(deviceId, seq)`.
 
 ### Deliverables (Phase 1 scope)
-- Implement `POST /v1/enroll` (in-memory store) returning `{ deviceId, ccAgentToken }`.
-- Add agent enrollment UI (Config page): `Enroll` button, paste/QR, and display of assigned `deviceName`.
+- Implement `POST /v1/enroll` returning `{ deviceId, ccAgentToken }`.
+- Add agent enrollment UI (Config page): `Enroll` button, paste/QR, and display of assigned `deviceName`. This remains deferred; current setup is manual.
 - Persist `ccDeviceId`, `ccAgentToken` in `sync-local.json` after successful enrollment.
 - Enforce single active connection per `deviceId` on the server.
-
-
-## Acceptance Criteria (Phase 1)
 
 ## Acceptance Criteria (Phase 1)
 
@@ -81,4 +94,3 @@
 - Codes starting with `BOOTSTRAP_` are terminal; agent must prompt user.
 - Codes starting with `AUTH_`, `CC_SERVER_`, `SESSION_` are retriable with backoff.
 - `INVALID_PARAMS` is always terminal with explicit field-level message.
-

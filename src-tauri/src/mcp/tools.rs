@@ -6,12 +6,12 @@ use crate::commands::{
     create_remote_browser_directory_action, delete_remote_browser_path_action,
     delete_server_action, get_app_config_action, list_remote_browser_children_action,
     open_remote_browser_action, save_app_config_action, save_sync_settings_action,
-    scp_download_action, scp_upload_action,
-    start_boundary_auth_action, start_caddy_action, start_openvpn_manual_action,
-    start_scp_download_action, start_scp_upload_action, start_server_ssh_action,
-    start_server_tunnel_action, stat_remote_browser_path_action, stop_boundary_auth_action,
-    stop_caddy_action, stop_openvpn_action, stop_server_ssh_action, stop_server_tunnel_action,
-    sync_config_pull_action, sync_config_push_action, upsert_server_action,
+    scp_download_action, scp_upload_action, start_boundary_auth_action, start_caddy_action,
+    start_openvpn_manual_action, start_scp_download_action, start_scp_upload_action,
+    start_server_ssh_action, start_server_tunnel_action, stat_remote_browser_path_action,
+    stop_boundary_auth_action, stop_caddy_action, stop_openvpn_action, stop_server_ssh_action,
+    stop_server_tunnel_action, sync_config_pull_action, sync_config_push_action,
+    upsert_server_action,
 };
 use crate::{
     mcp::{McpToolCallEnvelope, McpToolDescriptor},

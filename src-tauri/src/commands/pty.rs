@@ -1,15 +1,12 @@
 use portable_pty::{CommandBuilder, PtySize};
 use tauri::{AppHandle, State};
 
+use super::{boundary_token_summary, load_app_config_from_disk, update_functions_for_session_exit};
 use crate::models::FunctionStatus;
 use crate::services::{
-    close_pty_internal, emit_pty_exit, lock_err, open_pty_with_command_builder,
-    write_pty_internal,
+    close_pty_internal, emit_pty_exit, lock_err, open_pty_with_command_builder, write_pty_internal,
 };
 use crate::stores::{FunctionStore, SessionStore};
-use super::{
-    boundary_token_summary, load_app_config_from_disk, update_functions_for_session_exit,
-};
 use crate::BOUNDARY_AUTH_FUNCTION_ID;
 
 pub(crate) fn open_pty_internal(

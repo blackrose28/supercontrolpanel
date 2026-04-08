@@ -1,20 +1,14 @@
-use std::{
-    env, fs,
-    path::PathBuf,
-    process::Command,
-};
+use std::{env, fs, path::PathBuf, process::Command};
 
 use tauri::{AppHandle, State};
 
+use crate::cc::sync_cc_status_from_settings;
 use crate::mcp::{sync_mcp_runtime_from_settings, McpRuntimeState};
-use crate::models::{
-    AppConfig, AppConfigForDisk,
-};
+use crate::models::{AppConfig, AppConfigForDisk};
 use crate::services::{
-    config_file_path, default_app_config, detect_openvpn_executable_path,
-    keyring_get_optional, keyring_set_or_delete, load_sync_settings_from_disk,
-    save_sync_settings_to_disk, servers_file_path,
-    ConfigPaths, SyncSettings, SyncSettingsPatch,
+    config_file_path, default_app_config, detect_openvpn_executable_path, keyring_get_optional,
+    keyring_set_or_delete, load_sync_settings_from_disk, save_sync_settings_to_disk,
+    servers_file_path, ConfigPaths, SyncSettings, SyncSettingsPatch,
     KEYRING_BOUNDARY_OIDC_OTP_SECRET, KEYRING_BOUNDARY_OIDC_PASSWORD, KEYRING_BOUNDARY_PASSWORD,
     KEYRING_OPENVPN_OTP_SECRET, KEYRING_OPENVPN_PASSWORD,
 };
@@ -249,6 +243,7 @@ pub(crate) fn save_sync_settings_action(
     }
     save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
     let _ = sync_mcp_runtime_from_settings(&app, &mcp_state, &merged, crate::services::now_ms);
+    let _ = sync_cc_status_from_settings(&app);
     Ok(merged)
 }
 

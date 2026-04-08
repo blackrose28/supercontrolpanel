@@ -1,26 +1,21 @@
 use tauri::{AppHandle, State};
 
+use super::{update_functions_for_session_exit, upsert_function_status};
 use crate::commands::close_remote_browser_sessions_for_server;
 use crate::commands::load_app_config_from_disk;
 use crate::models::StartFunctionResult;
 use crate::server_mgmt::{load_servers, new_server_id, save_servers, Server};
 use crate::services::{
-    apply_boundary_env_builder, apply_boundary_token_arg_if_present_builder,
-    boundary_cli_path, close_pty_internal, emit_pty_exit,
-    open_pty_with_command_builder,
-    start_server_rdp as start_server_rdp_service,
-    start_server_ssh as start_server_ssh_service,
-    start_server_tunnel as start_server_tunnel_service,
-    stop_server_ssh as stop_server_ssh_service,
+    apply_boundary_env_builder, apply_boundary_token_arg_if_present_builder, boundary_cli_path,
+    close_pty_internal, emit_pty_exit, open_pty_with_command_builder,
+    start_server_rdp as start_server_rdp_service, start_server_ssh as start_server_ssh_service,
+    start_server_tunnel as start_server_tunnel_service, stop_server_ssh as stop_server_ssh_service,
     stop_server_tunnel as stop_server_tunnel_service,
 };
 use crate::stores::{FunctionStore, RemoteBrowserStore, SessionStore};
-use super::{update_functions_for_session_exit, upsert_function_status};
-use crate::{
-    server_ssh_function_id, server_tunnel_function_id,
-};
 #[cfg(target_os = "windows")]
 use crate::CREATE_NO_WINDOW;
+use crate::{server_ssh_function_id, server_tunnel_function_id};
 
 #[tauri::command]
 pub fn list_servers(app: AppHandle) -> Result<Vec<Server>, String> {

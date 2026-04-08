@@ -23,13 +23,13 @@ use tauri::{AppHandle, Emitter};
 use crate::cc::telemetry::forward_log_event;
 use crate::models::FunctionStatus;
 use crate::services::{
-    boundary_token_summary as boundary_token_summary_service,
-    lock_err, now_ms, BoundaryTokenSummary,
+    boundary_token_summary as boundary_token_summary_service, lock_err, now_ms,
+    BoundaryTokenSummary,
 };
 use crate::stores::FunctionStore;
-use crate::{BOUNDARY_AUTH_FUNCTION_ID, OPENVPN_FUNCTION_ID};
 #[cfg(target_os = "windows")]
 use crate::CREATE_NO_WINDOW;
+use crate::{BOUNDARY_AUTH_FUNCTION_ID, OPENVPN_FUNCTION_ID};
 
 pub(crate) fn upsert_function_status(
     app: &AppHandle,
@@ -39,7 +39,14 @@ pub(crate) fn upsert_function_status(
     message: &str,
     session_id: Option<String>,
 ) -> Result<(), String> {
-    crate::services::upsert_function_status(app, function_store, function_id, state, message, session_id)
+    crate::services::upsert_function_status(
+        app,
+        function_store,
+        function_id,
+        state,
+        message,
+        session_id,
+    )
 }
 
 pub(crate) fn upsert_boundary_status(

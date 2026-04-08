@@ -5,37 +5,45 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
+use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep, Duration};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, Message},
 };
-use tauri::AppHandle;
 
+use super::commands::set_cc_status;
 use super::protocol::{Envelope, MessageType};
 use super::telemetry::recent_log_events;
 use crate::commands::openvpn::restart_openvpn_action;
 use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
+use crate::stores::CcRuntimeState;
 
 pub struct CcConnection {
     server_url: String,
     agent_token: String,
     device_id: String,
     app: AppHandle,
+    generation: u64,
     seq: Arc<Mutex<u64>>,
-    connected: Arc<Mutex<bool>>,
 }
 
 impl CcConnection {
-    pub fn new(server_url: String, agent_token: String, device_id: String, app: AppHandle) -> Self {
+    pub fn new(
+        server_url: String,
+        agent_token: String,
+        device_id: String,
+        app: AppHandle,
+        generation: u64,
+    ) -> Self {
         Self {
             server_url,
             agent_token,
             device_id,
             app,
+            generation,
             seq: Arc::new(Mutex::new(0)),
-            connected: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -45,8 +53,19 @@ impl CcConnection {
         let mut attempt = 0;
 
         loop {
+            if !self.is_current_generation() {
+                return Ok(());
+            }
             attempt += 1;
             println!("CC connection attempt #{}", attempt);
+            let _ = set_cc_status(
+                &self.app,
+                "connecting",
+                &format!(
+                    "Connecting to {} as {} (attempt #{attempt}).",
+                    self.server_url, self.device_id
+                ),
+            );
 
             match self.connect().await {
                 Ok(_) => {
@@ -58,9 +77,21 @@ impl CcConnection {
                 }
             }
 
+            if !self.is_current_generation() {
+                return Ok(());
+            }
+
             // Jittered exponential backoff
             let jitter = rand::thread_rng().gen_range(0..=(base_delay_ms / 10));
             let delay = base_delay_ms + jitter;
+            let _ = set_cc_status(
+                &self.app,
+                "connecting",
+                &format!(
+                    "Disconnected from {}. Retrying in {}ms (attempt #{attempt}).",
+                    self.server_url, delay
+                ),
+            );
 
             println!("Retrying in {}ms...", delay);
             sleep(Duration::from_millis(delay)).await;
@@ -71,7 +102,10 @@ impl CcConnection {
     }
 
     async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let url = self.server_url.replace("http://", "ws://").replace("https://", "wss://");
+        let url = self
+            .server_url
+            .replace("http://", "ws://")
+            .replace("https://", "wss://");
         let ws_url = format!("{}/agent", url);
 
         let mut request = ws_url.into_client_request()?;
@@ -86,7 +120,16 @@ impl CcConnection {
         let (ws_stream, _) = connect_async(request).await?;
         let (mut write, mut read) = ws_stream.split();
 
-        *self.connected.lock().await = true;
+        if !self.is_current_generation() {
+            return Ok(());
+        }
+
+        self.app.state::<CcRuntimeState>().set_connected(true);
+        let _ = set_cc_status(
+            &self.app,
+            "connected",
+            &format!("Connected as {} to {}.", self.device_id, self.server_url),
+        );
         println!("CC connection established");
 
         // Send initial status_snapshot
@@ -96,18 +139,23 @@ impl CcConnection {
         // Start heartbeat task
         let device_id = self.device_id.clone();
         let seq_counter = self.seq.clone();
-        let connected = self.connected.clone();
+        let status_app = self.app.clone();
+        let generation = self.generation;
         let write_clone = Arc::new(Mutex::new(write));
         let heartbeat_write = write_clone.clone();
-        
+
         tokio::spawn(async move {
             let mut heartbeat_interval = interval(Duration::from_secs(15));
             let start_time = std::time::Instant::now();
 
             loop {
                 heartbeat_interval.tick().await;
-                
-                if !*connected.lock().await {
+
+                if !status_app.state::<CcRuntimeState>().is_connected()
+                    || !status_app
+                        .state::<CcRuntimeState>()
+                        .is_generation_current(generation)
+                {
                     break;
                 }
 
@@ -180,7 +228,12 @@ impl CcConnection {
                 }
                 Ok(Message::Close(_)) => {
                     println!("CC connection closed by server");
-                    *self.connected.lock().await = false;
+                    if !self.is_current_generation() {
+                        return Ok(());
+                    }
+                    self.app.state::<CcRuntimeState>().set_connected(false);
+                    let _ =
+                        set_cc_status(&self.app, "disconnected", "Connection closed by server.");
                     return Err(IoError::new(
                         ErrorKind::ConnectionAborted,
                         "CC connection closed by server",
@@ -189,7 +242,15 @@ impl CcConnection {
                 }
                 Err(e) => {
                     eprintln!("CC read error: {}", e);
-                    *self.connected.lock().await = false;
+                    if !self.is_current_generation() {
+                        return Ok(());
+                    }
+                    self.app.state::<CcRuntimeState>().set_connected(false);
+                    let _ = set_cc_status(
+                        &self.app,
+                        "disconnected",
+                        &format!("Socket read error: {e}"),
+                    );
                     return Err(IoError::new(
                         ErrorKind::ConnectionAborted,
                         format!("CC read error: {e}"),
@@ -200,12 +261,12 @@ impl CcConnection {
             }
         }
 
-        *self.connected.lock().await = false;
-        Err(IoError::new(
-            ErrorKind::UnexpectedEof,
-            "CC connection stream ended",
-        )
-        .into())
+        if !self.is_current_generation() {
+            return Ok(());
+        }
+        self.app.state::<CcRuntimeState>().set_connected(false);
+        let _ = set_cc_status(&self.app, "disconnected", "CC connection stream ended.");
+        Err(IoError::new(ErrorKind::UnexpectedEof, "CC connection stream ended").into())
     }
 
     async fn next_seq(&self) -> u64 {
@@ -214,10 +275,14 @@ impl CcConnection {
         *seq
     }
 
+    fn is_current_generation(&self) -> bool {
+        self.app
+            .state::<CcRuntimeState>()
+            .is_generation_current(self.generation)
+    }
+
     async fn send_status_snapshot(
-        write: &mut (
-            impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
-        ),
+        write: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
         device_id: &str,
         seq_counter: &Arc<Mutex<u64>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -233,9 +298,7 @@ impl CcConnection {
     }
 
     async fn send_inventory(
-        write: &mut (
-            impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
-        ),
+        write: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
         device_id: &str,
         seq_counter: &Arc<Mutex<u64>>,
         app: &AppHandle,
@@ -286,9 +349,7 @@ impl CcConnection {
     }
 
     async fn send_recent_logs(
-        write: &mut (
-            impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin
-        ),
+        write: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
         device_id: &str,
         seq_counter: &Arc<Mutex<u64>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {

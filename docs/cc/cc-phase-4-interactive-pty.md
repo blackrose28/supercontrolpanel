@@ -3,6 +3,16 @@
 ## Scope
 - Remote terminals via CC: open/write/resize/close mapped to agent PTYs.
 
+## Current implementation note
+
+This phase is still design-only in the current codebase pair (`SuperControlPanel` + `cc-server`):
+
+- the local app already has PTY commands for its own UI
+- the CC agent/server protocol does not yet define or handle remote `open_pty`, `write_pty`, `resize_pty`, or `close_pty`
+- there is no remote Admin terminal UI or CC-mediated PTY session lifecycle yet
+
+Treat the rest of this document as the target design, not as shipped behavior.
+
 ## Protocol
 - CC → Agent: `open_pty`, `write_pty`, `resize_pty`, `close_pty`.
 - Agent → CC: `pty-output`, `pty-exit` with `{sessionId}`.
@@ -73,4 +83,3 @@
   - Verify per-session ACL enforcement: unauthorized actor cannot attach; attempt is audited with `unauthorized`.
 - Cleanup
   - Idle timeout triggers server-side GC; session is closed and no residual resources leak.
-

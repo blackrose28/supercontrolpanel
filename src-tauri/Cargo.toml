@@ -29,6 +29,8 @@ tokio-tungstenite = "0.21"
 futures-util = "0.3"
 chrono = "0.4"
 rand = "0.8"
+flate2 = "1"
+regex = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Threading"] }

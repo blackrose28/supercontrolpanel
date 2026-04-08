@@ -3,7 +3,7 @@
 use std::sync::Mutex;
 
 mod cc;
-use cc::{get_cc_status, init_cc_connection};
+use cc::{get_cc_status, init_cc_connection, sync_cc_status_from_settings};
 use tauri::Manager;
 
 mod app_state;
@@ -15,7 +15,7 @@ mod stores;
 use mcp::{sync_mcp_runtime_from_settings, McpRuntimeState};
 use services::{load_sync_settings_from_disk, now_ms};
 use stores::{
-    BoundaryAutomationStore, FunctionStore, OpenVpnAdminStore,
+    BoundaryAutomationStore, CcRuntimeState, FunctionStore, OpenVpnAdminStore,
     OpenVpnReconnectStore, RemoteBrowserStore, ScpTransferStore, SessionStore,
 };
 
@@ -27,6 +27,7 @@ pub(crate) const SYNC_SETTINGS_FILE_NAME: &str = "sync-local.json";
 #[cfg(target_os = "windows")]
 pub(crate) const OPENVPN_HELPER_SCRIPT_NAME: &str = "openvpn-admin-helper.ps1";
 pub(crate) const BOUNDARY_AUTH_FUNCTION_ID: &str = "boundary-auth";
+pub(crate) const CC_FUNCTION_ID: &str = "cc-connection";
 pub(crate) const BOUNDARY_OIDC_WINDOW_LABEL: &str = "boundary-oidc-automation";
 
 pub(crate) fn server_tunnel_function_id(server_id: &str) -> String {
@@ -55,16 +56,15 @@ use commands::{
     close_pty, close_remote_browser, config_git_pull, config_git_push,
     create_remote_browser_directory, delete_remote_browser_path, delete_server,
     detect_openvpn_executable, get_app_config, get_config_paths, get_sync_settings,
-    list_function_statuses, list_remote_browser_children, list_servers,
-    mcp_call_tool_command, mcp_get_runtime_status, mcp_list_resources_command,
-    mcp_list_tools_command, mcp_read_resource_command, mcp_stop_runtime, mcp_sync_runtime,
-    open_pty, open_remote_browser, resize_pty, save_app_config, save_sync_settings,
-    upsert_server,
-    scp_download, scp_upload, search_boundary_targets, start_boundary_auth,
-    start_caddy_run, start_openvpn_function, start_scp_download, start_scp_upload,
-    start_server_rdp, start_server_ssh, start_server_tunnel, stat_remote_browser_path,
-    stop_boundary_auth, stop_caddy_run, stop_openvpn_function, stop_server_ssh,
-    stop_server_tunnel, sync_config_pull, sync_config_push, write_pty,
+    list_function_statuses, list_remote_browser_children, list_servers, mcp_call_tool_command,
+    mcp_get_runtime_status, mcp_list_resources_command, mcp_list_tools_command,
+    mcp_read_resource_command, mcp_stop_runtime, mcp_sync_runtime, open_pty, open_remote_browser,
+    resize_pty, save_app_config, save_sync_settings, scp_download, scp_upload,
+    search_boundary_targets, start_boundary_auth, start_caddy_run, start_openvpn_function,
+    start_scp_download, start_scp_upload, start_server_rdp, start_server_ssh, start_server_tunnel,
+    stat_remote_browser_path, stop_boundary_auth, stop_caddy_run, stop_openvpn_function,
+    stop_server_ssh, stop_server_tunnel, sync_config_pull, sync_config_push, upsert_server,
+    write_pty,
 };
 
 impl Default for FunctionStore {
@@ -80,7 +80,6 @@ impl Default for FunctionStore {
     }
 }
 
-
 fn main() {
     tauri::Builder::default()
         .manage(SessionStore::default())
@@ -91,10 +90,12 @@ fn main() {
         .manage(RemoteBrowserStore::default())
         .manage(ScpTransferStore::default())
         .manage(McpRuntimeState::default())
+        .manage(CcRuntimeState::default())
         .setup(|app| {
             let state = app.state::<McpRuntimeState>();
             let settings = load_sync_settings_from_disk(app.handle(), SYNC_SETTINGS_FILE_NAME)?;
             let _ = sync_mcp_runtime_from_settings(app.handle(), &state, &settings, now_ms);
+            let _ = sync_cc_status_from_settings(app.handle());
             if settings.cc_enabled {
                 let app_handle = app.handle().clone();
                 tauri::async_runtime::spawn(async move {

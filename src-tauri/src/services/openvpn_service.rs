@@ -426,11 +426,14 @@ pub fn emit_openvpn_log(app: &AppHandle, session_id: &str, function_id: &str, da
         session_id: session_id.to_string(),
         data,
     };
-    let _ = app.emit(
+    let _ = app.emit("openvpn-log", payload.clone());
+    forward_log_event(
+        app,
         "openvpn-log",
-        payload.clone(),
+        Some(session_id),
+        Some(function_id),
+        &payload,
     );
-    forward_log_event(app, "openvpn-log", Some(session_id), Some(function_id), &payload);
 }
 
 pub fn prepare_openvpn_start(

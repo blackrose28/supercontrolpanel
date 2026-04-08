@@ -1,6 +1,7 @@
 use tauri::{AppHandle, State};
 
 use crate::models::{RemoteBrowseEntry, RemoteBrowseNodeInfo, RemoteBrowseSession};
+use crate::server_tunnel_function_id;
 use crate::services::{
     close_remote_browser as close_remote_browser_service,
     close_remote_browser_sessions_for_server as close_remote_browser_sessions_for_server_service,
@@ -10,10 +11,9 @@ use crate::services::{
     open_remote_browser as open_remote_browser_service,
     stat_remote_browser_path as stat_remote_browser_path_service,
 };
+use crate::stores::{FunctionStore, RemoteBrowserStore};
 #[cfg(target_os = "windows")]
 use crate::CREATE_NO_WINDOW;
-use crate::server_tunnel_function_id;
-use crate::stores::{FunctionStore, RemoteBrowserStore};
 
 pub(crate) fn close_remote_browser_sessions_for_server(
     server_id: &str,

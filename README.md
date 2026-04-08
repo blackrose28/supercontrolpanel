@@ -12,7 +12,7 @@ Super Control Panel is a PTY-driven desktop control panel where each feature can
 
 - Basic Tauri + Vite project structure
 - Multi-page UI:
-  - **Status** page for all function runtime states (OpenVPN, Boundary auth, server tunnels/SSH)
+  - **Status** page for all function runtime states (OpenVPN, CC control plane, Boundary auth, server tunnels/SSH)
   - **OpenVPN** function page (first PTY-driven function)
   - **Caddy** page (runs `caddy run --config Caddyfile` in a configured folder)
   - **Servers** page for SSH/Boundary servers, tunnels, SSH, and SCP
@@ -61,9 +61,10 @@ Super Control Panel is a PTY-driven desktop control panel where each feature can
 
 ### Status page behavior
 
-- Shows a card for each function runtime (OpenVPN, Boundary auth, server tunnels/SSH).
+- Shows a card for each function runtime (OpenVPN, CC control plane, Boundary auth, server tunnels/SSH).
 - Each card includes a `Dismiss` action that hides just that current status entry for the rest of the app session. If that function later reports a different status, its card automatically reappears.
 - Cards are **clickable shortcuts**:
+  - Control plane card: navigates to the Config page and focuses the CC settings section.
   - OpenVPN card: navigates to the OpenVPN page, focuses the start button, and scrolls the VPN terminal into view.
   - Boundary auth card: navigates to the Boundary page, focuses the login button, and scrolls the Boundary terminal into view.
   - Server tunnel/SSH cards: are titled as **`Tunnel – {serverName}`** or **`SSH – {serverName}`**, navigate to the Servers page, select the corresponding server row, and scroll/focus that row while restoring its tunnel/SSH terminal scrollback. Once a tunnel or SSH session is explicitly stopped and its PTY torn down (idle state with no session), its card is hidden from the Status page to keep the list focused on active work.

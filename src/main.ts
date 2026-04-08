@@ -180,6 +180,7 @@ type ScpTransferEntry = {
 };
 
 const BOUNDARY_AUTH_FUNCTION_ID = "boundary-auth";
+const CC_FUNCTION_ID = "cc-connection";
 
 function mustElement<T extends Element>(selector: string): T {
   const node = document.querySelector<T>(selector);
@@ -324,7 +325,6 @@ const cfgCcServerUrl = mustElement<HTMLInputElement>("#cfg-cc-server-url");
 const cfgCcAuthMode = mustElement<HTMLSelectElement>("#cfg-cc-auth-mode");
 const cfgCcAgentToken = mustElement<HTMLInputElement>("#cfg-cc-agent-token");
 const cfgCcDeviceId = mustElement<HTMLInputElement>("#cfg-cc-device-id");
-const cfgCcStatus = mustElement<HTMLElement>("#cfg-cc-status");
 const cfgCcSaveBtn = mustElement<HTMLButtonElement>("#cfg-cc-save");
 const cfgCcReinitBtn = mustElement<HTMLButtonElement>("#cfg-cc-reinit");
 
@@ -746,6 +746,7 @@ const STATUS_CARD_TITLE: Record<string, string> = {
   [OPENVPN_FUNCTION_ID]: "OpenVPN",
   [CADDY_FUNCTION_ID]: "Caddy",
   [BOUNDARY_AUTH_FUNCTION_ID]: "Boundary Auth",
+  [CC_FUNCTION_ID]: "Control Plane",
 };
 
 function escapeHtml(s: string): string {
@@ -889,6 +890,15 @@ async function navigateFromStatusCard(functionId: string) {
         block: "start",
         behavior: "smooth",
       });
+    });
+    return;
+  }
+
+  if (functionId === CC_FUNCTION_ID) {
+    setActiveView("config");
+    requestAnimationFrame(() => {
+      cfgCcEnabled.focus();
+      cfgCcEnabled.scrollIntoView({ block: "center", behavior: "smooth" });
     });
     return;
   }
@@ -1075,34 +1085,14 @@ function readCcSettingsForm(): Partial<SyncSettings> {
   };
 }
 
-async function refreshCcStatus() {
-  try {
-    const status = await invoke<{
-      enabled: boolean;
-      serverUrl: string;
-      authMode?: string;
-      deviceId: string;
-      connected: boolean;
-    }>("get_cc_status");
-    if (!status.enabled) {
-      cfgCcStatus.textContent = "Disabled.";
-      return;
-    }
-    const deviceId = status.deviceId || "(no device)";
-    cfgCcStatus.textContent = status.connected
-      ? `Connected as ${deviceId}.`
-      : `Configured for ${deviceId} at ${status.serverUrl || "(no server)"}.`;
-  } catch (error) {
-    cfgCcStatus.textContent = `Status unavailable: ${String(error)}`;
-  }
-}
-
 async function saveCcSettings() {
   try {
     await saveSyncSettingsPatch(readCcSettingsForm());
-    cfgCcStatus.textContent = "CC settings saved.";
+    cfgStatus.textContent =
+      "CC settings saved. Check the Status page for connection state.";
+    await refreshStatuses();
   } catch (error) {
-    cfgCcStatus.textContent = `Save failed: ${String(error)}`;
+    cfgStatus.textContent = `Save failed: ${String(error)}`;
   }
 }
 
@@ -1110,10 +1100,10 @@ async function reinitCcConnection() {
   try {
     await saveSyncSettingsPatch(readCcSettingsForm());
     const result = await invoke<string>("init_cc_connection");
-    cfgCcStatus.textContent = result;
-    await refreshCcStatus();
+    cfgStatus.textContent = `${result}. Check the Status page for connection state.`;
+    await refreshStatuses();
   } catch (error) {
-    cfgCcStatus.textContent = `Re-init failed: ${String(error)}`;
+    cfgStatus.textContent = `Re-init failed: ${String(error)}`;
   }
 }
 
@@ -1188,7 +1178,6 @@ function renderConfigForm() {
   cfgCcDeviceId.value = syncSettings?.ccDeviceId ?? "";
   renderMcpSnippet();
   void refreshMcpRuntimeStatus();
-  void refreshCcStatus();
   renderConfigPreview();
 }
 
@@ -1334,7 +1323,6 @@ async function loadSyncSettings() {
   cfgCcDeviceId.value = syncSettings.ccDeviceId ?? "";
   renderMcpSnippet();
   await refreshMcpRuntimeStatus();
-  await refreshCcStatus();
 }
 
 type ConfigPaths = {

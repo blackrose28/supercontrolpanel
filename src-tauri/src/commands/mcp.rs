@@ -7,7 +7,9 @@ use crate::mcp::{
     McpRuntimeStatus, McpToolCallEnvelope, McpToolDescriptor,
 };
 use crate::services::{config_file_path, load_sync_settings_from_disk, now_ms, ConfigPaths};
-use crate::{BOUNDARY_AUTH_FUNCTION_ID, CONFIG_FILE_NAME, OPENVPN_FUNCTION_ID, SYNC_SETTINGS_FILE_NAME};
+use crate::{
+    BOUNDARY_AUTH_FUNCTION_ID, CONFIG_FILE_NAME, OPENVPN_FUNCTION_ID, SYNC_SETTINGS_FILE_NAME,
+};
 
 pub(crate) fn get_config_paths_internal(app: &AppHandle) -> Result<ConfigPaths, String> {
     let path = config_file_path(app, CONFIG_FILE_NAME)?;
@@ -65,7 +67,10 @@ pub fn mcp_call_tool_command(
 }
 
 #[tauri::command]
-pub fn mcp_read_resource_command(app: AppHandle, uri: String) -> Result<McpToolCallEnvelope, String> {
+pub fn mcp_read_resource_command(
+    app: AppHandle,
+    uri: String,
+) -> Result<McpToolCallEnvelope, String> {
     read_mcp_resource(
         &app,
         &uri,

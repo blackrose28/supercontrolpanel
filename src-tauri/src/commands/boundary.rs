@@ -1,29 +1,25 @@
 use std::{
-    path::PathBuf,
-    process::Command,
-    sync::atomic::AtomicBool,
-    sync::Arc,
-    thread,
-    time::Duration,
+    path::PathBuf, process::Command, sync::atomic::AtomicBool, sync::Arc, thread, time::Duration,
 };
 
+use serde_json;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-use serde_json;
 use tauri::{AppHandle, Manager, State};
 
+use super::{
+    boundary_token_summary, load_app_config_from_disk, update_functions_for_session_exit,
+    upsert_boundary_status, upsert_function_status,
+};
 use crate::models::{BoundaryConfig, BoundaryTargetSummary, StartFunctionResult};
 use crate::services::{
-    apply_boundary_env, apply_boundary_env_builder,
-    apply_boundary_token_arg_if_present, apply_boundary_token_arg_if_present_builder,
-    boundary_addr_base, boundary_cli_path, boundary_http_client,
-    close_pty_internal, complete_boundary_automation_session
-        as complete_boundary_automation_session_service,
-    emit_pty_exit, emit_pty_output_line,
-    generate_totp_code, keyring_set_or_delete, lock_err,
-    open_pty_with_command_builder, passive_pty_command,
-    prepare_boundary_auth_start,
-    boundary_oidc_init_script as boundary_oidc_init_script_service,
+    apply_boundary_env, apply_boundary_env_builder, apply_boundary_token_arg_if_present,
+    apply_boundary_token_arg_if_present_builder, boundary_addr_base, boundary_cli_path,
+    boundary_http_client, boundary_oidc_init_script as boundary_oidc_init_script_service,
+    close_pty_internal,
+    complete_boundary_automation_session as complete_boundary_automation_session_service,
+    emit_pty_exit, emit_pty_output_line, generate_totp_code, keyring_set_or_delete, lock_err,
+    open_pty_with_command_builder, passive_pty_command, prepare_boundary_auth_start,
     run_boundary_oidc_automation as run_boundary_oidc_automation_service,
     stop_boundary_auth as stop_boundary_auth_service,
     stop_boundary_automation_session as stop_boundary_automation_session_service,
@@ -32,13 +28,9 @@ use crate::services::{
 use crate::stores::{
     BoundaryAutomationSession, BoundaryAutomationStore, FunctionStore, SessionStore,
 };
-use crate::{BOUNDARY_AUTH_FUNCTION_ID, BOUNDARY_OIDC_WINDOW_LABEL};
 #[cfg(target_os = "windows")]
 use crate::CREATE_NO_WINDOW;
-use super::{
-    boundary_token_summary, load_app_config_from_disk, update_functions_for_session_exit,
-    upsert_boundary_status, upsert_function_status,
-};
+use crate::{BOUNDARY_AUTH_FUNCTION_ID, BOUNDARY_OIDC_WINDOW_LABEL};
 
 fn boundary_oidc_init_script(cfg: &BoundaryConfig) -> String {
     boundary_oidc_init_script_service(cfg, generate_totp_code)

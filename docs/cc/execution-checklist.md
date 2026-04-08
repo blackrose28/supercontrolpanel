@@ -19,7 +19,7 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 ### CC Server (NestJS)
 - ✅ Project scaffold (NestJS + TypeScript)
 - ✅ WebSocket `/agent` endpoint (subprotocol `scp.cc.v1`)
-- ✅ In-memory stores: `devices`, `sessions`
+- ✅ Device records are persisted in SQLite; live WS sessions remain in-memory
 - ✅ HTTP Admin API: `GET /v1/devices`, `GET /v1/devices/:id`, `GET /v1/health`
 - ✅ Simple Admin page (server-rendered): device list with `id`, `name`, `lastSeenAt`, `status`
 - ✅ Enrollment: `POST /v1/enroll` (bootstrap token → `{ deviceId, ccAgentToken }`)
@@ -35,7 +35,7 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ### Frontend (Vite/TypeScript)
 - ✅ Config page: Control plane section (URL, token, enable toggle)
-- ✅ Status pill: CC connection state
+- ✅ CC connection state is shown on the Status page as a normal runtime card
 
 ### Acceptance Criteria
 - ✅ Secure WS connect succeeds with valid token; rejected with clear error when invalid
@@ -55,12 +55,12 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ### Agent
 - ✅ Subscribe to Tauri events: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`
-- ⬜ Batching (10–50 ms / 8–16 KB)
-- 🟨 Retry/buffer queue implemented in-memory; durable disk-backed encrypted queue still pending
-- ⬜ Adaptive throttling (256 KB/s cap, leaky-bucket)
-- ⬜ Compression (gzip frames > 8 KB if negotiated)
-- ⬜ Chunking (oversize events with `{chunkIndex, totalChunks}`)
-- ⬜ Redaction (apply Phase 2 redaction matrix before enqueue)
+- ✅ Batching (15 ms / 16 KB max batch to `POST /v1/logs`)
+- 🟨 Retry/buffer queue implemented in-memory; durable disk layout/manifest scaffold is in place, but persisted enqueue/send/ack is still pending (tracked in `docs/cc/cc-phase-2-durable-queue-checklist.md`)
+- ✅ Adaptive throttling (256 KB/s soft cap via leaky-bucket; extra cooldown on HTTP 429/5xx)
+- ✅ Compression (gzip HTTP ingest bodies > 8 KB to `POST /v1/logs`; WS-negotiated gzip still deferred)
+- ✅ Chunking (oversize telemetry events split into ordered chunk records with `{chunkIndex, totalChunks}`)
+- ✅ Redaction (structured secret fields + common password/OTP/token text patterns scrubbed before enqueue)
 
 ### CC Server
 - ✅ Ingest: `POST /v1/logs`
@@ -73,15 +73,15 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ### Acceptance Criteria
 - ✅ Live logs appear in Admin UI end-to-end
-- 🟨 Backfill: reconnect replays buffered events from current in-memory agent queue; durable replay across agent restarts still pending
+- 🟨 Backfill: reconnect replays buffered events from current in-memory agent queue; durable queue layout exists, but replay across agent restarts still pending
 - ⬜ Ordering holds per `(deviceId, sessionId, type)` under burst
 - ⬜ Redaction: no secrets in SSE or stored rows
-- ⬜ Disk queue survives process restarts
+- ⬜ Disk queue survives process restarts (see `docs/cc/cc-phase-2-durable-queue-checklist.md`)
 
 ---
 
-**Last Updated:** 2026-04-07T00:00:00Z
-**Status:** Phase 1 complete; Phase 2 core telemetry/admin slice implemented; Phase 3 safe-control slice is in progress with status/inventory/recent-logs/OpenVPN-restart already implemented
+**Last Updated:** 2026-04-08T00:00:00Z
+**Status:** Phase 1 agent/server bootstrap is implemented end-to-end; Phase 2 core telemetry/admin slice is implemented; Phase 3 safe-control slice is in progress with status/inventory/recent-logs/OpenVPN-restart implemented; Phase 4 interactive PTY remains design-only
 
 ---
 
@@ -109,7 +109,7 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 - ⬜ Add `POST /v1/commands`
 - ⬜ Add `GET /v1/commands`
 - ⬜ Add `GET /v1/commands/:id`
-- ⬜ Push commands over `/agent` websocket
+- 🟨 Device-scoped control endpoints already push the current safe command set over `/agent`; generic command persistence/endpoints are still pending
 - ⬜ Track command audit entries with actor, device, payload summary, timestamps, outcome
 - ⬜ Add idempotency by `commandId`
 - ⬜ Reconcile stale in-flight commands after reconnect/lost agent

@@ -1,12 +1,12 @@
 use tauri::{AppHandle, State};
 
+use super::{update_functions_for_session_exit, upsert_function_status};
 use crate::models::StartFunctionResult;
 use crate::services::{
     close_pty_internal, emit_pty_exit, lock_err, open_pty_with_command_builder,
     start_caddy_run as start_caddy_run_service, stop_caddy_run as stop_caddy_run_service,
 };
 use crate::stores::{FunctionStore, SessionStore};
-use super::{update_functions_for_session_exit, upsert_function_status};
 use crate::CADDY_FUNCTION_ID;
 
 pub(crate) fn start_caddy_action(
