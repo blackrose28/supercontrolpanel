@@ -391,8 +391,8 @@ Once Phase 1 is verified and hardened:
 
 2. **Proceed to Phase 2 (Telemetry)**
   - Implement `POST /v1/logs` ingest endpoint
-  - Set up ClickHouse table with partitioning
-  - Keep using SQLite as the current implementation baseline until ClickHouse is actually introduced
+  - Set up SQLite-backed telemetry storage and retention
+  - Add the initial query/export paths on top of SQLite
    - Add SSE endpoint `GET /v1/logs/stream?deviceId=...`
    - Wire Agent to forward `pty-output`, `pty-exit`, `openvpn-log` events
 

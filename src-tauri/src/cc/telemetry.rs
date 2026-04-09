@@ -10,7 +10,7 @@ use std::{
 
 use flate2::{write::GzEncoder, Compression};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
@@ -42,6 +42,22 @@ const TELEMETRY_RATE_BYTES_PER_SEC: f64 = 256.0 * 1024.0;
 const TELEMETRY_BURST_BYTES: f64 = TELEMETRY_RATE_BYTES_PER_SEC * 5.0;
 const TELEMETRY_SERVER_BACKOFF_DEFAULT_MS: u64 = 1_000;
 const TELEMETRY_SERVER_BACKOFF_MAX_MS: u64 = 5_000;
+
+
+#[derive(Debug, Deserialize)]
+struct TelemetryNackResponse {
+    #[serde(rename = "type")]
+    msg_type: Option<String>,
+    payload: Option<TelemetryNackPayload>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TelemetryNackPayload {
+    #[serde(rename = "rate_limited")]
+    rate_limited: Option<bool>,
+    #[serde(rename = "retryAfterMs")]
+    retry_after_ms: Option<u64>,
+}
 
 struct TelemetryThrottleState {
     tokens: f64,
@@ -179,17 +195,30 @@ fn ensure_telemetry_worker_started(app: AppHandle) {
                     );
                 }
                 Ok(response) => {
-                    let retry_after = parse_retry_after_ms(response.headers());
-                    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
-                        || response.status().is_server_error()
-                    {
+                    let status = response.status();
+                    let retry_after_header = parse_retry_after_ms(response.headers());
+                    let nack = parse_nack_response(response).await;
+                    let retry_after = nack
+                        .as_ref()
+                        .and_then(|payload| payload.retry_after_ms)
+                        .or(retry_after_header);
+                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
                         apply_server_backoff(retry_after);
                     }
-                    schedule_retry(
-                        queue,
-                        batch.count,
-                        format!("server returned {}", response.status()),
-                    );
+                    let reason = if let Some(payload) = nack {
+                        if payload.rate_limited.unwrap_or(false) {
+                            format!(
+                                "server returned {} (rate_limited, retryAfterMs={})",
+                                status,
+                                payload.retry_after_ms.unwrap_or(TELEMETRY_SERVER_BACKOFF_DEFAULT_MS)
+                            )
+                        } else {
+                            format!("server returned {}", status)
+                        }
+                    } else {
+                        format!("server returned {}", status)
+                    };
+                    schedule_retry(queue, batch.count, reason);
                 }
                 Err(err) => {
                     apply_server_backoff(None);
@@ -294,6 +323,14 @@ fn parse_retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     let text = value.to_str().ok()?.trim();
     let seconds = text.parse::<u64>().ok()?;
     Some(seconds.saturating_mul(1_000))
+}
+
+async fn parse_nack_response(response: reqwest::Response) -> Option<TelemetryNackPayload> {
+    let body = response.json::<TelemetryNackResponse>().await.ok()?;
+    if body.msg_type.as_deref()? != "nack" {
+        return None;
+    }
+    body.payload
 }
 
 fn should_drop_batch_after_status(status: reqwest::StatusCode) -> bool {
@@ -544,7 +581,7 @@ fn redact_sensitive_string(input: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::should_drop_batch_after_status;
+    use super::{parse_retry_after_ms, should_drop_batch_after_status};
 
     #[test]
     fn unauthorized_and_forbidden_drop_queued_records() {
@@ -560,6 +597,13 @@ mod tests {
         assert!(!should_drop_batch_after_status(
             reqwest::StatusCode::INTERNAL_SERVER_ERROR
         ));
+    }
+
+    #[test]
+    fn parses_retry_after_header_as_milliseconds() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert(reqwest::header::RETRY_AFTER, "2".parse().unwrap());
+        assert_eq!(parse_retry_after_ms(&headers), Some(2_000));
     }
 }
 

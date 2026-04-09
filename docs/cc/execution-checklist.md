@@ -64,24 +64,24 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ### CC Server
 - ✅ Ingest: `POST /v1/logs`
-- 🟨 Durable storage implemented with SQLite (current Phase 2 implementation); ClickHouse remains deferred
+- ✅ Durable storage implemented with SQLite as the chosen Phase 2 telemetry store
 - ✅ SSE: `GET /v1/logs/stream?deviceId=...`
 - ✅ History API: `GET /v1/logs`, `GET /v1/logs/export`
 - ✅ Admin telemetry UI: filters, search, export, alerts, runtime summaries
-- ⬜ Backpressure: `nack { rate_limited: true, retryAfterMs }` when saturated
-- 🟨 Inventory summary path exists; full inventory cadence/request flow still pending
+- ✅ Backpressure: `nack { rate_limited: true, retryAfterMs }` when saturated
+- ✅ Inventory summary path exists; full inventory cadence/request flow is implemented
 
 ### Acceptance Criteria
 - ✅ Live logs appear in Admin UI end-to-end
 - ✅ Backfill: reconnect and restart replay now come from the rotated encrypted disk queue, with validation coverage in `docs/cc/cc-phase-2-durable-queue-checklist.md`
 - ✅ Ordering holds per `(deviceId, sessionId, type)` in the agent queue validation suite
-- ⬜ Redaction: no secrets in SSE or stored rows
+- ✅ Redaction: no secrets in SSE or stored rows
 - ✅ Disk queue survives process restarts (see `docs/cc/cc-phase-2-durable-queue-checklist.md`)
 
 ---
 
-**Last Updated:** 2026-04-08T00:00:00Z
-**Status:** Phase 1 agent/server bootstrap is implemented end-to-end; Phase 2 core telemetry/admin slice is implemented; Phase 3 safe-control slice is in progress with status/inventory/recent-logs/OpenVPN-restart implemented; Phase 4 interactive PTY remains design-only
+**Last Updated:** 2026-04-09T00:00:00Z
+**Status:** Phase 1 agent/server bootstrap is implemented end-to-end; Phase 2 core telemetry/admin slice is implemented; Phase 3 safe-control slice now includes durable command history, lifecycle/audit tracking, idempotent replay protection, reconnect reconciliation, and the current safe command set; Phase 4 interactive PTY remains design-only
 
 ---
 
@@ -95,54 +95,57 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 1. request fresh `status_snapshot`
 2. request fresh `inventory`
 3. one low-risk start/stop command mapped to an existing Tauri command
-4. command lifecycle + audit trail
-5. idempotency + reconnect reconciliation
+4. command persistence + lifecycle read APIs
+5. audit trail + idempotency + reconnect reconciliation
 
 ### CC Server
-- ⬜ Add command store (`commands`) with lifecycle state:
+- ✅ Add command store (`commands`) with lifecycle state:
   - `queued`
   - `dispatched`
   - `executing`
   - `succeeded`
   - `failed`
   - `canceled`
-- ⬜ Add `POST /v1/commands`
-- ⬜ Add `GET /v1/commands`
-- ⬜ Add `GET /v1/commands/:id`
-- 🟨 Device-scoped control endpoints already push the current safe command set over `/agent`; generic command persistence/endpoints are still pending
-- ⬜ Track command audit entries with actor, device, payload summary, timestamps, outcome
-- ⬜ Add idempotency by `commandId`
-- ⬜ Reconcile stale in-flight commands after reconnect/lost agent
+- ✅ Add `POST /v1/commands`
+- ✅ Add `GET /v1/commands`
+- ✅ Add `GET /v1/commands/:id`
+- ✅ Add `GET /v1/commands/:id/audit`
+- ✅ Device-scoped control endpoints now create durable command rows and dispatch the current safe command set over `/agent`
+- ✅ Make existing device-scoped control endpoints create durable command rows and return `{ command }`
+- ✅ Track command audit entries with actor, device, payload summary, lifecycle timestamps, outcome
+- ✅ Add idempotent command replay/conflict handling by `commandId`
+- ✅ Reconcile stale in-flight commands after reconnect/lost agent
 
 ### Agent (Tauri/Rust)
 - 🟨 Extend CC protocol handling for server → agent messages
 - 🟨 Add command dispatcher in `src-tauri/src/cc/`
 - 🟨 Map safe server commands to existing local actions
-- ⬜ Emit lifecycle updates back to CC:
-  - dispatch ack/nack
+- 🟨 Emit lifecycle updates back to CC via explicit `command_status` frames:
+  - acknowledged
   - executing
   - terminal result
-- ⬜ Add duplicate command suppression by `commandId`
+- ✅ Add duplicate command suppression by `commandId` with TTL cache
 - ⬜ Add timeout handling for non-terminal commands
 
 ### Admin / API
 - ✅ Add a minimal HTTP/admin flow for safe control testing
-- 🟨 Show latest outcomes indirectly through telemetry/runtime summary views
-- ⬜ Show full command history and lifecycle as a first-class command list
+- ✅ Show latest outcomes through command history, audit entries, and telemetry/runtime views
+- ✅ Show recent command history and audit entries as a first-class per-device list
 
 ### First safe command set
 - ✅ `request_status_snapshot`
 - ✅ `request_inventory`
 - ✅ `request_recent_logs`
 - ✅ `restart_openvpn`
-- ⬜ next one of:
-  - `restart_boundary_auth`
-  - `restart_server_tunnel`
-  - `restart_server_ssh`
+- ✅ `restart_boundary_auth`
+- ✅ `restart_server_tunnel`
+- ✅ `restart_server_ssh`
 
 ### Acceptance Criteria
-- 🟨 Server can trigger implemented safe commands and see deterministic outcomes through telemetry/runtime state
-- 🟨 Agent executes current safe commands reliably under retry/reconnect conditions
-- ⬜ Duplicate `commandId` does not produce duplicate side effects
+- ✅ Server can trigger implemented safe commands and see deterministic outcomes through lifecycle/audit state
+- ✅ Agent executes current safe commands reliably under retry/reconnect conditions
+- ✅ Each accepted control request returns a durable `commandId`
+- ✅ Explicit `command_status` lifecycle updates flow end-to-end for the current safe command set
+- ✅ Duplicate `commandId` does not produce duplicate side effects
 - 🟨 Reconnect-related OpenVPN restart issues were addressed in the current helper-based implementation
-- ⬜ Audit trail matches actual executed actions
+- ✅ Audit trail matches actual executed actions

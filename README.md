@@ -58,6 +58,9 @@ Super Control Panel is a PTY-driven desktop control panel where each feature can
     - request inventory
     - request recent logs
     - restart OpenVPN
+    - restart Boundary auth
+    - restart server tunnel
+    - restart server SSH
 
 ### Status page behavior
 

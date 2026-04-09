@@ -22,8 +22,8 @@
 
 ## Backups & restore
 ### Backup strategy
-- ClickHouse: daily full snapshot + incremental WAL; retention 30d; stored in S3-compatible object store with versioning enabled.
-- Postgres (if used): daily full + WAL archiving; PITR snapshots hourly; retention 30d.
+- SQLite: scheduled hot backups of the database file plus periodic validated restore snapshots; retention 30d; store encrypted backups in S3-compatible object storage with versioning enabled.
+- If a future relational sidecar is introduced for scale, apply the same backup/PITR discipline there as needed.
 - Object store (recordings, exports): versioning on; lifecycle policy moves to Glacier after 90d.
 - Secrets (KMS keys, agent tokens): backup via KMS native replication; rotation runbooks tested quarterly.
 
@@ -32,8 +32,8 @@
 - RTO target: ≤ 1 h (restore + validation + cutover).
 - Runbook steps:
   1. Identify restore point (timestamp or WAL position).
-  2. Provision new ClickHouse/Postgres instance from snapshot.
-  3. Replay WAL to target point.
+  2. Restore the SQLite database snapshot to a clean host or volume.
+  3. Apply the latest backup increment/export set if the backup workflow uses them.
   4. Validate data integrity (row counts, sample queries, audit chain).
   5. Cutover DNS/load balancer; monitor for anomalies.
 - Drill cadence: quarterly; drill reports archived with lessons learned.
@@ -53,7 +53,7 @@
 - Network flap: disconnect 10% of agents for 30s; verify reconnect with backoff and replay without duplicates.
 - Packet loss: inject 5% packet loss on WS path; verify graceful degradation and recovery within SLOs.
 - Server restart: rolling restart of CC instances; verify zero data loss and <5s reconnect per agent.
-- DB failover: trigger ClickHouse/Postgres failover; verify writes resume within 30s and queries within 10s.
+- DB recovery: restore the SQLite database on a replacement host/volume; verify writes resume within 30s and queries within 10s.
 - Disk full: fill agent queue disk to 95%; verify drop-oldest policy and recovery after space freed.
 - Clock skew: introduce ±5 min skew on agent; verify token grace window prevents false expiry.
 
@@ -94,13 +94,13 @@
 ## Deployment
 
 ### Containerization
-- CC Server: Docker image with NestJS + ClickHouse client; multi-stage build; base image: node:20-alpine.
+- CC Server: Docker image with NestJS + SQLite runtime support; multi-stage build; base image: node:20-alpine.
 - Agent: bundled in Tauri app; no separate container (desktop app).
 - Admin UI: static build served via Nginx or CDN; CSP headers enforced.
 
 ### Database migrations
-- ClickHouse: schema versioning via migration scripts; applied on startup with lock to prevent concurrent runs.
-- Postgres (if used): Flyway or similar; versioned migrations; rollback scripts tested in staging.
+- SQLite: schema versioning via migration scripts; applied on startup with locking to prevent concurrent runs.
+- Any future auxiliary database should follow the same versioned migration discipline, with rollback tested in staging.
 - Migration strategy: additive-only changes preferred; breaking changes require blue/green deployment.
 
 ### Rollout strategy

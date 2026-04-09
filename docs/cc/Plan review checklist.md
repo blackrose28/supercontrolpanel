@@ -67,7 +67,7 @@ Use this checklist to harden and complete the CC design before implementation. W
 - [x] API versioning and deprecation policy (see `docs/cc/cc-protocol.md` → "REST API versioning and deprecation")
 
 ## Deployment
-- [x] Containerization; database migrations (ClickHouse strategy) (see `docs/cc/cc-phase-7-ops.md` → "Deployment")
+- [x] Containerization; database migrations/backup strategy for the chosen SQLite-based server deployment (see `docs/cc/cc-phase-7-ops.md` → "Deployment")
 - [x] Blue/green or canary rollout; configuration management (12-factor) (see `docs/cc/cc-phase-7-ops.md` → "Deployment")
 - [x] Server secrets management (Vault/KMS); rotation runbooks (see `docs/cc/cc-phase-7-ops.md` → "Deployment" → "Server secrets management")
 

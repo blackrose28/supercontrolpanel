@@ -11,6 +11,8 @@ pub struct Envelope {
     pub ts: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub payload: Option<Value>,
+    #[serde(rename = "commandId", skip_serializing_if = "Option::is_none")]
+    pub command_id: Option<String>,
     #[serde(rename = "reqSeq", skip_serializing_if = "Option::is_none")]
     pub req_seq: Option<u64>,
 }
@@ -28,6 +30,10 @@ pub enum MessageType {
     RequestInventory,
     RequestRecentLogs,
     RequestRestartOpenvpn,
+    RequestRestartBoundaryAuth,
+    RequestRestartServerTunnel,
+    RequestRestartServerSsh,
+    CommandStatus,
     FunctionStatus,
     Unknown(String),
 }
@@ -46,6 +52,10 @@ impl From<&str> for MessageType {
             "request_inventory" => MessageType::RequestInventory,
             "request_recent_logs" => MessageType::RequestRecentLogs,
             "request_restart_openvpn" => MessageType::RequestRestartOpenvpn,
+            "request_restart_boundary_auth" => MessageType::RequestRestartBoundaryAuth,
+            "request_restart_server_tunnel" => MessageType::RequestRestartServerTunnel,
+            "request_restart_server_ssh" => MessageType::RequestRestartServerSsh,
+            "command_status" => MessageType::CommandStatus,
             "function-status" => MessageType::FunctionStatus,
             other => MessageType::Unknown(other.to_string()),
         }
@@ -60,6 +70,7 @@ impl Envelope {
             seq,
             ts: chrono::Utc::now().to_rfc3339(),
             payload,
+            command_id: None,
             req_seq: None,
         }
     }
@@ -94,5 +105,16 @@ impl Envelope {
 
     pub fn recent_logs(device_id: String, seq: u64, logs: Value) -> Self {
         Self::new("recent_logs", device_id, seq, Some(logs))
+    }
+
+    pub fn command_status(
+        device_id: String,
+        seq: u64,
+        command_id: String,
+        status: Value,
+    ) -> Self {
+        let mut envelope = Self::new("command_status", device_id, seq, Some(status));
+        envelope.command_id = Some(command_id);
+        envelope
     }
 }

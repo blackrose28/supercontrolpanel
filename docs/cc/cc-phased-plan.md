@@ -8,7 +8,7 @@
 ## Phase 2 — Telemetry
 - Stream `pty-output`, `openvpn-log`.
 - Persist logs and expose SSE/history for UI stream.
-- Current implementation uses SQLite; ClickHouse remains a later upgrade path if volume demands it.
+- Current implementation uses SQLite, and SQLite is the planned telemetry store for this project.
 
 ## Phase 3 — Core Control
 - Implement low-risk server → agent control commands first.
@@ -17,8 +17,11 @@
   - `request_inventory`
   - `request_recent_logs`
   - `restart_openvpn`
+  - `restart_boundary_auth`
+  - `restart_server_tunnel`
+  - `restart_server_ssh`
 - On Windows, `restart_openvpn` now reuses the already-running elevated helper so restart does not require a fresh UAC prompt.
-- Remaining work can expand to Boundary / tunnel / SSH restart controls and, later, a fuller audit / command-store model.
+- Remaining work should now add a durable command-store / lifecycle / audit model around the implemented safe command set.
 
 ## Phase 4 — Interactive PTY
 - Remote PTY control; admin live terminal view.
@@ -36,7 +39,7 @@
 - Metrics, dashboards, backups, log retention, alerts.
 
 ## Tech Choices
-- Server: Node (NestJS). Current persistence is SQLite; Redis/ClickHouse remain future scale-up options.
+- Server: Node (NestJS). Current persistence is SQLite; Redis remains an optional future scale-up helper if needed.
 - Admin UI: Vite + React (or server-rendered + htmx).
 - Observability: OpenTelemetry + JSON logs + Sentry.
 

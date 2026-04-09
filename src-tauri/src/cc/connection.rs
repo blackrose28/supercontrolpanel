@@ -2,12 +2,13 @@ use futures_util::{SinkExt, StreamExt};
 use rand::Rng;
 use serde_json::json;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::io::{Error as IoError, ErrorKind};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tokio::sync::Mutex;
-use tokio::time::{interval, sleep, Duration};
+use tokio::time::{interval, sleep, Duration, Instant};
 use tokio_tungstenite::{
     connect_async,
     tungstenite::{client::IntoClientRequest, Message},
@@ -16,9 +17,16 @@ use tokio_tungstenite::{
 use super::commands::set_cc_status;
 use super::protocol::{Envelope, MessageType};
 use super::telemetry::recent_log_events;
-use crate::commands::openvpn::restart_openvpn_action;
+use crate::commands::{
+    boundary::restart_boundary_auth_action,
+    openvpn::restart_openvpn_action,
+    server::{restart_server_ssh_action, restart_server_tunnel_action},
+};
 use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
 use crate::stores::CcRuntimeState;
+
+const INVENTORY_PUBLISH_INTERVAL_SECS: u64 = 5 * 60;
+const INVENTORY_CHANGE_POLL_SECS: u64 = 30;
 
 pub struct CcConnection {
     server_url: String,
@@ -27,6 +35,7 @@ pub struct CcConnection {
     app: AppHandle,
     generation: u64,
     seq: Arc<Mutex<u64>>,
+    recent_command_ids: Arc<Mutex<HashMap<String, u64>>>,
 }
 
 impl CcConnection {
@@ -44,6 +53,7 @@ impl CcConnection {
             app,
             generation,
             seq: Arc::new(Mutex::new(0)),
+            recent_command_ids: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -134,7 +144,8 @@ impl CcConnection {
 
         // Send initial status_snapshot
         Self::send_status_snapshot(&mut write, &self.device_id, &self.seq).await?;
-        Self::send_inventory(&mut write, &self.device_id, &self.seq, &self.app).await?;
+        let initial_inventory_hash =
+            Self::send_inventory(&mut write, &self.device_id, &self.seq, &self.app).await?;
 
         // Start heartbeat task
         let device_id = self.device_id.clone();
@@ -176,15 +187,97 @@ impl CcConnection {
             }
         });
 
+        let inventory_device_id = self.device_id.clone();
+        let inventory_seq = self.seq.clone();
+        let inventory_app = self.app.clone();
+        let inventory_generation = self.generation;
+        let inventory_write = write_clone.clone();
+
+        tokio::spawn(async move {
+            let mut inventory_interval = interval(Duration::from_secs(INVENTORY_CHANGE_POLL_SECS));
+            let mut last_inventory_hash = initial_inventory_hash;
+            let mut last_inventory_sent_at = Instant::now();
+
+            loop {
+                inventory_interval.tick().await;
+
+                if !inventory_app.state::<CcRuntimeState>().is_connected()
+                    || !inventory_app
+                        .state::<CcRuntimeState>()
+                        .is_generation_current(inventory_generation)
+                {
+                    break;
+                }
+
+                let Ok(current_hash) = Self::compute_inventory_hash(&inventory_app) else {
+                    continue;
+                };
+                if current_hash == last_inventory_hash
+                    && last_inventory_sent_at.elapsed()
+                        < Duration::from_secs(INVENTORY_PUBLISH_INTERVAL_SECS)
+                {
+                    continue;
+                }
+
+                let mut w = inventory_write.lock().await;
+                match Self::send_inventory(&mut *w, &inventory_device_id, &inventory_seq, &inventory_app)
+                    .await
+                {
+                    Ok(sent_hash) => {
+                        last_inventory_hash = sent_hash;
+                        last_inventory_sent_at = Instant::now();
+                    }
+                    Err(err) => {
+                        eprintln!("CC periodic inventory send failed: {}", err);
+                        break;
+                    }
+                }
+            }
+        });
+
         // Read messages from server
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(Message::Text(text)) => {
                     if let Ok(envelope) = serde_json::from_str::<Envelope>(&text) {
                         println!("Received from CC: type={}", envelope.msg_type);
+                        if let Some(command_id) = envelope.command_id.clone() {
+                            if self.is_duplicate_command(&command_id).await {
+                                let mut w = write_clone.lock().await;
+                                let _ = Self::send_command_status(
+                                    &mut *w,
+                                    &self.device_id,
+                                    &self.seq,
+                                    &command_id,
+                                    "acknowledged",
+                                    Some("duplicate_suppressed".to_string()),
+                                    Some("DUPLICATE_COMMAND".to_string()),
+                                    Some(
+                                        "Duplicate commandId received recently; side effects were suppressed."
+                                            .to_string(),
+                                    ),
+                                )
+                                .await;
+                                continue;
+                            }
+                        }
                         if let MessageType::RequestStatusSnapshot =
                             MessageType::from(envelope.msg_type.as_str())
                         {
+                            if let Some(command_id) = envelope.command_id.clone() {
+                                let mut w = write_clone.lock().await;
+                                let _ = Self::send_command_status(
+                                    &mut *w,
+                                    &self.device_id,
+                                    &self.seq,
+                                    &command_id,
+                                    "acknowledged",
+                                    None,
+                                    None,
+                                    None,
+                                )
+                                .await;
+                            }
                             let mut w = write_clone.lock().await;
                             if let Err(err) =
                                 Self::send_status_snapshot(&mut *w, &self.device_id, &self.seq)
@@ -196,6 +289,20 @@ impl CcConnection {
                         } else if let MessageType::RequestInventory =
                             MessageType::from(envelope.msg_type.as_str())
                         {
+                            if let Some(command_id) = envelope.command_id.clone() {
+                                let mut w = write_clone.lock().await;
+                                let _ = Self::send_command_status(
+                                    &mut *w,
+                                    &self.device_id,
+                                    &self.seq,
+                                    &command_id,
+                                    "acknowledged",
+                                    None,
+                                    None,
+                                    None,
+                                )
+                                .await;
+                            }
                             let mut w = write_clone.lock().await;
                             if let Err(err) =
                                 Self::send_inventory(&mut *w, &self.device_id, &self.seq, &self.app)
@@ -207,6 +314,20 @@ impl CcConnection {
                         } else if let MessageType::RequestRecentLogs =
                             MessageType::from(envelope.msg_type.as_str())
                         {
+                            if let Some(command_id) = envelope.command_id.clone() {
+                                let mut w = write_clone.lock().await;
+                                let _ = Self::send_command_status(
+                                    &mut *w,
+                                    &self.device_id,
+                                    &self.seq,
+                                    &command_id,
+                                    "acknowledged",
+                                    None,
+                                    None,
+                                    None,
+                                )
+                                .await;
+                            }
                             let mut w = write_clone.lock().await;
                             if let Err(err) =
                                 Self::send_recent_logs(&mut *w, &self.device_id, &self.seq).await
@@ -217,12 +338,365 @@ impl CcConnection {
                         } else if let MessageType::RequestRestartOpenvpn =
                             MessageType::from(envelope.msg_type.as_str())
                         {
+                            let command_id = envelope.command_id.clone();
                             let app = self.app.clone();
-                            std::thread::spawn(move || {
-                                if let Err(err) = restart_openvpn_action(app) {
-                                    eprintln!("CC restart_openvpn failed: {}", err);
+                            let device_id = self.device_id.clone();
+                            let seq = self.seq.clone();
+                            let write_for_status = write_clone.clone();
+                            tokio::spawn(async move {
+                                if let Some(command_id) = command_id.clone() {
+                                    let mut w = write_for_status.lock().await;
+                                    let _ = Self::send_command_status(
+                                        &mut *w,
+                                        &device_id,
+                                        &seq,
+                                        &command_id,
+                                        "executing",
+                                        Some("restart_openvpn".to_string()),
+                                        None,
+                                        None,
+                                    )
+                                    .await;
+                                }
+                                let result =
+                                    tokio::task::spawn_blocking(move || restart_openvpn_action(app))
+                                        .await;
+                                if let Some(command_id) = command_id {
+                                    let mut w = write_for_status.lock().await;
+                                    match result {
+                                        Ok(Ok(())) => {
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "succeeded",
+                                                Some("restart_openvpn".to_string()),
+                                                None,
+                                                None,
+                                            )
+                                            .await;
+                                        }
+                                        Ok(Err(err)) => {
+                                            eprintln!("CC restart_openvpn failed: {}", err);
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "failed",
+                                                None,
+                                                Some("ACTION_FAILED".to_string()),
+                                                Some(err),
+                                            )
+                                            .await;
+                                        }
+                                        Err(err) => {
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "failed",
+                                                None,
+                                                Some("JOIN_ERROR".to_string()),
+                                                Some(err.to_string()),
+                                            )
+                                            .await;
+                                        }
+                                    }
                                 }
                             });
+                        } else if let MessageType::RequestRestartBoundaryAuth =
+                            MessageType::from(envelope.msg_type.as_str())
+                        {
+                            let command_id = envelope.command_id.clone();
+                            let app = self.app.clone();
+                            let device_id = self.device_id.clone();
+                            let seq = self.seq.clone();
+                            let write_for_status = write_clone.clone();
+                            tokio::spawn(async move {
+                                if let Some(command_id) = command_id.clone() {
+                                    let mut w = write_for_status.lock().await;
+                                    let _ = Self::send_command_status(
+                                        &mut *w,
+                                        &device_id,
+                                        &seq,
+                                        &command_id,
+                                        "executing",
+                                        Some("restart_boundary_auth".to_string()),
+                                        None,
+                                        None,
+                                    )
+                                    .await;
+                                }
+                                let result = tokio::task::spawn_blocking(move || {
+                                    restart_boundary_auth_action(app)
+                                })
+                                .await;
+                                if let Some(command_id) = command_id {
+                                    let mut w = write_for_status.lock().await;
+                                    match result {
+                                        Ok(Ok(())) => {
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "succeeded",
+                                                Some("restart_boundary_auth".to_string()),
+                                                None,
+                                                None,
+                                            )
+                                            .await;
+                                        }
+                                        Ok(Err(err)) => {
+                                            eprintln!("CC restart_boundary_auth failed: {}", err);
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "failed",
+                                                None,
+                                                Some("ACTION_FAILED".to_string()),
+                                                Some(err),
+                                            )
+                                            .await;
+                                        }
+                                        Err(err) => {
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "failed",
+                                                None,
+                                                Some("JOIN_ERROR".to_string()),
+                                                Some(err.to_string()),
+                                            )
+                                            .await;
+                                        }
+                                    }
+                                }
+                            });
+                        } else if let MessageType::RequestRestartServerTunnel =
+                            MessageType::from(envelope.msg_type.as_str())
+                        {
+                            let server_id = envelope
+                                .payload
+                                .as_ref()
+                                .and_then(|payload| payload.get("serverId"))
+                                .and_then(|value| value.as_str())
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToOwned::to_owned);
+                            let command_id = envelope.command_id.clone();
+                            match server_id {
+                                Some(server_id) => {
+                                    let app = self.app.clone();
+                                    let device_id = self.device_id.clone();
+                                    let seq = self.seq.clone();
+                                    let write_for_status = write_clone.clone();
+                                    tokio::spawn(async move {
+                                        if let Some(command_id) = command_id.clone() {
+                                            let mut w = write_for_status.lock().await;
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "executing",
+                                                Some(format!("restart_server_tunnel:{server_id}")),
+                                                None,
+                                                None,
+                                            )
+                                            .await;
+                                        }
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            restart_server_tunnel_action(server_id.clone(), app)
+                                        })
+                                        .await;
+                                        if let Some(command_id) = command_id {
+                                            let mut w = write_for_status.lock().await;
+                                            match result {
+                                                Ok(Ok(())) => {
+                                                    let _ = Self::send_command_status(
+                                                        &mut *w,
+                                                        &device_id,
+                                                        &seq,
+                                                        &command_id,
+                                                        "succeeded",
+                                                        Some("restart_server_tunnel".to_string()),
+                                                        None,
+                                                        None,
+                                                    )
+                                                    .await;
+                                                }
+                                                Ok(Err(err)) => {
+                                                    eprintln!(
+                                                        "CC restart_server_tunnel failed: {}",
+                                                        err
+                                                    );
+                                                    let _ = Self::send_command_status(
+                                                        &mut *w,
+                                                        &device_id,
+                                                        &seq,
+                                                        &command_id,
+                                                        "failed",
+                                                        None,
+                                                        Some("ACTION_FAILED".to_string()),
+                                                        Some(err),
+                                                    )
+                                                    .await;
+                                                }
+                                                Err(err) => {
+                                                    let _ = Self::send_command_status(
+                                                        &mut *w,
+                                                        &device_id,
+                                                        &seq,
+                                                        &command_id,
+                                                        "failed",
+                                                        None,
+                                                        Some("JOIN_ERROR".to_string()),
+                                                        Some(err.to_string()),
+                                                    )
+                                                    .await;
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                                None => {
+                                    eprintln!(
+                                        "CC restart_server_tunnel ignored: missing payload.serverId"
+                                    );
+                                    if let Some(command_id) = command_id {
+                                        let mut w = write_clone.lock().await;
+                                        let _ = Self::send_command_status(
+                                            &mut *w,
+                                            &self.device_id,
+                                            &self.seq,
+                                            &command_id,
+                                            "failed",
+                                            None,
+                                            Some("SERVER_ID_REQUIRED".to_string()),
+                                            Some(
+                                                "Missing payload.serverId for restart_server_tunnel"
+                                                    .to_string(),
+                                            ),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
+                        } else if let MessageType::RequestRestartServerSsh =
+                            MessageType::from(envelope.msg_type.as_str())
+                        {
+                            let server_id = envelope
+                                .payload
+                                .as_ref()
+                                .and_then(|payload| payload.get("serverId"))
+                                .and_then(|value| value.as_str())
+                                .map(str::trim)
+                                .filter(|value| !value.is_empty())
+                                .map(ToOwned::to_owned);
+                            let command_id = envelope.command_id.clone();
+                            match server_id {
+                                Some(server_id) => {
+                                    let app = self.app.clone();
+                                    let device_id = self.device_id.clone();
+                                    let seq = self.seq.clone();
+                                    let write_for_status = write_clone.clone();
+                                    tokio::spawn(async move {
+                                        if let Some(command_id) = command_id.clone() {
+                                            let mut w = write_for_status.lock().await;
+                                            let _ = Self::send_command_status(
+                                                &mut *w,
+                                                &device_id,
+                                                &seq,
+                                                &command_id,
+                                                "executing",
+                                                Some(format!("restart_server_ssh:{server_id}")),
+                                                None,
+                                                None,
+                                            )
+                                            .await;
+                                        }
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            restart_server_ssh_action(server_id.clone(), app)
+                                        })
+                                        .await;
+                                        if let Some(command_id) = command_id {
+                                            let mut w = write_for_status.lock().await;
+                                            match result {
+                                                Ok(Ok(())) => {
+                                                    let _ = Self::send_command_status(
+                                                        &mut *w,
+                                                        &device_id,
+                                                        &seq,
+                                                        &command_id,
+                                                        "succeeded",
+                                                        Some("restart_server_ssh".to_string()),
+                                                        None,
+                                                        None,
+                                                    )
+                                                    .await;
+                                                }
+                                                Ok(Err(err)) => {
+                                                    eprintln!("CC restart_server_ssh failed: {}", err);
+                                                    let _ = Self::send_command_status(
+                                                        &mut *w,
+                                                        &device_id,
+                                                        &seq,
+                                                        &command_id,
+                                                        "failed",
+                                                        None,
+                                                        Some("ACTION_FAILED".to_string()),
+                                                        Some(err),
+                                                    )
+                                                    .await;
+                                                }
+                                                Err(err) => {
+                                                    let _ = Self::send_command_status(
+                                                        &mut *w,
+                                                        &device_id,
+                                                        &seq,
+                                                        &command_id,
+                                                        "failed",
+                                                        None,
+                                                        Some("JOIN_ERROR".to_string()),
+                                                        Some(err.to_string()),
+                                                    )
+                                                    .await;
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
+                                None => {
+                                    eprintln!(
+                                        "CC restart_server_ssh ignored: missing payload.serverId"
+                                    );
+                                    if let Some(command_id) = command_id {
+                                        let mut w = write_clone.lock().await;
+                                        let _ = Self::send_command_status(
+                                            &mut *w,
+                                            &self.device_id,
+                                            &self.seq,
+                                            &command_id,
+                                            "failed",
+                                            None,
+                                            Some("SERVER_ID_REQUIRED".to_string()),
+                                            Some(
+                                                "Missing payload.serverId for restart_server_ssh"
+                                                    .to_string(),
+                                            ),
+                                        )
+                                        .await;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -275,6 +749,22 @@ impl CcConnection {
         *seq
     }
 
+    async fn is_duplicate_command(&self, command_id: &str) -> bool {
+        const DUPLICATE_TTL_MS: u64 = 10 * 60 * 1000;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let mut seen = self.recent_command_ids.lock().await;
+        seen.retain(|_, ts| now_ms.saturating_sub(*ts) <= DUPLICATE_TTL_MS);
+        if seen.contains_key(command_id) {
+            return true;
+        }
+        seen.insert(command_id.to_string(), now_ms);
+        false
+    }
+
     fn is_current_generation(&self) -> bool {
         self.app
             .state::<CcRuntimeState>()
@@ -302,7 +792,22 @@ impl CcConnection {
         device_id: &str,
         seq_counter: &Arc<Mutex<u64>>,
         app: &AppHandle,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let (payload, hash) = Self::build_inventory_payload(app)?;
+        let seq = {
+            let mut s = seq_counter.lock().await;
+            *s += 1;
+            *s
+        };
+        let inventory = Envelope::inventory(device_id.to_string(), seq, payload);
+        let msg = serde_json::to_string(&inventory)?;
+        write.send(Message::Text(msg)).await?;
+        Ok(hash)
+    }
+
+    fn build_inventory_payload(
+        app: &AppHandle,
+    ) -> Result<(serde_json::Value, String), Box<dyn std::error::Error + Send + Sync>> {
         let servers = load_servers(app).map_err(|err| format!("load servers: {err}"))?;
         let servers_payload: Vec<_> = servers
             .iter()
@@ -337,15 +842,13 @@ impl CcConnection {
             "servers": servers_payload,
         });
 
-        let seq = {
-            let mut s = seq_counter.lock().await;
-            *s += 1;
-            *s
-        };
-        let inventory = Envelope::inventory(device_id.to_string(), seq, payload);
-        let msg = serde_json::to_string(&inventory)?;
-        write.send(Message::Text(msg)).await?;
-        Ok(())
+        Ok((payload, hash))
+    }
+
+    fn compute_inventory_hash(
+        app: &AppHandle,
+    ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        Self::build_inventory_payload(app).map(|(_, hash)| hash)
     }
 
     async fn send_recent_logs(
@@ -365,6 +868,34 @@ impl CcConnection {
         };
         let recent_logs = Envelope::recent_logs(device_id.to_string(), seq, payload);
         let msg = serde_json::to_string(&recent_logs)?;
+        write.send(Message::Text(msg)).await?;
+        Ok(())
+    }
+
+    async fn send_command_status(
+        write: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
+        device_id: &str,
+        seq_counter: &Arc<Mutex<u64>>,
+        command_id: &str,
+        state: &str,
+        outcome: Option<String>,
+        reason_code: Option<String>,
+        reason_detail: Option<String>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let payload = json!({
+            "state": state,
+            "outcome": outcome,
+            "reasonCode": reason_code,
+            "reasonDetail": reason_detail,
+        });
+        let seq = {
+            let mut s = seq_counter.lock().await;
+            *s += 1;
+            *s
+        };
+        let status =
+            Envelope::command_status(device_id.to_string(), seq, command_id.to_string(), payload);
+        let msg = serde_json::to_string(&status)?;
         write.send(Message::Text(msg)).await?;
         Ok(())
     }

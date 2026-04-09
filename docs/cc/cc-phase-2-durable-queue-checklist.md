@@ -2,7 +2,7 @@
 
 Track the implementation of the agent-side durable disk-backed telemetry queue as a sequence of small, verifiable steps.
 
-This checklist is scoped to the Tauri/Rust agent in `SuperControlPanel`. It does not cover server-side ClickHouse work.
+This checklist is scoped to the Tauri/Rust agent in `SuperControlPanel`. It does not cover the server-side SQLite telemetry store work.
 
 ## Goal
 

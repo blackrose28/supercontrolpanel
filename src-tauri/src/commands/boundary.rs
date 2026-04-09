@@ -7,9 +7,11 @@ use serde_json;
 use std::os::windows::process::CommandExt;
 use tauri::{AppHandle, Manager, State};
 
+use crate::commands::load_app_config_from_disk;
+
 use super::{
-    boundary_token_summary, load_app_config_from_disk, update_functions_for_session_exit,
-    upsert_boundary_status, upsert_function_status,
+    boundary_token_summary, update_functions_for_session_exit, upsert_boundary_status,
+    upsert_function_status,
 };
 use crate::models::{BoundaryConfig, BoundaryTargetSummary, StartFunctionResult};
 use crate::services::{
@@ -313,6 +315,77 @@ pub(crate) fn stop_boundary_auth_action(
         boundary_token_summary,
         upsert_boundary_status,
     )
+}
+
+pub(crate) fn restart_boundary_auth_action(app: AppHandle) -> Result<(), String> {
+    let cfg = load_app_config_from_disk(&app)?;
+    let cols = cfg.app.default_terminal_cols;
+    let rows = cfg.app.default_terminal_rows;
+    let is_running = {
+        let function_store = app.state::<FunctionStore>();
+        let running = lock_err(&function_store.statuses)?
+            .get(BOUNDARY_AUTH_FUNCTION_ID)
+            .and_then(|status| status.session_id.clone())
+            .is_some();
+        running
+    };
+
+    if is_running {
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        let automation_store = app.state::<BoundaryAutomationStore>();
+        stop_boundary_auth_action(app.clone(), session_store, function_store, automation_store)?;
+    } else {
+        let function_store = app.state::<FunctionStore>();
+        upsert_boundary_status(
+            &app,
+            &function_store,
+            "authenticating",
+            "CC restart requested; Boundary auth is idle, starting directly",
+            None,
+            None,
+        )?;
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        let automation_store = app.state::<BoundaryAutomationStore>();
+        return start_boundary_auth_action(
+            cols,
+            rows,
+            app.clone(),
+            session_store,
+            function_store,
+            automation_store,
+        )
+        .map(|_| ());
+    }
+
+    let restart_app = app.clone();
+    thread::spawn(move || {
+        thread::sleep(Duration::from_millis(500));
+        let session_store = restart_app.state::<SessionStore>();
+        let function_store = restart_app.state::<FunctionStore>();
+        let automation_store = restart_app.state::<BoundaryAutomationStore>();
+        if let Err(err) = start_boundary_auth_action(
+            cols,
+            rows,
+            restart_app.clone(),
+            session_store,
+            function_store,
+            automation_store,
+        ) {
+            let function_store = restart_app.state::<FunctionStore>();
+            let _ = upsert_boundary_status(
+                &restart_app,
+                &function_store,
+                "error",
+                &format!("CC Boundary auth restart failed: {err}"),
+                None,
+                None,
+            );
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]

@@ -5,19 +5,44 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
 ## Agent → CC (telemetry)
 - `function-status`, `pty-output`, `pty-exit`, `openvpn-log`
 - `heartbeat` (uptime, versions, platform)
+- `status_snapshot`
 - `inventory` (servers list hash)
+- `recent_logs`
+- `command_status` (explicit lifecycle update for a `commandId`)
 
 ## CC → Agent (control)
-- `start_openvpn_function`, `stop_openvpn_function`
-- `start_boundary_auth`, `stop_boundary_auth`
-- `start_server_tunnel`, `stop_server_tunnel`
-- `start_server_ssh`, `stop_server_ssh`
+- current safe device-control messages:
+  - `request_status_snapshot`
+  - `request_inventory`
+  - `request_recent_logs`
+  - `request_restart_openvpn`
+  - `request_restart_boundary_auth`
+  - `request_restart_server_tunnel`
+  - `request_restart_server_ssh`
+- lower-level / broader command catalog also includes:
+  - `start_openvpn_function`, `stop_openvpn_function`
+  - `start_boundary_auth`, `stop_boundary_auth`
+  - `start_server_tunnel`, `stop_server_tunnel`
+  - `start_server_ssh`, `stop_server_ssh`
 - PTY: `open_pty`, `write_pty`, `resize_pty`, `close_pty`
 - SCP: `scp_upload`, `scp_download`
 - Remote browser: `open_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `close_remote_browser`
 
 ## Replies
-- `ack` / `nack` with `reqSeq`, `status`, `error?`.
+- WebSocket replies: `ack` / `nack` with `reqSeq`, `status`, `error?`.
+- HTTP telemetry ingest may also return `429` with a `nack`-shaped body such as `{ type: "nack", payload: { rate_limited: true, retryAfterMs } }`.
+
+## Explicit command lifecycle frames
+
+- Control commands carry `commandId`
+- Agent lifecycle updates now use `command_status`
+- Recommended states:
+  - `acknowledged`
+  - `executing`
+  - `succeeded`
+  - `failed`
+  - `canceled`
+- These explicit frames are now the preferred lifecycle source of truth; `function-status` and other telemetry remain useful supporting signals
 
 ## WebSocket
 - URL: `wss /agent`, subprotocol `scp.cc.v1`.
@@ -26,6 +51,7 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
 
 ## Mapping to App Contracts
 - Names mirror existing Tauri commands/events 1:1; agent dispatches to `SessionStore`/`FunctionStore` and forwards `function-status`/`pty-output`/`pty-exit`/`openvpn-log`.
+- For command execution tracking, the agent additionally emits `command_status` frames keyed by `commandId`.
 
 ## Versioning and Capabilities
 - Protocol version: `scp.cc.v1` (WebSocket subprotocol).
@@ -103,6 +129,14 @@ This section applies to the HTTP API exposed by `cc-server`, especially the mobi
 - `POST /v1/devices/:id/request-inventory`
 - `POST /v1/devices/:id/request-recent-logs`
 - `POST /v1/devices/:id/request-restart-openvpn`
+- `POST /v1/devices/:id/request-restart-boundary-auth`
+- `POST /v1/devices/:id/request-restart-server-tunnel`
+- `POST /v1/devices/:id/request-restart-server-ssh`
+
+### Next OpenAPI slice after command persistence lands
+- `GET /v1/commands`
+- `GET /v1/commands/:commandId`
+- `GET /v1/commands/:commandId/audit`
 
 ### Explicitly out of first OpenAPI slice
 - browser HTML pages under `/admin/...`
@@ -182,8 +216,20 @@ Minimal example:
 ### Catalogs (message types)
 
 - **Agent → CC (telemetry/events)**: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`, `heartbeat`
+- **Agent → CC (lifecycle)**: `command_status`
 - **CC → Agent (control/commands)**: `start_openvpn_function`, `stop_openvpn_function`, `start_boundary_auth`, `stop_boundary_auth`, `boundary_search_targets`, `list_servers`, `upsert_server`, `delete_server`, `start_server_tunnel`, `stop_server_tunnel`, `start_server_ssh`, `stop_server_ssh`, `start_server_rdp`, `open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `scp_upload`, `scp_download`, `start_scp_upload`, `start_scp_download`, `list_function_statuses`, `get_app_config`, `save_app_config`, `detect_openvpn_executable`, `get_config_paths`, `sync_config_pull`, `sync_config_push`, `save_sync_settings`
 - **Replies**: `ack`, `nack`
+
+Example `command_status` payload:
+
+```json
+{
+  "state": "failed",
+  "outcome": null,
+  "reasonCode": "ACTION_FAILED",
+  "reasonDetail": "restart_server_ssh failed: ..."
+}
+```
 
 ### Common scalar types
 

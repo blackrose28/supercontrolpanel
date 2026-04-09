@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 
 use super::{update_functions_for_session_exit, upsert_function_status};
 use crate::commands::close_remote_browser_sessions_for_server;
@@ -144,6 +144,81 @@ pub(crate) fn stop_server_tunnel_action(
     )
 }
 
+pub(crate) fn restart_server_tunnel_action(
+    server_id: String,
+    app: AppHandle,
+) -> Result<(), String> {
+    let cfg = load_app_config_from_disk(&app)?;
+    let cols = cfg.app.default_terminal_cols;
+    let rows = cfg.app.default_terminal_rows;
+    let is_running = {
+        let function_store = app.state::<FunctionStore>();
+        let fid = server_tunnel_function_id(&server_id);
+        let running = crate::services::lock_err(&function_store.statuses)?
+            .get(&fid)
+            .and_then(|status| status.session_id.clone())
+            .is_some();
+        running
+    };
+
+    if is_running {
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        let browser_store = app.state::<RemoteBrowserStore>();
+        stop_server_tunnel_action(
+            server_id.clone(),
+            app.clone(),
+            session_store,
+            function_store,
+            browser_store,
+        )?;
+    } else {
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        let browser_store = app.state::<RemoteBrowserStore>();
+        return start_server_tunnel_action(
+            server_id,
+            cols,
+            rows,
+            app.clone(),
+            session_store,
+            function_store,
+            browser_store,
+        )
+        .map(|_| ());
+    }
+
+    let restart_app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let session_store = restart_app.state::<SessionStore>();
+        let function_store = restart_app.state::<FunctionStore>();
+        let browser_store = restart_app.state::<RemoteBrowserStore>();
+        if let Err(err) = start_server_tunnel_action(
+            server_id.clone(),
+            cols,
+            rows,
+            restart_app.clone(),
+            session_store,
+            function_store,
+            browser_store,
+        ) {
+            let function_store = restart_app.state::<FunctionStore>();
+            let fid = server_tunnel_function_id(&server_id);
+            let _ = upsert_function_status(
+                &restart_app,
+                &function_store,
+                &fid,
+                "error",
+                &format!("CC server tunnel restart failed: {err}"),
+                None,
+            );
+        }
+    });
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn stop_server_tunnel(
     server_id: String,
@@ -207,6 +282,72 @@ pub(crate) fn stop_server_ssh_action(
         upsert_function_status,
         server_ssh_function_id,
     )
+}
+
+pub(crate) fn restart_server_ssh_action(server_id: String, app: AppHandle) -> Result<(), String> {
+    let cfg = load_app_config_from_disk(&app)?;
+    let cols = cfg.app.default_terminal_cols;
+    let rows = cfg.app.default_terminal_rows;
+    let is_running = {
+        let function_store = app.state::<FunctionStore>();
+        let fid = server_ssh_function_id(&server_id);
+        let running = crate::services::lock_err(&function_store.statuses)?
+            .get(&fid)
+            .and_then(|status| status.session_id.clone())
+            .is_some();
+        running
+    };
+
+    if is_running {
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        stop_server_ssh_action(
+            server_id.clone(),
+            app.clone(),
+            session_store,
+            function_store,
+        )?;
+    } else {
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        return start_server_ssh_action(
+            server_id,
+            cols,
+            rows,
+            app.clone(),
+            session_store,
+            function_store,
+        )
+        .map(|_| ());
+    }
+
+    let restart_app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let session_store = restart_app.state::<SessionStore>();
+        let function_store = restart_app.state::<FunctionStore>();
+        if let Err(err) = start_server_ssh_action(
+            server_id.clone(),
+            cols,
+            rows,
+            restart_app.clone(),
+            session_store,
+            function_store,
+        ) {
+            let function_store = restart_app.state::<FunctionStore>();
+            let fid = server_ssh_function_id(&server_id);
+            let _ = upsert_function_status(
+                &restart_app,
+                &function_store,
+                &fid,
+                "error",
+                &format!("CC server SSH restart failed: {err}"),
+                None,
+            );
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]

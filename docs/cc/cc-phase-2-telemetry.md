@@ -6,7 +6,7 @@
 
 ## Current implementation note
 
-The current implementation diverges from the original Phase 2 storage plan:
+The current implementation now defines the Phase 2 storage plan:
 
 - Implemented now:
   - agent forwarding for `function-status`, `pty-output`, `pty-exit`, `openvpn-log`
@@ -23,12 +23,10 @@ The current implementation diverges from the original Phase 2 storage plan:
   - history/export endpoints: `GET /v1/logs`, `GET /v1/logs/export`
   - admin telemetry UI with filters, search, export, alerts, and runtime summaries
 - Still deferred:
-  - ClickHouse
   - negotiated WS gzip capability and server-side chunk reassembly
-  - explicit `nack`/server backpressure protocol
   - full redaction matrix parity with the original Phase 2 design
 
-Use this document as the target design, but treat SQLite + the current rotated encrypted disk queue as the current Phase 2 baseline. Redacted telemetry records are now persisted on enqueue and used as the source of truth for ready-batch selection, retry metadata, and ack/drop. Rotation, compaction, encryption, bounded-capacity shedding, and validation coverage are now implemented.
+Use this document as the target design for the current implementation. SQLite + the rotated encrypted disk queue are the intended Phase 2 baseline and storage path. Redacted telemetry records are now persisted on enqueue and used as the source of truth for ready-batch selection, retry metadata, and ack/drop. Rotation, compaction, encryption, bounded-capacity shedding, and validation coverage are now implemented.
 
 ## Deliverables
 - Agent: batching implemented at 15 ms / 16 KB max batch size; tags `{functionId, sessionId}`.
@@ -36,19 +34,18 @@ Use this document as the target design, but treat SQLite + the current rotated e
   - Implementation checklist: `docs/cc/cc-phase-2-durable-queue-checklist.md`
 - CC (ingest + storage):
   - Ingest: `POST /v1/logs` (internal), `GET /v1/logs/stream?deviceId=...` (SSE)
-  - Current storage: SQLite (implemented)
-  - Target storage: ClickHouse (deferred) — see "Storage schema (ClickHouse)" below
+  - Storage: SQLite (implemented and planned)
   - `GET /v1/logs` and export/filter/search are already implemented in the current server
 - Compression/chunking: current reality is gzip-compressed HTTP ingest bodies > 8 KB plus agent-side chunk records for oversize telemetry events; negotiated WS gzip and server-side chunk reassembly remain deferred.
 - Ordering: per `(deviceId, sessionId, type)`; reconnect replay up to N buffered events.
-- Inventory publish: cadence 5m or on change; fields `{ serversListHash, serversCount }`.
+- Inventory publish: implemented on connect, every 5 minutes, and on detected server-list hash change; fields `{ serversListHash, serversCount }`.
 ## Checklists
 - Agent: subscribe to Tauri events: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`.
 - Agent: redacted telemetry is persisted to the disk queue before it becomes sendable, and the live sender/retry path now reads ready records plus retry metadata from disk; segment rotation, compaction, AES-256-GCM at-rest encryption, and bounded-capacity shedding are implemented.
 - Agent: queue validation now covers restart replay, offline growth/reconnect flush, per-stream ordering, corruption skip-and-continue behavior, auth-failure drop semantics, disk-pressure shedding, and disk-artifact secret checks.
-- CC: ingest → durable store implemented with SQLite; backpressure handling still pending.
+- CC: ingest → durable store implemented with SQLite; HTTP ingest now returns `nack { rate_limited: true, retryAfterMs }` when saturated by rate limiting.
 - CC: SSE/history fanout per-device implemented.
-- Redaction parity with MCP (no secrets at-rest/in-flight).
+- Redaction parity with MCP is implemented for persisted telemetry, history/export, and SSE fanout (no secrets at-rest/in-flight).
 
 ## Backpressure and throttling
 - Server backpressure
@@ -56,7 +53,8 @@ Use this document as the target design, but treat SQLite + the current rotated e
   - SSE fanout backpressure: per-connection buffers capped; slow consumers are dropped with a retry hint.
 - Agent adaptive throttling
   - Implemented baseline: local leaky-bucket with a 256KB/s soft cap and up to 5s burst budget, plus temporary cooldown when ingest returns HTTP `429` or `5xx`.
-  - Deferred from the original design: protocol-level `nack { rate_limited, retryAfterMs }` handling and dynamic batch-window resizing tied to negotiated backpressure signals.
+  - Implemented baseline: HTTP ingest returns `429` with a `nack` body carrying `rate_limited` + `retryAfterMs`, and the agent honors that server backoff hint.
+  - Deferred from the original design: dynamic batch-window resizing tied to negotiated backpressure signals.
 - Offline buffer policy: drop oldest non-critical telemetry when the disk queue projects above the 90% high-watermark; emit a local `cc-telemetry-health` signal and queue-pressure logs when shedding occurs.
 - Compression and chunking
   - Implemented baseline: gzip HTTP ingest bodies when the serialized batch exceeds 8 KB.
@@ -66,63 +64,30 @@ Use this document as the target design, but treat SQLite + the current rotated e
   - Ordering guaranteed per `(deviceId, sessionId, type)` by `seq`.
   - On reconnect, replay up to `N` buffered events; server de-duplicates by `(deviceId, seq)`.
 
-## Storage schema (ClickHouse)
-Target: ClickHouse for high-volume append-only telemetry with fast time-range queries and fanout.
+## Storage schema (SQLite)
+Target: SQLite as the primary append-oriented telemetry store for this project, with indexed time-range queries and straightforward export/backup flows.
 
-```sql
--- Raw events (normalized envelope + selected payload fields)
-CREATE TABLE IF NOT EXISTS cc_events_raw (
-  ts DateTime64(3, 'UTC') CODEC(Delta, ZSTD(6)),
-  deviceId String CODEC(ZSTD(6)),
-  type LowCardinality(String) CODEC(ZSTD(6)),
-  sessionId String CODEC(ZSTD(6)),
-  seq UInt64 CODEC(Delta, ZSTD(6)),
-  schemaVersion UInt16 CODEC(LZ4),
-  functionId String CODEC(ZSTD(6)),
-  payload_json JSON CODEC(ZSTD(6)), -- redacted at ingest
-  size_bytes UInt32 CODEC(LZ4)
-)
-ENGINE = MergeTree()
-PARTITION BY toYYYYMMDD(ts)
-ORDER BY (deviceId, ts, type, sessionId, seq)
-TTL ts + INTERVAL 30 DAY DELETE  -- adjust per org in Phase 7
-SETTINGS index_granularity = 8192;
+Recommended logical shape:
 
--- Optional narrow tables for hot-path queries (example: PTY output)
-CREATE TABLE IF NOT EXISTS cc_events_pty_output (
-  ts DateTime64(3, 'UTC') CODEC(Delta, ZSTD(6)),
-  deviceId String CODEC(ZSTD(6)),
-  sessionId String CODEC(ZSTD(6)),
-  seq UInt64 CODEC(Delta, ZSTD(6)),
-  data String CODEC(ZSTD(6))
-)
-ENGINE = MergeTree()
-PARTITION BY toYYYYMMDD(ts)
-ORDER BY (deviceId, ts, sessionId, seq)
-SETTINGS index_granularity = 8192;
+- one `logs` table containing the normalized envelope fields already used by the current server
+- indexed lookups on device/time/type for history and SSE catch-up queries
+- redacted payload JSON stored as text
+- retention handled by scheduled deletion/export jobs rather than engine TTL features
 
--- Materialized view to project hot fields from raw into pty_output (optional, Phase 2+)
-CREATE MATERIALIZED VIEW IF NOT EXISTS mv_pty_output
-TO cc_events_pty_output AS
-SELECT
-  ts,
-  deviceId,
-  JSON_VALUE(payload_json, '$.id') AS sessionId,
-  seq,
-  JSON_VALUE(payload_json, '$.data') AS data
-FROM cc_events_raw
-WHERE type = 'pty-output';
-```
+Suggested indexing goals:
+
+- `(deviceId, ts)` for per-device timelines
+- `(deviceId, type, ts)` for filtered telemetry views
+- `(deviceId, sessionId, seq)` for ordered session replay
 
 Notes
-- Partition by day on `ts`; order by `(deviceId, ts, type, sessionId, seq)` for efficient per-device/session scans.
-- Redaction occurs before insert; `payload_json` stores already-redacted payloads.
-- Retention via TTL (Phase 7 can move older partitions to object storage tiering if enabled).
-- SSE fanout queries use `cc_events_raw` by time+device, with server-side buffering for burst smoothing.
+- redaction occurs before insert; stored payloads must already be redacted
+- retention is enforced by application jobs described in Phase 7
+- if higher volume ever requires a different store later, that should be treated as a separate migration project rather than an implicit Phase 2 assumption
 
 ## Backpressure and throttling
-- Server backpressure: when ingest/DB is saturated, respond with `nack { reqSeq, rate_limited: true, retryAfterMs }` on control paths and slow SSE fanout; log a structured event.
-- Agent adaptive throttling: leaky-bucket per device (default 256KB/s soft cap for telemetry; bursts up to 1MB over 5s). When `nack.rate_limited=true` or socket write backs up, agent increases batch window (up to 100ms) and reduces send rate.
+- Server backpressure: when HTTP ingest is saturated by rate limiting, respond with `429` and a `nack { rate_limited: true, retryAfterMs }` body; slow SSE consumers may still be dropped with a retry hint.
+- Agent adaptive throttling: leaky-bucket per device (default 256KB/s soft cap for telemetry; bursts up to 1MB over 5s). When the server returns `nack.rate_limited=true`, the agent honors `retryAfterMs` and delays the next send attempt accordingly.
 - Queue near-full policy: disk-backed queue uses a 128 MB hard cap and a 90% high-watermark. When projected usage crosses the watermark, it drops the oldest non-critical telemetry first; it never intentionally sheds `function-status`, `pty-exit`, or terminal lifecycle events.
 - Health signals: current implementation emits a local Tauri `cc-telemetry-health` event and queue-pressure log entries when records are shed. A periodic server-visible degraded heartbeat remains deferred.
 - Corruption handling: if one persisted record cannot be decoded or decrypted, the agent skips that record, logs the issue, and continues reading later records from the queue.
@@ -195,7 +160,7 @@ These items were implemented earlier than the original phased docs suggested:
 ## Test plan (Phase 2 Telemetry)
 
 - Backpressure/adaptive throttling
-  - Induce server `nack { rate_limited: true, retryAfterMs }` and verify agent backs off, reduces batch size, and recovers.
+  - Induce server `nack { rate_limited: true, retryAfterMs }` and verify agent backs off according to `retryAfterMs` and recovers.
   - Verify no data loss: post-recovery, all queued events are delivered in order.
 - Durable queue replay
   - Kill agent mid-burst; on restart, verify disk queue replays without duplicates (keyed by `(deviceId, seq)`).
@@ -204,7 +169,7 @@ These items were implemented earlier than the original phased docs suggested:
   - Interleave two PTY sessions; verify per-stream ordering preserved, cross-stream interleave allowed.
   - Send oversized events; verify gzip and `{chunkIndex, totalChunks}` chunking behaviors and server reassembly.
 - Redaction parity
-  - Inject payloads containing secrets; verify redaction at agent and server logs; ClickHouse sample queries show redacted fields only.
+  - Inject payloads containing secrets; verify redaction at agent and server logs; SQLite history/export queries show redacted fields only.
 - SSE fanout SLOs
   - Under 2× normal traffic, P95 latency within targets; backpressure signals sent before breach and recovery verified.
 - Inventory publishing

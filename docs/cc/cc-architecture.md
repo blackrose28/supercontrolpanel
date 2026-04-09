@@ -31,7 +31,7 @@ Centralize control and telemetry for multiple SuperControlPanel clients via a se
 
 ## Cross-Cutting Concerns
 - Retention and Storage
-    - Events: 30 days hot (Postgres), 180 days warm (object store/ClickHouse), configurable per org.
+    - Events: retained in SQLite with configurable retention windows; optional exports/object-store archival can be added later if needed.
     - Commands and audits: 365 days.
     - PTY/log chunks capped at 16KB per frame; per-session max 50MB before truncation with notice.
 
@@ -41,7 +41,7 @@ Centralize control and telemetry for multiple SuperControlPanel clients via a se
     - Backpressure signaled via `nack` with `rate_limited=true` and `retryAfterMs`.
 
 - Disaster Recovery
-    - Postgres PITR snapshots hourly; object-store versioning on.
+    - SQLite database backups taken on a scheduled cadence; exported artifacts/object-store versioning enabled when configured.
     - Restore runbooks: RPO ≤ 15m, RTO ≤ 1h; periodic game days.
 
 - Secrets Lifecycle
@@ -67,7 +67,7 @@ Centralize control and telemetry for multiple SuperControlPanel clients via a se
 ## Compliance and data lifecycle
 
 ### Data retention per type
-- Telemetry events: hot 14d (ClickHouse), warm 90d (object store or cold tier), configurable per-org overrides.
+- Telemetry events: retained in SQLite for the configured hot window, with optional export/archive flows for longer retention if needed.
 - Command audit: 365d minimum; legal hold extends indefinitely until released.
 - PTY recordings: 7d default; org-configurable up to 90d; auto-delete after retention period unless legal hold.
 - Agent tokens: revoked tokens retained in audit for 90d; active tokens max TTL 30d.
