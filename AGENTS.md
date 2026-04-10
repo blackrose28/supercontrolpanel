@@ -196,7 +196,7 @@ Do not break these names unless updating both frontend and backend in the same c
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **SuperControlPanel** (1889 symbols, 3855 relationships, 163 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **SuperControlPanel** (2255 symbols, 4787 relationships, 195 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

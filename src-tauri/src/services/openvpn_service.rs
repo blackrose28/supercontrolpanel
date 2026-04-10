@@ -1198,18 +1198,21 @@ pub fn start_openvpn_admin_worker(
                     if let Some(pid) = cached_helper_pid {
                         if !is_windows_pid_running(pid) {
                             let _ = fs::remove_file(&helper_pid_path_watch);
+                            let msg =
+                                "Elevated helper exited unexpectedly before status file was available";
                             let _ = upsert_function_status(
                                 &status_app,
                                 &status_app.state::<FunctionStore>(),
                                 &function_id,
-                                "stopped",
-                                "Elevated helper ended before status file was available",
+                                "error",
+                                msg,
                                 None,
                             );
                             let _ = set_openvpn_admin_session(
                                 &status_app.state::<OpenVpnAdminStore>(),
                                 None,
                             );
+                            on_terminal_state(&status_app, "error", msg);
                             break;
                         }
                     }
@@ -1252,16 +1255,18 @@ pub fn start_openvpn_admin_worker(
             if let Some(pid) = cached_helper_pid {
                 if !is_windows_pid_running(pid) {
                     let _ = fs::remove_file(&helper_pid_path_watch);
+                    let msg = "Elevated helper exited unexpectedly before reporting terminal status";
                     let _ = upsert_function_status(
                         &status_app,
                         &status_app.state::<FunctionStore>(),
                         &function_id,
-                        "stopped",
-                        "Elevated helper ended (window closed or process exited)",
+                        "error",
+                        msg,
                         None,
                     );
                     let _ =
                         set_openvpn_admin_session(&status_app.state::<OpenVpnAdminStore>(), None);
+                    on_terminal_state(&status_app, "error", msg);
                     break;
                 }
             }

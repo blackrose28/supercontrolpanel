@@ -117,15 +117,15 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 - ✅ Reconcile stale in-flight commands after reconnect/lost agent
 
 ### Agent (Tauri/Rust)
-- 🟨 Extend CC protocol handling for server → agent messages
-- 🟨 Add command dispatcher in `src-tauri/src/cc/`
-- 🟨 Map safe server commands to existing local actions
-- 🟨 Emit lifecycle updates back to CC via explicit `command_status` frames:
+- ✅ Extend CC protocol handling for server → agent messages
+- ✅ Add command dispatcher in `src-tauri/src/cc/`
+- ✅ Map safe server commands to existing local actions
+- ✅ Emit lifecycle updates back to CC via explicit `command_status` frames:
   - acknowledged
   - executing
   - terminal result
 - ✅ Add duplicate command suppression by `commandId` with TTL cache
-- ⬜ Add timeout handling for non-terminal commands
+- ✅ Add timeout handling for non-terminal commands
 
 ### Admin / API
 - ✅ Add a minimal HTTP/admin flow for safe control testing
@@ -147,5 +147,78 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 - ✅ Each accepted control request returns a durable `commandId`
 - ✅ Explicit `command_status` lifecycle updates flow end-to-end for the current safe command set
 - ✅ Duplicate `commandId` does not produce duplicate side effects
-- 🟨 Reconnect-related OpenVPN restart issues were addressed in the current helper-based implementation
+- ✅ Reconnect-related OpenVPN restart issues were addressed in the current helper-based implementation
 - ✅ Audit trail matches actual executed actions
+
+---
+
+## Phase 4 — Interactive PTY
+
+**Goal:** Add remote PTY control over CC with a live Admin terminal, safe session lifecycle handling, and PTY-specific hardening.
+
+**Reference:** `docs/cc/cc-phase-4-interactive-pty.md`
+
+**Phase 4 decisions locked in:**
+- server-generated `sessionId` is the canonical remote PTY identity
+- agent may keep a local PTY id internally, but must map it to `sessionId`
+- remote PTY sessions are single-operator owned in Phase 4
+- same-operator reattach is allowed; different-operator attach to a live owned PTY is rejected
+- `pty_open` and `pty_attach` are distinct concepts; the first Admin UX may combine them as open-and-attach
+- browser disconnect acts as detach, not immediate PTY close
+- default reattach grace window: 30s
+- default detached hard idle timeout: 5m
+- agent ↔ cc-server uses the existing `/agent` websocket
+- Admin UI ↔ cc-server uses a separate browser-facing PTY websocket
+- browser-facing PTY transport uses WebSocket, not SSE
+- audit is required for PTY open/attach/reject/detach/close/expire and recording consent
+
+### Recommended implementation order
+1. extend CC protocol and dispatch for remote PTY lifecycle
+2. add agent-side PTY session mapping / multiplexing for CC-owned sessions
+3. add server-side PTY session relay/state handling
+4. add minimal Admin live terminal UI
+5. add PTY hardening: backpressure, idle GC, scrollback replay, RBAC/recording
+
+### Protocol / CC transport
+- ✅ Add protocol messages for `open_pty`, `write_pty`, `resize_pty`, `close_pty`
+- ✅ Define/align `pty-output` and `pty-exit` remote-session payload contracts with `{ sessionId }`
+- ✅ Add PTY-specific correlation fields and stable error/nack handling for PTY control requests
+- ✅ Keep `pty_open` and `pty_attach` distinct in the model while allowing open-and-attach in the first Admin UX
+
+### Agent (Tauri/Rust)
+- ✅ Add CC command handling for remote `open_pty`, `write_pty`, `resize_pty`, `close_pty`
+- ✅ Map server-issued remote `sessionId` values onto the existing local PTY runtime/session store safely
+- ✅ Forward PTY output/exit events for CC-owned sessions
+- ✅ Add PTY multiplexing and slow-consumer backpressure handling
+- ✅ Add detach-aware cleanup/GC for abandoned remote PTY sessions using the 30s grace / 5m idle policy
+
+### CC Server
+- ✅ Add durable `pty_sessions` state tracking between Admin and agent websocket
+- ✅ Add authorization checks for PTY open/write/resize/close
+- ✅ Add single-operator ownership enforcement plus attach/detach handling and session cleanup on disconnect
+- ✅ Expose a browser-facing PTY websocket transport for Admin UI
+
+### Admin / API
+- ✅ Add minimal live terminal UI for a device PTY session
+- ✅ Support terminal input, resize, close, and reconnect/reattach flows over the browser-facing PTY websocket
+- ✅ Replay recent scrollback on attach
+- ✅ Surface recording/privacy state when enabled
+- ✅ Treat "Open terminal" as open-and-attach, while reconnect uses attach-only semantics
+
+### PTY hardening
+- ✅ Enforce UTF-8/input sanitization and disallowed control-sequence filtering
+- ✅ Add keystroke and resize rate limits with `nack { rate_limited: true }`
+- ✅ Add bounded scrollback with truncation notice
+- ✅ Add RBAC + consent/audit behavior for record-enabled sessions
+- ✅ Audit PTY open/attach/reject/detach/close/expire and recording consent without storing raw PTY input
+
+### Acceptance Criteria
+- ⬜ Admin can open a remote PTY and interact with it end-to-end over CC
+- ⬜ `write_pty` / `resize_pty` / `close_pty` work reliably under reconnect conditions
+- ⬜ PTY output and exit events are correlated correctly by `sessionId`
+- ⬜ Same-operator reattach works within the grace window without spawning a new PTY
+- ⬜ Different-operator attach to an owned live PTY is rejected deterministically
+- ⬜ Slow-consumer/backpressure behavior is bounded and visible
+- ⬜ Idle/abandoned PTY sessions are cleaned up automatically
+- ⬜ Scrollback replay works and truncates with notice
+- ⬜ RBAC/recording/privacy behavior is enforced and auditable

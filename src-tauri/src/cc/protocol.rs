@@ -33,6 +33,10 @@ pub enum MessageType {
     RequestRestartBoundaryAuth,
     RequestRestartServerTunnel,
     RequestRestartServerSsh,
+    OpenPty,
+    WritePty,
+    ResizePty,
+    ClosePty,
     CommandStatus,
     FunctionStatus,
     Unknown(String),
@@ -55,6 +59,10 @@ impl From<&str> for MessageType {
             "request_restart_boundary_auth" => MessageType::RequestRestartBoundaryAuth,
             "request_restart_server_tunnel" => MessageType::RequestRestartServerTunnel,
             "request_restart_server_ssh" => MessageType::RequestRestartServerSsh,
+            "open_pty" => MessageType::OpenPty,
+            "write_pty" => MessageType::WritePty,
+            "resize_pty" => MessageType::ResizePty,
+            "close_pty" => MessageType::ClosePty,
             "command_status" => MessageType::CommandStatus,
             "function-status" => MessageType::FunctionStatus,
             other => MessageType::Unknown(other.to_string()),
@@ -115,6 +123,24 @@ impl Envelope {
     ) -> Self {
         let mut envelope = Self::new("command_status", device_id, seq, Some(status));
         envelope.command_id = Some(command_id);
+        envelope
+    }
+
+    pub fn ack(device_id: String, seq: u64, req_seq: u64, result: Option<Value>) -> Self {
+        let payload = result.unwrap_or_else(|| serde_json::json!({ "status": "ok" }));
+        let mut envelope = Self::new("ack", device_id, seq, Some(payload));
+        envelope.req_seq = Some(req_seq);
+        envelope
+    }
+
+    pub fn nack(device_id: String, seq: u64, req_seq: u64, code: &str, message: &str) -> Self {
+        let payload = serde_json::json!({
+            "status": "error",
+            "error": code,
+            "message": message,
+        });
+        let mut envelope = Self::new("nack", device_id, seq, Some(payload));
+        envelope.req_seq = Some(req_seq);
         envelope
     }
 }

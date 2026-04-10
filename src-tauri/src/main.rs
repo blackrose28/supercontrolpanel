@@ -16,7 +16,7 @@ use mcp::{sync_mcp_runtime_from_settings, McpRuntimeState};
 use services::{load_sync_settings_from_disk, now_ms};
 use stores::{
     BoundaryAutomationStore, CcRuntimeState, FunctionStore, OpenVpnAdminStore,
-    OpenVpnReconnectStore, RemoteBrowserStore, ScpTransferStore, SessionStore,
+    OpenVpnReconnectStore, RemoteBrowserStore, RemotePtyStore, ScpTransferStore, SessionStore,
 };
 
 pub(crate) const OPENVPN_FUNCTION_ID: &str = "openvpn-connect";
@@ -88,6 +88,7 @@ fn main() {
         .manage(OpenVpnReconnectStore::default())
         .manage(BoundaryAutomationStore::default())
         .manage(RemoteBrowserStore::default())
+        .manage(RemotePtyStore::default())
         .manage(ScpTransferStore::default())
         .manage(McpRuntimeState::default())
         .manage(CcRuntimeState::default())

@@ -24,7 +24,7 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
   - `start_boundary_auth`, `stop_boundary_auth`
   - `start_server_tunnel`, `stop_server_tunnel`
   - `start_server_ssh`, `stop_server_ssh`
-- PTY: `open_pty`, `write_pty`, `resize_pty`, `close_pty`
+- design-only / Phase 4 (not yet implemented): `open_pty`, `write_pty`, `resize_pty`, `close_pty`
 - SCP: `scp_upload`, `scp_download`
 - Remote browser: `open_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `close_remote_browser`
 
@@ -52,6 +52,78 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
 ## Mapping to App Contracts
 - Names mirror existing Tauri commands/events 1:1; agent dispatches to `SessionStore`/`FunctionStore` and forwards `function-status`/`pty-output`/`pty-exit`/`openvpn-log`.
 - For command execution tracking, the agent additionally emits `command_status` frames keyed by `commandId`.
+- Remote PTY control is still Phase 4 design work: the local app has PTY commands/events, but the CC agent/server path does not yet implement remote PTY lifecycle handling end-to-end.
+
+## Phase 4 protocol gaps to implement first
+
+Before remote PTY can be considered implemented, the protocol and both runtimes still need all of the following:
+
+1. **Explicit remote PTY control envelopes**
+   - `open_pty`
+   - `write_pty`
+   - `resize_pty`
+   - `close_pty`
+
+2. **A stable remote-session identity contract**
+   - use `sessionId` consistently for remote PTY sessions
+   - stop mixing local event field names like `id` with CC-facing remote PTY identity
+
+3. **PTY-specific request/reply behavior**
+   - `ack` / `nack` semantics for open/write/resize/close
+   - structured PTY error codes such as `PTY_NOT_FOUND`, `PTY_ALREADY_CLOSED`, `PTY_RATE_LIMITED`, `PTY_UNAUTHORIZED`, `PTY_SPAWN_ERROR`
+
+4. **Agent → CC PTY event contract for remote sessions**
+   - `pty-output { sessionId, data }`
+   - `pty-exit { sessionId, exitCode?, reason }`
+   - optional attach/replay metadata if scrollback replay is included in the first pass
+
+5. **Correlation / authorization metadata**
+   - request correlation for Admin ↔ server ↔ agent PTY flows
+   - per-session authorization and recording/privacy state once Phase 4 UI is added
+
+## Phase 4 PTY request/reply semantics
+
+Remote PTY commands use normal websocket `ack` / `nack` replies, but their result semantics should be explicit:
+
+- `open_pty`
+  - `ack.result` should return at least `{ sessionId }`
+  - may also include `{ replayBytes?, recording?, startedAt? }`
+- `write_pty`
+  - `ack.result` may be omitted or return `{ sessionId, acceptedBytes }`
+- `resize_pty`
+  - `ack.result` may be omitted or return `{ sessionId, cols, rows }`
+- `close_pty`
+  - `ack.result` may be omitted or return `{ sessionId, closing: true }`
+
+`nack` replies should use stable PTY-specific error codes so Admin/server behavior is deterministic.
+
+### PTY error taxonomy
+
+- `PTY_NOT_FOUND`
+  - session does not exist on the agent
+- `PTY_ALREADY_CLOSED`
+  - session already exited or was previously closed
+- `PTY_SPAWN_ERROR`
+  - agent failed to create the PTY/session
+- `PTY_WRITE_REJECTED`
+  - input was rejected before reaching the PTY
+- `PTY_INVALID_SIZE`
+  - invalid `cols` / `rows`
+- `PTY_RATE_LIMITED`
+  - input or resize requests exceeded rate limits
+- `PTY_UNAUTHORIZED`
+  - actor/session is not allowed to access this PTY
+- `PTY_RECORDING_CONSENT_REQUIRED`
+  - recording-enabled open was requested before required consent was captured
+- `PTY_INTERNAL_ERROR`
+  - unexpected agent/server error
+
+Recommended `nack.error.details` payloads:
+
+- `open_pty`: `{ sessionId?, reason?, retryAfterMs? }`
+- `write_pty`: `{ sessionId, droppedBytes?, retryAfterMs? }`
+- `resize_pty`: `{ sessionId, cols?, rows?, retryAfterMs? }`
+- `close_pty`: `{ sessionId }`
 
 ## Versioning and Capabilities
 - Protocol version: `scp.cc.v1` (WebSocket subprotocol).
@@ -218,6 +290,7 @@ Minimal example:
 - **Agent → CC (telemetry/events)**: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`, `heartbeat`
 - **Agent → CC (lifecycle)**: `command_status`
 - **CC → Agent (control/commands)**: `start_openvpn_function`, `stop_openvpn_function`, `start_boundary_auth`, `stop_boundary_auth`, `boundary_search_targets`, `list_servers`, `upsert_server`, `delete_server`, `start_server_tunnel`, `stop_server_tunnel`, `start_server_ssh`, `stop_server_ssh`, `start_server_rdp`, `open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `scp_upload`, `scp_download`, `start_scp_upload`, `start_scp_download`, `list_function_statuses`, `get_app_config`, `save_app_config`, `detect_openvpn_executable`, `get_config_paths`, `sync_config_pull`, `sync_config_push`, `save_sync_settings`
+- **CC → Agent (design-only / Phase 4 PTY)**: `open_pty`, `write_pty`, `resize_pty`, `close_pty`
 - **Replies**: `ack`, `nack`
 
 Example `command_status` payload:
@@ -315,6 +388,75 @@ Representative schemas; new commands should follow the same pattern.
 }
 ```
 
+- `open_pty` (Phase 4 / remote PTY)
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.open_pty.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sessionId": { "type": "string", "minLength": 1 },
+    "cols": { "type": "integer", "minimum": 1 },
+    "rows": { "type": "integer", "minimum": 1 },
+    "recording": { "type": "boolean", "default": false },
+    "reason": { "type": ["string", "null"] },
+    "cwd": { "type": ["string", "null"] },
+    "env": {
+      "type": ["object", "null"],
+      "additionalProperties": { "type": "string" }
+    }
+  },
+  "required": ["sessionId", "cols", "rows"]
+}
+```
+
+- `write_pty` (Phase 4 / remote PTY)
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.write_pty.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sessionId": { "type": "string", "minLength": 1 },
+    "data": { "type": "string" }
+  },
+  "required": ["sessionId", "data"]
+}
+```
+
+- `resize_pty` (Phase 4 / remote PTY)
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.resize_pty.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sessionId": { "type": "string", "minLength": 1 },
+    "cols": { "type": "integer", "minimum": 1 },
+    "rows": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["sessionId", "cols", "rows"]
+}
+```
+
+- `close_pty` (Phase 4 / remote PTY)
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/cmd.close_pty.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "sessionId": { "type": "string", "minLength": 1 },
+    "reason": { "type": ["string", "null"] }
+  },
+  "required": ["sessionId"]
+}
+```
+
 ### Events (Agent → CC)
 
 - `function-status`
@@ -344,10 +486,10 @@ Representative schemas; new commands should follow the same pattern.
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string" },
+    "sessionId": { "type": "string" },
     "data": { "type": "string" }
   },
-  "required": ["id", "data"]
+  "required": ["sessionId", "data"]
 }
 ```
 
@@ -359,11 +501,11 @@ Representative schemas; new commands should follow the same pattern.
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string" },
+    "sessionId": { "type": "string" },
     "exitCode": { "type": ["integer", "null"] },
     "reason": { "type": "string", "enum": ["exit", "signal", "unknown"] }
   },
-  "required": ["id", "reason"]
+  "required": ["sessionId", "reason"]
 }
 ```
 
@@ -441,6 +583,23 @@ Representative schemas; new commands should follow the same pattern.
 }
 ```
 
+Example PTY rate-limited `nack`:
+
+```json
+{
+  "reqSeq": 1042,
+  "status": "error",
+  "error": {
+    "code": "PTY_RATE_LIMITED",
+    "message": "PTY input rate limit exceeded",
+    "details": {
+      "sessionId": "pty-9f1e",
+      "retryAfterMs": 250
+    }
+  }
+}
+```
+
 ### Conventions and hygiene
 
 - **Extensibility**: prefer adding optional fields over breaking changes. Use `additionalProperties: false` by default; when extension points are needed, add a namespaced map (e.g., `ext: { "vendor.x": ... }`).
@@ -504,10 +663,10 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/events/pty-output.json",
   "type": "object",
-  "required": ["id", "data"],
+  "required": ["sessionId", "data"],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string" },
+    "sessionId": { "type": "string" },
     "data": { "type": "string" }
   }
 }
@@ -519,10 +678,10 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/events/pty-exit.json",
   "type": "object",
-  "required": ["id", "exitCode", "reason"],
+  "required": ["sessionId", "exitCode", "reason"],
   "additionalProperties": false,
   "properties": {
-    "id": { "type": "string" },
+    "sessionId": { "type": "string" },
     "exitCode": { "type": "integer" },
     "reason": { "type": "string" }
   }

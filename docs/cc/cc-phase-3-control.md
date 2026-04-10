@@ -41,6 +41,7 @@ Windows-specific restart behavior now implemented:
 - later CC-triggered restarts reuse the already-running elevated helper
 - helper restart is performed through a helper control file, not by relaunching the elevated helper
 - helper status-file writes, reconnect cancellation, and log-tail reset behavior were hardened during restart work
+- unexpected helper loss is reconciled through the normal app-level terminal-state path so auto-reconnect/error handling stays deterministic
 
 That means the remaining Phase 3 work should focus on the **command lifecycle / audit trail layer** around the already-implemented safe commands, not on rebuilding connection/admin primitives.
 
@@ -134,7 +135,7 @@ The current implementation has already proven:
 - replay of the same logical command should return the existing command record rather than creating a second one
 
 ## Timeouts, cancellation, and retries
-- Default execution timeout: 60 s (configurable per command); agent reports `failed` with `reason: timeout`.
+- Default execution timeout: 60 s; agent now reports `failed` with `reasonCode: EXECUTION_TIMEOUT`, and server-side reconciliation still backstops older/non-responsive flows.
 - Cancellation: server may send `cancel_command {commandId}`; agent attempts best-effort cancel and reports `canceled`.
 - Delivery retries: if agent does not `ack` dispatch within 5 s, server may re-dispatch; idempotency prevents double-execute.
 
@@ -260,11 +261,13 @@ Recommended response shape:
 
 The current websocket command messages stay as-is, and lifecycle reporting is now standardized around explicit `command_status` frames.
 
+Inbound server → agent command handling now uses a typed parser/dispatcher layer for the current safe command set, including explicit invalid-payload / unsupported-message rejection before local action execution. The dispatcher now also owns the current safe-command mapping to existing local actions, while `connection.rs` focuses on transport/session concerns.
+
 ### Minimum lifecycle signals from agent
 
 - `command_status { state: "acknowledged" }`
 - `command_status { state: "executing" }` when local work starts
-- one terminal `command_status` tied to the same `commandId`
+- one terminal `command_status` tied to the same `commandId` for every current safe command, including refresh requests
 
 Recommended payload shape:
 
