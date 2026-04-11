@@ -80,8 +80,8 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 
 ---
 
-**Last Updated:** 2026-04-09T00:00:00Z
-**Status:** Phase 1 agent/server bootstrap is implemented end-to-end; Phase 2 core telemetry/admin slice is implemented; Phase 3 safe-control slice now includes durable command history, lifecycle/audit tracking, idempotent replay protection, reconnect reconciliation, and the current safe command set; Phase 4 interactive PTY remains design-only
+**Last Updated:** 2026-04-11T00:00:00Z
+**Status:** Phase 1 agent/server bootstrap is implemented end-to-end; Phase 2 core telemetry/admin slice is implemented; Phase 3 safe-control slice now includes durable command history, lifecycle/audit tracking, idempotent replay protection, reconnect reconciliation, and the current safe command set; Phase 4 interactive PTY is implemented and E2E-verified
 
 ---
 
@@ -213,12 +213,12 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 - ✅ Audit PTY open/attach/reject/detach/close/expire and recording consent without storing raw PTY input
 
 ### Acceptance Criteria
-- ⬜ Admin can open a remote PTY and interact with it end-to-end over CC
-- ⬜ `write_pty` / `resize_pty` / `close_pty` work reliably under reconnect conditions
-- ⬜ PTY output and exit events are correlated correctly by `sessionId`
-- ⬜ Same-operator reattach works within the grace window without spawning a new PTY
-- ⬜ Different-operator attach to an owned live PTY is rejected deterministically
-- ⬜ Slow-consumer/backpressure behavior is bounded and visible
-- ⬜ Idle/abandoned PTY sessions are cleaned up automatically
-- ⬜ Scrollback replay works and truncates with notice
-- ⬜ RBAC/recording/privacy behavior is enforced and auditable
+- ✅ Admin can open a remote PTY and interact with it end-to-end over CC
+- ✅ `write_pty` / `resize_pty` / `close_pty` work reliably under reconnect conditions
+- ✅ PTY output and exit events are correlated correctly by `sessionId`
+- ✅ Same-operator reattach works within the grace window without spawning a new PTY
+- ✅ Different-operator attach to an owned live PTY is rejected deterministically
+- ✅ Slow-consumer/backpressure behavior is bounded and visible
+- ✅ Idle/abandoned PTY sessions are cleaned up automatically
+- ✅ Scrollback replay works and truncates with notice
+- ✅ RBAC/recording/privacy behavior is enforced and auditable
