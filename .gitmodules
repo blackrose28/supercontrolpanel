@@ -1,0 +1,3 @@
+[submodule "cc-server"]
+	path = cc-server
+	url = https://msh-git.sohatv.vn/chuonglv/supercontrolpanelserver.git
