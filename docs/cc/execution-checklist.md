@@ -222,3 +222,66 @@ Track implementation progress for the Control Plane. Each phase has concrete del
 - ✅ Idle/abandoned PTY sessions are cleaned up automatically
 - ✅ Scrollback replay works and truncates with notice
 - ✅ RBAC/recording/privacy behavior is enforced and auditable
+
+
+---
+
+## Phase 5 — File Operations
+
+**Goal:** Add durable, auditable remote file operations over CC, including transfer progress/history and remote-browser-backed path workflows.
+
+**Reference:** `docs/cc/cc-phase-5-file-ops.md`
+
+### Recommended implementation order
+1. align protocol/contracts for file ops and remote browser messages
+2. add durable transfer/session state on cc-server
+3. wire agent-side SCP/SFTP execution + progress/lifecycle reporting
+4. add Admin UI for remote browser + transfer queue/history
+5. add reliability/safety hardening: overwrite policy, atomic writes, quotas, tunnel precheck, integrity checks
+
+### Protocol / CC transport
+- ✅ Add protocol messages for `scp_upload`, `scp_download`, `start_scp_upload`, `start_scp_download`
+- ✅ Add protocol messages for remote browser lifecycle (`open_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `close_remote_browser`)
+- ✅ Define stable transfer progress / terminal-status payloads and reason codes
+- ✅ Define overwrite / follow-symlink / rate-limit / checksum flags in the contract
+
+### Agent (Tauri/Rust)
+- ✅ Add CC command handling for SCP upload/download and remote browser operations
+- ✅ Reuse existing SCP + persistent SFTP browser session implementation safely for CC-owned sessions
+- ✅ Emit transfer lifecycle + progress updates back to CC with stable transfer identifiers
+- ✅ Add Boundary tunnel precheck before Boundary-backed SCP work
+- ✅ Add retry/resume behavior for long-running transfers
+  - ✅ timeout handling
+  - ✅ minimal automatic retry for transient start/pre-transfer failures
+  - ✅ true resumable interrupted-transfer support with validated resume offset/state
+
+### CC Server
+- ✅ Add durable transfer/session storage for file ops and remote browser state
+- ✅ Add authorization checks for file ops and browser mutations
+- ✅ Add transfer history / progress relay between Admin UI and agent websocket
+- ✅ Enforce quota / rate-limit behavior with stable reason codes for the current Phase 5 slice
+- ✅ Audit browser mutations and transfer lifecycle without storing secrets
+- ✅ Persist resume metadata and recovery state for interrupted transfers
+
+### Admin / API
+- ✅ Add remote browser UI over CC for choosing upload/download paths
+- ✅ Add transfer queue/history UI with running, success, and failure states
+- ✅ Surface overwrite confirmations, tunnel-precheck failures, and stable error reasons
+- ✅ Support upload/download initiation from browser selections and manual-path fallback
+- ✅ Add resume-aware transfer UX for interrupted transfers
+
+### File-op hardening
+- ✅ Enforce path normalization and invalid-target rejection across platforms
+- ✅ Add overwrite policy support (`prompt`, `force`, `skip`)
+- ✅ Add atomic upload temp-path + rename flow
+- ✅ Add optional checksum verification reporting
+- ✅ Add symlink-handling policy and audit notes
+
+### Acceptance Criteria
+- ✅ Upload/download works end-to-end over CC with visible continuous progress
+- ✅ Transfer history survives refresh/reconnect and reflects terminal outcomes deterministically
+- ✅ Remote browser operations reflect remote FS changes after refresh
+- ✅ Boundary-backed SCP is rejected clearly when the tunnel is not running
+- ✅ Atomic upload flow prevents partial destination files on success path
+- ✅ Overwrite / checksum / path-safety behavior is enforced and auditable
+- ✅ Interrupted transfers expose truthful retry/resume state and resume only when validated state is trustworthy

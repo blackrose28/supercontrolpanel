@@ -2,6 +2,8 @@ use futures_util::{SinkExt, StreamExt};
 use rand::Rng;
 use std::collections::HashMap;
 use std::io::{Error as IoError, ErrorKind};
+use std::path::Path;
+use std::process::Command;
 use std::sync::Arc;
 use tauri::{AppHandle, Listener, Manager};
 use tokio::sync::Mutex;
@@ -17,10 +19,14 @@ use super::dispatcher::{
     send_command_status, send_inventory, send_status_snapshot,
 };
 use super::protocol::{Envelope, MessageType};
-use crate::services::close_pty_internal;
+use crate::server_mgmt::ConnectionMethod;
+use crate::services::{
+    add_common_ssh_options, close_pty_internal, load_server_by_id, open_remote_sftp_session,
+    resolve_server_ssh_endpoint, ssh_target,
+};
 use crate::stores::{
-    CcRuntimeState, RemotePtyGcDecision, RemotePtyStore, SessionStore, REMOTE_PTY_DETACH_GRACE_MS,
-    REMOTE_PTY_IDLE_TIMEOUT_MS,
+    CcRuntimeState, RemotePtyGcDecision, RemotePtyStore, SessionStore, TransferRuntimeContext,
+    TransferRuntimeDirection, REMOTE_PTY_DETACH_GRACE_MS, REMOTE_PTY_IDLE_TIMEOUT_MS,
 };
 use serde_json::json;
 
@@ -250,9 +256,68 @@ impl CcConnection {
             else {
                 return;
             };
+            let transfer_context = pty_output_app
+                .state::<CcRuntimeState>()
+                .transfer_context_for_session(local_session_id)
+                .ok()
+                .flatten();
+            let transfer_id = transfer_context
+                .as_ref()
+                .map(|context| context.transfer_id.clone());
             let Some(remote_session_id) =
                 remote_pty_session_for_local(&pty_output_app, local_session_id)
             else {
+                if let Some(transfer_id) = transfer_id {
+                    let Some(output_data) = payload_value
+                        .get("data")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToString::to_string)
+                    else {
+                        return;
+                    };
+                    let write = pty_output_write.clone();
+                    let device_id = pty_output_device_id.clone();
+                    let seq_counter = pty_output_seq.clone();
+                    let app = pty_output_app.clone();
+                    let local_session_id = local_session_id.to_string();
+                    tauri::async_runtime::spawn(async move {
+                        if !app.state::<CcRuntimeState>().is_connected()
+                            || !app
+                                .state::<CcRuntimeState>()
+                                .is_generation_current(pty_output_generation)
+                        {
+                            return;
+                        }
+                        let progress_percent = extract_scp_progress_percent(&output_data);
+                        let _ = app
+                            .state::<CcRuntimeState>()
+                            .note_transfer_activity(&local_session_id);
+                        let _ = app
+                            .state::<CcRuntimeState>()
+                            .note_transfer_progress(&local_session_id, progress_percent, None);
+                        let mut w = write.lock().await;
+                        let _ = send_ws_event(
+                            &mut *w,
+                            "transfer_progress",
+                            &device_id,
+                            &seq_counter,
+                            json!({
+                                "transferId": transfer_id,
+                                "bytesTransferred": 0,
+                                "bytesTotal": serde_json::Value::Null,
+                                "percent": progress_percent.map(|value| json!(value)).unwrap_or(serde_json::Value::Null),
+                                "throughputBps": serde_json::Value::Null,
+                                "etaSec": serde_json::Value::Null,
+                                "phase": "transfer",
+                                "resumeSupported": false,
+                                "resumeToken": serde_json::Value::Null,
+                                "resumeOffsetBytes": serde_json::Value::Null,
+                                "tempPathHint": serde_json::Value::Null,
+                            }),
+                        )
+                        .await;
+                    });
+                }
                 return;
             };
             let Some(output_data) = payload_value
@@ -262,6 +327,56 @@ impl CcConnection {
             else {
                 return;
             };
+            if let Some(transfer_id) = transfer_id {
+                let write = pty_output_write.clone();
+                let device_id = pty_output_device_id.clone();
+                let seq_counter = pty_output_seq.clone();
+                let app = pty_output_app.clone();
+                let local_session_id = local_session_id.to_string();
+                let transfer_output = output_data.clone();
+                let transfer_context = transfer_context.clone();
+                tauri::async_runtime::spawn(async move {
+                    if !app.state::<CcRuntimeState>().is_connected()
+                        || !app
+                            .state::<CcRuntimeState>()
+                            .is_generation_current(pty_output_generation)
+                    {
+                        return;
+                    }
+                    let progress_percent = extract_scp_progress_percent(&transfer_output);
+                    let _ = app
+                        .state::<CcRuntimeState>()
+                        .note_transfer_activity(&local_session_id);
+                    let _ = app
+                        .state::<CcRuntimeState>()
+                        .note_transfer_progress(&local_session_id, progress_percent, None);
+                    let resume_fields = transfer_context
+                        .as_ref()
+                        .map(progress_resume_fields)
+                        .unwrap_or_default();
+                    let mut w = write.lock().await;
+                    let _ = send_ws_event(
+                        &mut *w,
+                        "transfer_progress",
+                        &device_id,
+                        &seq_counter,
+                        json!({
+                            "transferId": transfer_id,
+                            "bytesTransferred": 0,
+                            "bytesTotal": serde_json::Value::Null,
+                            "percent": progress_percent.map(|value| json!(value)).unwrap_or(serde_json::Value::Null),
+                            "throughputBps": serde_json::Value::Null,
+                            "etaSec": serde_json::Value::Null,
+                            "phase": "transfer",
+                            "resumeSupported": resume_fields.resume_supported,
+                            "resumeToken": resume_fields.resume_token,
+                            "resumeOffsetBytes": resume_fields.resume_offset_bytes,
+                            "tempPathHint": resume_fields.temp_path_hint,
+                        }),
+                    )
+                    .await;
+                });
+            }
 
             let should_spawn_flush = match pty_output_app
                 .state::<RemotePtyStore>()
@@ -350,9 +465,77 @@ impl CcConnection {
             else {
                 return;
             };
+            let transfer_context = pty_exit_app
+                .state::<CcRuntimeState>()
+                .unbind_transfer_session(&local_session_id)
+                .ok()
+                .flatten();
+            let transfer_id = transfer_context
+                .as_ref()
+                .map(|context| context.transfer_id.clone());
             let Some(remote_session_id) =
                 remote_pty_session_for_local(&pty_exit_app, &local_session_id)
             else {
+                if let Some(transfer_id) = transfer_id {
+                    let write = pty_exit_write.clone();
+                    let device_id = pty_exit_device_id.clone();
+                    let seq_counter = pty_exit_seq.clone();
+                    let app = pty_exit_app.clone();
+                    let transfer_context = transfer_context.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if !app.state::<CcRuntimeState>().is_connected()
+                            || !app
+                                .state::<CcRuntimeState>()
+                                .is_generation_current(pty_exit_generation)
+                        {
+                            return;
+                        }
+                        let mut w = write.lock().await;
+                        let succeeded = payload_value
+                            .get("exitCode")
+                            .and_then(serde_json::Value::as_i64)
+                            == Some(0);
+                        let resume_fields = if succeeded {
+                            ResumeTelemetryFields::default()
+                        } else {
+                            transfer_context
+                                .as_ref()
+                                .map(|context| derive_resume_fields(&app, context))
+                                .unwrap_or_default()
+                        };
+                        let reason_detail = payload_value
+                            .get("reason")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("");
+                        let reason_code = if succeeded {
+                            serde_json::Value::Null
+                        } else {
+                            json!(transfer_reason_code(reason_detail))
+                        };
+                        let _ = send_ws_event(
+                            &mut *w,
+                            "transfer_status",
+                            &device_id,
+                            &seq_counter,
+                            json!({
+                                "transferId": transfer_id,
+                                "state": if succeeded { "succeeded" } else { "failed" },
+                                "direction": serde_json::Value::Null,
+                                "serverId": serde_json::Value::Null,
+                                "browserSessionId": serde_json::Value::Null,
+                                "phase": "finalize",
+                                "reasonCode": reason_code,
+                                "reasonDetail": payload_value.get("reason").cloned().unwrap_or(serde_json::Value::Null),
+                                "message": payload_value.get("reason").cloned().unwrap_or(serde_json::Value::Null),
+                                "resumeSupported": resume_fields.resume_supported,
+                                "resumeToken": resume_fields.resume_token,
+                                "resumeOffsetBytes": resume_fields.resume_offset_bytes,
+                                "tempPathHint": resume_fields.temp_path_hint,
+                            }),
+                        )
+                        .await;
+                    });
+                }
                 return;
             };
             if let Some(object) = payload_value.as_object_mut() {
@@ -372,6 +555,8 @@ impl CcConnection {
             let device_id = pty_exit_device_id.clone();
             let seq_counter = pty_exit_seq.clone();
             let app = pty_exit_app.clone();
+            let transfer_id_for_event = transfer_id.clone();
+            let transfer_context_for_event = transfer_context.clone();
             tauri::async_runtime::spawn(async move {
                 if !app.state::<CcRuntimeState>().is_connected()
                     || !app
@@ -381,6 +566,51 @@ impl CcConnection {
                     return;
                 }
                 let mut w = write.lock().await;
+                if let Some(transfer_id) = transfer_id_for_event {
+                    let succeeded = payload_value
+                        .get("exitCode")
+                        .and_then(serde_json::Value::as_i64)
+                        == Some(0);
+                    let resume_fields = if succeeded {
+                        ResumeTelemetryFields::default()
+                    } else {
+                        transfer_context_for_event
+                            .as_ref()
+                            .map(|context| derive_resume_fields(&app, context))
+                            .unwrap_or_default()
+                    };
+                    let reason_detail = payload_value
+                        .get("reason")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    let reason_code = if succeeded {
+                        serde_json::Value::Null
+                    } else {
+                        json!(transfer_reason_code(reason_detail))
+                    };
+                    let _ = send_ws_event(
+                        &mut *w,
+                        "transfer_status",
+                        &device_id,
+                        &seq_counter,
+                        json!({
+                            "transferId": transfer_id,
+                            "state": if succeeded { "succeeded" } else { "failed" },
+                            "direction": serde_json::Value::Null,
+                            "serverId": serde_json::Value::Null,
+                            "browserSessionId": serde_json::Value::Null,
+                            "phase": "finalize",
+                            "reasonCode": reason_code,
+                            "reasonDetail": payload_value.get("reason").cloned().unwrap_or(serde_json::Value::Null),
+                            "message": payload_value.get("reason").cloned().unwrap_or(serde_json::Value::Null),
+                            "resumeSupported": resume_fields.resume_supported,
+                            "resumeToken": resume_fields.resume_token,
+                            "resumeOffsetBytes": resume_fields.resume_offset_bytes,
+                            "tempPathHint": resume_fields.temp_path_hint,
+                        }),
+                    )
+                    .await;
+                }
                 let _ = send_ws_event(
                     &mut *w,
                     "pty-exit",
@@ -662,4 +892,131 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0)
+}
+
+#[derive(Default)]
+struct ResumeTelemetryFields {
+    resume_supported: bool,
+    resume_token: serde_json::Value,
+    resume_offset_bytes: serde_json::Value,
+    temp_path_hint: serde_json::Value,
+}
+
+fn progress_resume_fields(context: &TransferRuntimeContext) -> ResumeTelemetryFields {
+    ResumeTelemetryFields {
+        resume_supported: false,
+        resume_token: serde_json::Value::Null,
+        resume_offset_bytes: serde_json::Value::Null,
+        temp_path_hint: context
+            .temp_path_hint
+            .as_ref()
+            .map(|value| json!(value))
+            .unwrap_or(serde_json::Value::Null),
+    }
+}
+
+fn derive_resume_fields(app: &AppHandle, context: &TransferRuntimeContext) -> ResumeTelemetryFields {
+    let offset = match context.direction {
+        TransferRuntimeDirection::Upload => derive_remote_resume_offset(app, context),
+        TransferRuntimeDirection::Download => derive_local_resume_offset(context),
+    };
+
+    match offset {
+        Some(offset) if offset > 0 => ResumeTelemetryFields {
+            resume_supported: true,
+            resume_token: json!(context.resume_token),
+            resume_offset_bytes: json!(offset),
+            temp_path_hint: context
+                .temp_path_hint
+                .as_ref()
+                .map(|value| json!(value))
+                .unwrap_or(serde_json::Value::Null),
+        },
+        _ => ResumeTelemetryFields {
+            resume_supported: false,
+            resume_token: serde_json::Value::Null,
+            resume_offset_bytes: serde_json::Value::Null,
+            temp_path_hint: context
+                .temp_path_hint
+                .as_ref()
+                .map(|value| json!(value))
+                .unwrap_or(serde_json::Value::Null),
+        },
+    }
+}
+
+fn derive_remote_resume_offset(app: &AppHandle, context: &TransferRuntimeContext) -> Option<u64> {
+    let temp_path = context.temp_path_hint.as_deref()?;
+    let server = load_server_by_id(app, &context.server_id).ok()?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "SCP").ok()?;
+    if let Some(size) = open_remote_sftp_session(
+        &endpoint,
+        server.connection_method == ConnectionMethod::Boundary,
+    )
+    .ok()
+    .and_then(|session| session.sftp().ok())
+    .and_then(|sftp| sftp.lstat(Path::new(temp_path)).ok())
+    .and_then(|stat| stat.size)
+    {
+        return Some(size);
+    }
+    derive_remote_resume_offset_via_ssh(&endpoint, temp_path)
+}
+
+fn derive_remote_resume_offset_via_ssh(
+    endpoint: &crate::models::SshEndpoint,
+    temp_path: &str,
+) -> Option<u64> {
+    let mut ssh = Command::new("ssh");
+    add_common_ssh_options(&mut ssh, "-p", endpoint.port);
+    let output = ssh
+        .arg(ssh_target(endpoint))
+        .arg(format!("sh -lc 'wc -c < {}'", shell_quote(temp_path)))
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
+
+fn shell_quote(input: &str) -> String {
+    format!("'{}'", input.replace('\'', "'\"'\"'"))
+}
+
+fn derive_local_resume_offset(context: &TransferRuntimeContext) -> Option<u64> {
+    let temp_path = context.temp_path_hint.as_deref()?;
+    std::fs::metadata(temp_path).ok().map(|metadata| metadata.len())
+}
+
+fn transfer_reason_code(reason: &str) -> String {
+    let Some((prefix, _)) = reason.split_once(':') else {
+        return "ACTION_FAILED".to_string();
+    };
+    let code = prefix.trim();
+    if code.is_empty()
+        || !code
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch == '_')
+    {
+        "ACTION_FAILED".to_string()
+    } else {
+        code.to_string()
+    }
+}
+
+fn extract_scp_progress_percent(output: &str) -> Option<u16> {
+    let mut last = None;
+    for token in output.split_whitespace() {
+        if let Some(number) = token.strip_suffix('%') {
+            if let Ok(value) = number.parse::<u16>() {
+                last = Some(value.min(100));
+            }
+        }
+    }
+    last
 }

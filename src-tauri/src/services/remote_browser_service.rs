@@ -19,7 +19,7 @@ use crate::{
     server_mgmt::ConnectionMethod,
     services::{
         add_common_ssh_options, ensure_boundary_tunnel_running, load_server_by_id, lock_err,
-        resolve_server_ssh_endpoint, ssh_target,
+        normalize_remote_transfer_path, resolve_server_ssh_endpoint, ssh_target,
     },
     stores::{
         CliRemoteBrowserIo, CliRemoteBrowserSession, FunctionStore, RemoteBrowserSessionState,
@@ -136,14 +136,8 @@ pub fn path_buf_to_remote_string(path: &std::path::Path) -> String {
 }
 
 pub fn normalize_remote_browser_path(path: &str, fallback: &str) -> String {
-    let trimmed = path.trim();
-    if trimmed.is_empty() {
-        fallback.to_string()
-    } else if trimmed == "/" {
-        "/".to_string()
-    } else {
-        trimmed.trim_end_matches('/').to_string()
-    }
+    normalize_remote_transfer_path(path, Some(fallback), "invalid_target_path", true)
+        .unwrap_or_else(|_| fallback.to_string())
 }
 
 pub fn parse_remote_browser_ls_entry(base_path: &str, raw: &str) -> Option<RemoteBrowseEntry> {
@@ -500,6 +494,28 @@ pub fn open_remote_browser(
     server_tunnel_function_id: fn(&str) -> String,
     #[cfg(target_os = "windows")] create_no_window: u32,
 ) -> Result<RemoteBrowseSession, String> {
+    let browser_id = next_remote_browser_id(browser_store)?;
+    open_remote_browser_with_id(
+        app,
+        server_id,
+        browser_id,
+        browser_store,
+        function_store,
+        server_tunnel_function_id,
+        #[cfg(target_os = "windows")]
+        create_no_window,
+    )
+}
+
+pub fn open_remote_browser_with_id(
+    app: &AppHandle,
+    server_id: String,
+    browser_id: String,
+    browser_store: &RemoteBrowserStore,
+    function_store: &FunctionStore,
+    server_tunnel_function_id: fn(&str) -> String,
+    #[cfg(target_os = "windows")] create_no_window: u32,
+) -> Result<RemoteBrowseSession, String> {
     close_all_remote_browser_sessions(browser_store)?;
     let server = load_server_by_id(app, &server_id)?;
     ensure_boundary_tunnel_running(function_store, &server, server_tunnel_function_id)?;
@@ -526,7 +542,6 @@ pub fn open_remote_browser(
             .map_err(|e| format!("failed to resolve remote root path: {e}"))?;
         (root_path, RemoteBrowserTransport::Sftp(session))
     };
-    let browser_id = next_remote_browser_id(browser_store)?;
     let state = Arc::new(RemoteBrowserSessionState {
         server_id,
         root_path: root_path.clone(),
@@ -552,7 +567,9 @@ pub fn list_remote_browser_children(
     browser_store: &RemoteBrowserStore,
 ) -> Result<Vec<RemoteBrowseEntry>, String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    let target_path =
+        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", true)
+            .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session
@@ -590,7 +607,9 @@ pub fn stat_remote_browser_path(
     browser_store: &RemoteBrowserStore,
 ) -> Result<RemoteBrowseNodeInfo, String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    let target_path =
+        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", true)
+            .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session
@@ -621,7 +640,9 @@ pub fn create_remote_browser_directory(
     browser_store: &RemoteBrowserStore,
 ) -> Result<(), String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    let target_path =
+        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", false)
+            .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session
@@ -644,7 +665,9 @@ pub fn delete_remote_browser_path(
     browser_store: &RemoteBrowserStore,
 ) -> Result<(), String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path = normalize_remote_browser_path(&path, &browser.root_path);
+    let target_path =
+        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", false)
+            .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session

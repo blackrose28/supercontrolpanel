@@ -24,8 +24,8 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
   - `start_boundary_auth`, `stop_boundary_auth`
   - `start_server_tunnel`, `stop_server_tunnel`
   - `start_server_ssh`, `stop_server_ssh`
-- design-only / Phase 4 (not yet implemented): `open_pty`, `write_pty`, `resize_pty`, `close_pty`
-- SCP: `scp_upload`, `scp_download`
+- remote PTY: `open_pty`, `write_pty`, `resize_pty`, `close_pty`
+- SCP/file transfer: `scp_upload`, `scp_download`, `start_scp_upload`, `start_scp_download`
 - Remote browser: `open_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `close_remote_browser`
 
 ## Replies
@@ -52,36 +52,27 @@ Envelope: `{ type, deviceId, seq, ts, payload }`
 ## Mapping to App Contracts
 - Names mirror existing Tauri commands/events 1:1; agent dispatches to `SessionStore`/`FunctionStore` and forwards `function-status`/`pty-output`/`pty-exit`/`openvpn-log`.
 - For command execution tracking, the agent additionally emits `command_status` frames keyed by `commandId`.
-- Remote PTY control is still Phase 4 design work: the local app has PTY commands/events, but the CC agent/server path does not yet implement remote PTY lifecycle handling end-to-end.
+- Remote PTY control is implemented in Phase 4: the local app PTY commands/events are now bridged through the CC agent/server path with stable `sessionId` semantics.
+- Phase 5 extends the same protocol family for durable file transfer and remote-browser workflows.
 
-## Phase 4 protocol gaps to implement first
+## Phase 5 protocol additions
 
-Before remote PTY can be considered implemented, the protocol and both runtimes still need all of the following:
+Phase 5 adds two durable CC identities on top of the existing envelope:
 
-1. **Explicit remote PTY control envelopes**
-   - `open_pty`
-   - `write_pty`
-   - `resize_pty`
-   - `close_pty`
+1. **`transferId`**
+   - server-generated canonical identity for long-running SCP/file-transfer work
+   - survives Admin refresh/reconnect and keys progress/history rows
 
-2. **A stable remote-session identity contract**
-   - use `sessionId` consistently for remote PTY sessions
-   - stop mixing local event field names like `id` with CC-facing remote PTY identity
+2. **`browserSessionId`**
+   - server-generated canonical identity for a CC-owned remote browser session
+   - maps to any agent-local SFTP/browser handle internally
 
-3. **PTY-specific request/reply behavior**
-   - `ack` / `nack` semantics for open/write/resize/close
-   - structured PTY error codes such as `PTY_NOT_FOUND`, `PTY_ALREADY_CLOSED`, `PTY_RATE_LIMITED`, `PTY_UNAUTHORIZED`, `PTY_SPAWN_ERROR`
+Phase 5 command families:
+- file transfer start commands: `start_scp_upload`, `start_scp_download`
+- compatibility/simple transfer commands: `scp_upload`, `scp_download`
+- browser session commands: `open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`
 
-4. **Agent → CC PTY event contract for remote sessions**
-   - `pty-output { sessionId, data }`
-   - `pty-exit { sessionId, exitCode?, reason }`
-   - optional attach/replay metadata if scrollback replay is included in the first pass
-
-5. **Correlation / authorization metadata**
-   - request correlation for Admin ↔ server ↔ agent PTY flows
-   - per-session authorization and recording/privacy state once Phase 4 UI is added
-
-## Phase 4 PTY request/reply semantics
+## Phase 5 request/reply semantics
 
 Remote PTY commands use normal websocket `ack` / `nack` replies, but their result semantics should be explicit:
 
@@ -124,6 +115,31 @@ Recommended `nack.error.details` payloads:
 - `write_pty`: `{ sessionId, droppedBytes?, retryAfterMs? }`
 - `resize_pty`: `{ sessionId, cols?, rows?, retryAfterMs? }`
 - `close_pty`: `{ sessionId }`
+
+Phase 5 file-op commands follow the same `ack` / `nack` transport rules, but long-running transfer truth comes from explicit transfer lifecycle events rather than transport-level ack alone.
+
+Recommended `nack.error.details` payloads for Phase 5:
+
+- `start_scp_upload` / `start_scp_download`: `{ transferId, reasonCode, retryAfterMs?, actionHint? }`
+- `scp_upload` / `scp_download`: `{ transferId?, reasonCode, retryAfterMs?, actionHint? }`
+- `open_remote_browser`: `{ browserSessionId?, reasonCode, actionHint? }`
+- `list_remote_browser_children` / `stat_remote_browser_path` / `create_remote_browser_directory` / `delete_remote_browser_path` / `close_remote_browser`: `{ browserSessionId, path?, reasonCode, actionHint? }`
+
+Stable Phase 5 reason codes should include at least:
+
+- `tunnel_not_running`
+- `path_not_found`
+- `path_already_exists`
+- `overwrite_declined`
+- `invalid_target_path`
+- `invalid_source_path`
+- `permission_denied`
+- `rate_limited`
+- `checksum_mismatch`
+- `transfer_timeout`
+- `resume_not_supported`
+- `browser_session_closed`
+- `agent_error`
 
 ## Versioning and Capabilities
 - Protocol version: `scp.cc.v1` (WebSocket subprotocol).
@@ -289,8 +305,8 @@ Minimal example:
 
 - **Agent → CC (telemetry/events)**: `function-status`, `pty-output`, `pty-exit`, `openvpn-log`, `heartbeat`
 - **Agent → CC (lifecycle)**: `command_status`
-- **CC → Agent (control/commands)**: `start_openvpn_function`, `stop_openvpn_function`, `start_boundary_auth`, `stop_boundary_auth`, `boundary_search_targets`, `list_servers`, `upsert_server`, `delete_server`, `start_server_tunnel`, `stop_server_tunnel`, `start_server_ssh`, `stop_server_ssh`, `start_server_rdp`, `open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `scp_upload`, `scp_download`, `start_scp_upload`, `start_scp_download`, `list_function_statuses`, `get_app_config`, `save_app_config`, `detect_openvpn_executable`, `get_config_paths`, `sync_config_pull`, `sync_config_push`, `save_sync_settings`
-- **CC → Agent (design-only / Phase 4 PTY)**: `open_pty`, `write_pty`, `resize_pty`, `close_pty`
+- **CC → Agent (control/commands)**: `start_openvpn_function`, `stop_openvpn_function`, `start_boundary_auth`, `stop_boundary_auth`, `boundary_search_targets`, `list_servers`, `upsert_server`, `delete_server`, `start_server_tunnel`, `stop_server_tunnel`, `start_server_ssh`, `stop_server_ssh`, `start_server_rdp`, `open_pty`, `write_pty`, `resize_pty`, `close_pty`, `open_remote_browser`, `close_remote_browser`, `list_remote_browser_children`, `stat_remote_browser_path`, `create_remote_browser_directory`, `delete_remote_browser_path`, `scp_upload`, `scp_download`, `start_scp_upload`, `start_scp_download`, `list_function_statuses`, `get_app_config`, `save_app_config`, `detect_openvpn_executable`, `get_config_paths`, `sync_config_pull`, `sync_config_push`, `save_sync_settings`
+- **Agent → CC (Phase 5 transfer/browser events)**: `transfer_status`, `transfer_progress`, `browser_session_status`
 - **Replies**: `ack`, `nack`
 
 Example `command_status` payload:
@@ -795,6 +811,7 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
+    "transferId": { "type": "string", "format": "uuid" },
     "serverId": { "type": "string", "format": "uuid" },
     "cols": { "type": "integer", "minimum": 1 },
     "rows": { "type": "integer", "minimum": 1 }
@@ -810,7 +827,9 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
-    "serverId": { "type": "string", "format": "uuid" }
+    "transferId": { "type": "string", "format": "uuid" },
+    "serverId": { "type": "string", "format": "uuid" },
+    "browserSessionId": { "type": "string" }
   }
 }
 ```
@@ -823,6 +842,7 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
+    "transferId": { "type": "string", "format": "uuid" },
     "serverId": { "type": "string", "format": "uuid" },
     "cols": { "type": "integer", "minimum": 1 },
     "rows": { "type": "integer", "minimum": 1 }
@@ -849,7 +869,7 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/open_remote_browser.json",
   "type": "object",
-  "required": ["commandId", "serverId"],
+  "required": ["commandId", "serverId", "browserSessionId"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
@@ -862,11 +882,11 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/close_remote_browser.json",
   "type": "object",
-  "required": ["commandId", "browserId"],
+  "required": ["commandId", "browserSessionId"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
-    "browserId": { "type": "string" }
+    "browserSessionId": { "type": "string" }
   }
 }
 ```
@@ -875,11 +895,11 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/list_remote_browser_children.json",
   "type": "object",
-  "required": ["commandId", "browserId", "path"],
+  "required": ["commandId", "browserSessionId", "path"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
-    "browserId": { "type": "string" },
+    "browserSessionId": { "type": "string" },
     "path": { "type": "string" }
   }
 }
@@ -889,11 +909,11 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/stat_remote_browser_path.json",
   "type": "object",
-  "required": ["commandId", "browserId", "path"],
+  "required": ["commandId", "browserSessionId", "path"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
-    "browserId": { "type": "string" },
+    "browserSessionId": { "type": "string" },
     "path": { "type": "string" }
   }
 }
@@ -903,11 +923,11 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/create_remote_browser_directory.json",
   "type": "object",
-  "required": ["commandId", "browserId", "path"],
+  "required": ["commandId", "browserSessionId", "path"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
-    "browserId": { "type": "string" },
+    "browserSessionId": { "type": "string" },
     "path": { "type": "string" }
   }
 }
@@ -917,13 +937,17 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/delete_remote_browser_path.json",
   "type": "object",
-  "required": ["commandId", "browserId", "path"],
+  "required": ["commandId", "browserSessionId", "path"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
-    "browserId": { "type": "string" },
+    "browserSessionId": { "type": "string" },
     "path": { "type": "string" },
-    "recursive": { "type": "boolean", "default": false }
+    "recursive": { "type": "boolean", "default": false },
+    "overwritePolicy": { "type": "string", "enum": ["prompt", "force", "skip"] },
+    "followSymlinks": { "type": "boolean", "default": false },
+    "rateLimitKbps": { "type": ["integer", "null"], "minimum": 1 },
+    "verifyChecksum": { "type": "boolean", "default": false }
   }
 }
 ```
@@ -934,14 +958,19 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/scp_upload.json",
   "type": "object",
-  "required": ["commandId", "serverId", "localPath", "remotePath"],
+  "required": ["commandId", "transferId", "serverId", "localPath", "remotePath", "overwritePolicy"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
+    "transferId": { "type": "string", "format": "uuid" },
     "serverId": { "type": "string", "format": "uuid" },
     "localPath": { "type": "string" },
     "remotePath": { "type": "string" },
-    "recursive": { "type": "boolean", "default": false }
+    "recursive": { "type": "boolean", "default": false },
+    "overwritePolicy": { "type": "string", "enum": ["prompt", "force", "skip"] },
+    "followSymlinks": { "type": "boolean", "default": true },
+    "rateLimitKbps": { "type": ["integer", "null"], "minimum": 1 },
+    "verifyChecksum": { "type": "boolean", "default": false }
   }
 }
 ```
@@ -950,14 +979,20 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/scp_download.json",
   "type": "object",
-  "required": ["commandId", "serverId", "remotePath", "localPath"],
+  "required": ["commandId", "transferId", "serverId", "remotePath", "localPath", "overwritePolicy"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
     "serverId": { "type": "string", "format": "uuid" },
     "remotePath": { "type": "string" },
     "localPath": { "type": "string" },
-    "recursive": { "type": "boolean", "default": false }
+    "recursive": { "type": "boolean", "default": false },
+    "overwritePolicy": { "type": "string", "enum": ["prompt", "force", "skip"] },
+    "followSymlinks": { "type": "boolean", "default": false },
+    "rateLimitKbps": { "type": ["integer", "null"], "minimum": 1 },
+    "verifyChecksum": { "type": "boolean", "default": false },
+    "preserveMtime": { "type": "boolean", "default": false },
+    "preserveMode": { "type": "boolean", "default": false }
   }
 }
 ```
@@ -968,14 +1003,20 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_scp_upload.json",
   "type": "object",
-  "required": ["commandId", "serverId", "localPath", "remotePath"],
+  "required": ["commandId", "transferId", "serverId", "localPath", "remotePath", "overwritePolicy"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
     "serverId": { "type": "string", "format": "uuid" },
     "localPath": { "type": "string" },
     "remotePath": { "type": "string" },
-    "recursive": { "type": "boolean", "default": false }
+    "recursive": { "type": "boolean", "default": false },
+    "overwritePolicy": { "type": "string", "enum": ["prompt", "force", "skip"] },
+    "followSymlinks": { "type": "boolean", "default": true },
+    "rateLimitKbps": { "type": ["integer", "null"], "minimum": 1 },
+    "verifyChecksum": { "type": "boolean", "default": false },
+    "preserveMtime": { "type": "boolean", "default": false },
+    "preserveMode": { "type": "boolean", "default": false }
   }
 }
 ```
@@ -984,7 +1025,7 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
 {
   "$id": "https://supercontrolpanel.dev/schemas/cc/commands/start_scp_download.json",
   "type": "object",
-  "required": ["commandId", "serverId", "remotePath", "localPath"],
+  "required": ["commandId", "transferId", "serverId", "remotePath", "localPath", "overwritePolicy"],
   "additionalProperties": false,
   "properties": {
     "commandId": { "type": "string", "format": "uuid" },
@@ -992,6 +1033,69 @@ All WS frames share the same envelope. `type` determines the `payload` schema.
     "remotePath": { "type": "string" },
     "localPath": { "type": "string" },
     "recursive": { "type": "boolean", "default": false }
+  }
+}
+```
+
+### Phase 5 transfer/browser events (Agent → CC)
+
+- `transfer_status`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/transfer_status.json",
+  "type": "object",
+  "required": ["transferId", "state"],
+  "additionalProperties": false,
+  "properties": {
+    "transferId": { "type": "string", "format": "uuid" },
+    "state": { "type": "string", "enum": ["queued", "starting", "running", "succeeded", "failed", "canceled"] },
+    "direction": { "type": ["string", "null"], "enum": ["upload", "download", null] },
+    "serverId": { "type": ["string", "null"] },
+    "browserSessionId": { "type": ["string", "null"] },
+    "phase": { "type": ["string", "null"], "enum": ["precheck", "transfer", "checksum", "finalize", null] },
+    "reasonCode": { "type": ["string", "null"] },
+    "reasonDetail": { "type": ["string", "null"] },
+    "message": { "type": ["string", "null"] }
+  }
+}
+```
+
+- `transfer_progress`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/transfer_progress.json",
+  "type": "object",
+  "required": ["transferId", "bytesTransferred"],
+  "additionalProperties": false,
+  "properties": {
+    "transferId": { "type": "string", "format": "uuid" },
+    "bytesTransferred": { "type": "integer", "minimum": 0 },
+    "bytesTotal": { "type": ["integer", "null"], "minimum": 0 },
+    "percent": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+    "throughputBps": { "type": ["number", "null"], "minimum": 0 },
+    "etaSec": { "type": ["number", "null"], "minimum": 0 },
+    "phase": { "type": ["string", "null"], "enum": ["precheck", "transfer", "checksum", "finalize", null] }
+  }
+}
+```
+
+- `browser_session_status`
+
+```json
+{
+  "$id": "https://supercontrolpanel.dev/schemas/cc/events/browser_session_status.json",
+  "type": "object",
+  "required": ["browserSessionId", "state"],
+  "additionalProperties": false,
+  "properties": {
+    "browserSessionId": { "type": "string" },
+    "serverId": { "type": ["string", "null"] },
+    "state": { "type": "string", "enum": ["opened", "active", "closed", "failed"] },
+    "path": { "type": ["string", "null"] },
+    "reasonCode": { "type": ["string", "null"] },
+    "reasonDetail": { "type": ["string", "null"] }
   }
 }
 ```

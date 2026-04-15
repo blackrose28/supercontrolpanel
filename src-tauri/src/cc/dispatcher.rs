@@ -15,14 +15,38 @@ use crate::commands::{
     boundary::restart_boundary_auth_action,
     openvpn::restart_openvpn_action,
     pty::open_pty_internal,
+    update_functions_for_session_exit,
+    remote_browser::{
+        close_remote_browser_action, create_remote_browser_directory_action,
+        delete_remote_browser_path_action, list_remote_browser_children_action,
+        stat_remote_browser_path_action,
+    },
     server::{restart_server_ssh_action, restart_server_tunnel_action},
 };
 use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
-use crate::services::{close_pty_internal, lock_err, write_pty_internal};
-use crate::stores::{RemotePtyStore, SessionStore};
+use crate::services::{
+    add_common_ssh_options, cc_scp_download_service, cc_scp_upload_service,
+    cc_start_scp_download_service, cc_start_scp_upload_service, close_pty_internal,
+    emit_pty_exit, load_server_by_id, lock_err, open_pty_with_command_builder,
+    open_remote_browser_with_id, resolve_server_ssh_endpoint, ssh_target, StartScpResult,
+    write_pty_internal,
+};
+use crate::stores::{
+    next_transfer_resume_token, CcRuntimeState, FunctionStore, RemoteBrowserStore,
+    RemotePtyStore, SessionStore, TransferRuntimeContext, TransferRuntimeDirection,
+};
 use portable_pty::PtySize;
+use std::path::Path;
+use std::process::Command;
 
 const COMMAND_EXECUTION_TIMEOUT_SECS: u64 = 60;
+const TRANSFER_HEARTBEAT_INTERVAL_SECS: u64 = 15;
+const TRANSFER_TOTAL_TIMEOUT_SECS: u64 = 30 * 60;
+const TRANSFER_STALL_TIMEOUT_SECS: u64 = 60;
+const TRANSFER_PROGRESS_STALL_TIMEOUT_SECS: u64 = 90;
+const TRANSFER_RETRY_BACKOFF_SECS: u64 = 2;
+const TRANSFER_ATTEMPT: u64 = 1;
+const TRANSFER_MAX_ATTEMPTS: u64 = 2;
 
 pub struct CcDispatcher {
     device_id: String,
@@ -89,6 +113,96 @@ pub enum InboundServerMessage {
         req_seq: u64,
         session_id: String,
     },
+    OpenRemoteBrowser {
+        command_id: Option<String>,
+        req_seq: u64,
+        server_id: String,
+        browser_session_id: String,
+    },
+    CloseRemoteBrowser {
+        command_id: Option<String>,
+        req_seq: u64,
+        browser_session_id: String,
+    },
+    ListRemoteBrowserChildren {
+        command_id: Option<String>,
+        req_seq: u64,
+        browser_session_id: String,
+        path: String,
+    },
+    StatRemoteBrowserPath {
+        command_id: Option<String>,
+        req_seq: u64,
+        browser_session_id: String,
+        path: String,
+    },
+    CreateRemoteBrowserDirectory {
+        command_id: Option<String>,
+        req_seq: u64,
+        browser_session_id: String,
+        path: String,
+    },
+    DeleteRemoteBrowserPath {
+        command_id: Option<String>,
+        req_seq: u64,
+        browser_session_id: String,
+        path: String,
+        recursive: bool,
+    },
+    ScpUpload {
+        command_id: Option<String>,
+        req_seq: u64,
+        transfer_id: String,
+        server_id: String,
+        local_path: String,
+        remote_path: String,
+        recursive: bool,
+        overwrite_policy: Option<String>,
+        follow_symlinks: bool,
+        verify_checksum: bool,
+    },
+    ScpDownload {
+        command_id: Option<String>,
+        req_seq: u64,
+        transfer_id: String,
+        server_id: String,
+        remote_path: String,
+        local_path: String,
+        recursive: bool,
+        overwrite_policy: Option<String>,
+        follow_symlinks: bool,
+        verify_checksum: bool,
+    },
+    StartScpUpload {
+        command_id: Option<String>,
+        req_seq: u64,
+        transfer_id: String,
+        server_id: String,
+        local_path: String,
+        remote_path: String,
+        recursive: bool,
+        overwrite_policy: Option<String>,
+        follow_symlinks: bool,
+        verify_checksum: bool,
+        resume_token: Option<String>,
+        resume_offset_bytes: Option<u64>,
+        temp_path_hint: Option<String>,
+    },
+    StartScpDownload {
+        command_id: Option<String>,
+        req_seq: u64,
+        transfer_id: String,
+        server_id: String,
+        remote_path: String,
+        local_path: String,
+        recursive: bool,
+        overwrite_policy: Option<String>,
+        follow_symlinks: bool,
+        verify_checksum: bool,
+        resume_token: Option<String>,
+        resume_offset_bytes: Option<u64>,
+        temp_path_hint: Option<String>,
+    },
 }
 
 impl InboundServerMessage {
@@ -104,7 +218,17 @@ impl InboundServerMessage {
             | Self::OpenPty { command_id, .. }
             | Self::WritePty { command_id, .. }
             | Self::ResizePty { command_id, .. }
-            | Self::ClosePty { command_id, .. } => command_id.as_deref(),
+            | Self::ClosePty { command_id, .. }
+            | Self::OpenRemoteBrowser { command_id, .. }
+            | Self::CloseRemoteBrowser { command_id, .. }
+            | Self::ListRemoteBrowserChildren { command_id, .. }
+            | Self::StatRemoteBrowserPath { command_id, .. }
+            | Self::CreateRemoteBrowserDirectory { command_id, .. }
+            | Self::DeleteRemoteBrowserPath { command_id, .. }
+            | Self::ScpUpload { command_id, .. }
+            | Self::ScpDownload { command_id, .. }
+            | Self::StartScpUpload { command_id, .. }
+            | Self::StartScpDownload { command_id, .. } => command_id.as_deref(),
         }
     }
 }
@@ -149,6 +273,85 @@ struct ResizePtyPayload {
 struct ClosePtyPayload {
     #[serde(rename = "sessionId")]
     session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenRemoteBrowserPayload {
+    #[serde(rename = "serverId")]
+    server_id: String,
+    #[serde(rename = "browserSessionId")]
+    browser_session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserSessionPayload {
+    #[serde(rename = "browserSessionId")]
+    browser_session_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BrowserPathPayload {
+    #[serde(rename = "browserSessionId")]
+    browser_session_id: String,
+    path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteRemoteBrowserPathPayload {
+    #[serde(rename = "browserSessionId")]
+    browser_session_id: String,
+    path: String,
+    recursive: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScpUploadPayload {
+    #[serde(rename = "transferId")]
+    transfer_id: String,
+    #[serde(rename = "serverId")]
+    server_id: String,
+    #[serde(rename = "localPath")]
+    local_path: String,
+    #[serde(rename = "remotePath")]
+    remote_path: String,
+    recursive: Option<bool>,
+    #[serde(rename = "overwritePolicy")]
+    overwrite_policy: Option<String>,
+    #[serde(rename = "followSymlinks")]
+    follow_symlinks: Option<bool>,
+    #[serde(rename = "verifyChecksum")]
+    verify_checksum: Option<bool>,
+    #[serde(rename = "resumeToken")]
+    resume_token: Option<String>,
+    #[serde(rename = "resumeOffsetBytes")]
+    resume_offset_bytes: Option<u64>,
+    #[serde(rename = "tempPathHint")]
+    temp_path_hint: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScpDownloadPayload {
+    #[serde(rename = "transferId")]
+    transfer_id: String,
+    #[serde(rename = "serverId")]
+    server_id: String,
+    #[serde(rename = "remotePath")]
+    remote_path: String,
+    #[serde(rename = "localPath")]
+    local_path: String,
+    recursive: Option<bool>,
+    #[serde(rename = "overwritePolicy")]
+    overwrite_policy: Option<String>,
+    #[serde(rename = "followSymlinks")]
+    follow_symlinks: Option<bool>,
+    #[serde(rename = "verifyChecksum")]
+    verify_checksum: Option<bool>,
+    #[serde(rename = "resumeToken")]
+    resume_token: Option<String>,
+    #[serde(rename = "resumeOffsetBytes")]
+    resume_offset_bytes: Option<u64>,
+    #[serde(rename = "tempPathHint")]
+    temp_path_hint: Option<String>,
 }
 
 pub fn parse_inbound_server_message(
@@ -223,6 +426,138 @@ pub fn parse_inbound_server_message(
                 session_id: payload.session_id,
             })
         }
+        MessageType::OpenRemoteBrowser => {
+            let req_seq = envelope.seq;
+            let payload = parse_open_remote_browser_payload(envelope)?;
+            Ok(InboundServerMessage::OpenRemoteBrowser {
+                command_id,
+                req_seq,
+                server_id: payload.server_id,
+                browser_session_id: payload.browser_session_id,
+            })
+        }
+        MessageType::CloseRemoteBrowser => {
+            let req_seq = envelope.seq;
+            let payload = parse_browser_session_payload(envelope, "close_remote_browser")?;
+            Ok(InboundServerMessage::CloseRemoteBrowser {
+                command_id,
+                req_seq,
+                browser_session_id: payload.browser_session_id,
+            })
+        }
+        MessageType::ListRemoteBrowserChildren => {
+            let req_seq = envelope.seq;
+            let payload = parse_browser_path_payload(envelope, "list_remote_browser_children")?;
+            Ok(InboundServerMessage::ListRemoteBrowserChildren {
+                command_id,
+                req_seq,
+                browser_session_id: payload.browser_session_id,
+                path: payload.path,
+            })
+        }
+        MessageType::StatRemoteBrowserPath => {
+            let req_seq = envelope.seq;
+            let payload = parse_browser_path_payload(envelope, "stat_remote_browser_path")?;
+            Ok(InboundServerMessage::StatRemoteBrowserPath {
+                command_id,
+                req_seq,
+                browser_session_id: payload.browser_session_id,
+                path: payload.path,
+            })
+        }
+        MessageType::CreateRemoteBrowserDirectory => {
+            let req_seq = envelope.seq;
+            let payload =
+                parse_browser_path_payload(envelope, "create_remote_browser_directory")?;
+            Ok(InboundServerMessage::CreateRemoteBrowserDirectory {
+                command_id,
+                req_seq,
+                browser_session_id: payload.browser_session_id,
+                path: payload.path,
+            })
+        }
+        MessageType::DeleteRemoteBrowserPath => {
+            let req_seq = envelope.seq;
+            let payload =
+                parse_delete_remote_browser_path_payload(envelope)?;
+            Ok(InboundServerMessage::DeleteRemoteBrowserPath {
+                command_id,
+                req_seq,
+                browser_session_id: payload.browser_session_id,
+                path: payload.path,
+                recursive: payload.recursive.unwrap_or(false),
+            })
+        }
+        MessageType::ScpUpload => {
+            let req_seq = envelope.seq;
+            let payload = parse_scp_upload_payload(envelope, "scp_upload")?;
+            Ok(InboundServerMessage::ScpUpload {
+                command_id,
+                req_seq,
+                transfer_id: payload.transfer_id,
+                server_id: payload.server_id,
+                local_path: payload.local_path,
+                remote_path: payload.remote_path,
+                recursive: payload.recursive.unwrap_or(false),
+                overwrite_policy: payload.overwrite_policy,
+                follow_symlinks: payload.follow_symlinks.unwrap_or(false),
+                verify_checksum: payload.verify_checksum.unwrap_or(false),
+            })
+        }
+        MessageType::ScpDownload => {
+            let req_seq = envelope.seq;
+            let payload = parse_scp_download_payload(envelope, "scp_download")?;
+            Ok(InboundServerMessage::ScpDownload {
+                command_id,
+                req_seq,
+                transfer_id: payload.transfer_id,
+                server_id: payload.server_id,
+                remote_path: payload.remote_path,
+                local_path: payload.local_path,
+                recursive: payload.recursive.unwrap_or(false),
+                overwrite_policy: payload.overwrite_policy,
+                follow_symlinks: payload.follow_symlinks.unwrap_or(true),
+                verify_checksum: payload.verify_checksum.unwrap_or(false),
+            })
+        }
+        MessageType::StartScpUpload => {
+            let req_seq = envelope.seq;
+            let payload = parse_scp_upload_payload(envelope, "start_scp_upload")?;
+            Ok(InboundServerMessage::StartScpUpload {
+                command_id,
+                req_seq,
+                transfer_id: payload.transfer_id,
+                server_id: payload.server_id,
+                local_path: payload.local_path,
+                remote_path: payload.remote_path,
+                recursive: payload.recursive.unwrap_or(false),
+                overwrite_policy: payload.overwrite_policy,
+                follow_symlinks: payload.follow_symlinks.unwrap_or(false),
+                verify_checksum: payload.verify_checksum.unwrap_or(false),
+                resume_token: payload.resume_token,
+                resume_offset_bytes: payload.resume_offset_bytes,
+                temp_path_hint: payload.temp_path_hint,
+            })
+        }
+        MessageType::StartScpDownload => {
+            let req_seq = envelope.seq;
+            let payload = parse_scp_download_payload(envelope, "start_scp_download")?;
+            Ok(InboundServerMessage::StartScpDownload {
+                command_id,
+                req_seq,
+                transfer_id: payload.transfer_id,
+                server_id: payload.server_id,
+                remote_path: payload.remote_path,
+                local_path: payload.local_path,
+                recursive: payload.recursive.unwrap_or(false),
+                overwrite_policy: payload.overwrite_policy,
+                follow_symlinks: payload.follow_symlinks.unwrap_or(true),
+                verify_checksum: payload.verify_checksum.unwrap_or(false),
+                resume_token: payload.resume_token,
+                resume_offset_bytes: payload.resume_offset_bytes,
+                temp_path_hint: payload.temp_path_hint,
+            })
+        }
         other => Err(InboundServerMessageError {
             command_id,
             reason_code: "UNSUPPORTED_MESSAGE_TYPE".to_string(),
@@ -251,6 +586,46 @@ fn parse_close_pty_payload(
     envelope: Envelope,
 ) -> Result<ClosePtyPayload, InboundServerMessageError> {
     parse_payload(envelope, "close_pty")
+}
+
+fn parse_open_remote_browser_payload(
+    envelope: Envelope,
+) -> Result<OpenRemoteBrowserPayload, InboundServerMessageError> {
+    parse_payload(envelope, "open_remote_browser")
+}
+
+fn parse_browser_session_payload(
+    envelope: Envelope,
+    message_type: &str,
+) -> Result<BrowserSessionPayload, InboundServerMessageError> {
+    parse_payload(envelope, message_type)
+}
+
+fn parse_browser_path_payload(
+    envelope: Envelope,
+    message_type: &str,
+) -> Result<BrowserPathPayload, InboundServerMessageError> {
+    parse_payload(envelope, message_type)
+}
+
+fn parse_delete_remote_browser_path_payload(
+    envelope: Envelope,
+) -> Result<DeleteRemoteBrowserPathPayload, InboundServerMessageError> {
+    parse_payload(envelope, "delete_remote_browser_path")
+}
+
+fn parse_scp_upload_payload(
+    envelope: Envelope,
+    message_type: &str,
+) -> Result<ScpUploadPayload, InboundServerMessageError> {
+    parse_payload(envelope, message_type)
+}
+
+fn parse_scp_download_payload(
+    envelope: Envelope,
+    message_type: &str,
+) -> Result<ScpDownloadPayload, InboundServerMessageError> {
+    parse_payload(envelope, message_type)
 }
 
 fn parse_payload<T: for<'de> Deserialize<'de>>(
@@ -724,7 +1099,1245 @@ where
             }
             Ok(())
         }
+        InboundServerMessage::OpenRemoteBrowser {
+            command_id,
+            req_seq,
+            server_id,
+            browser_session_id,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "open_remote_browser",
+                move || {
+                    let browser_store = app_handle.state::<RemoteBrowserStore>();
+                    let function_store = app_handle.state::<FunctionStore>();
+                    #[cfg(target_os = "windows")]
+                    let session = open_remote_browser_with_id(
+                        &app_handle,
+                        server_id,
+                        browser_session_id,
+                        &browser_store,
+                        &function_store,
+                        crate::server_tunnel_function_id,
+                        crate::CREATE_NO_WINDOW,
+                    )?;
+                    #[cfg(not(target_os = "windows"))]
+                    let session = open_remote_browser_with_id(
+                        &app_handle,
+                        server_id,
+                        browser_session_id,
+                        &browser_store,
+                        &function_store,
+                        crate::server_tunnel_function_id,
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "browserSessionId": session.browser_id,
+                        "rootPath": session.root_path,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::CloseRemoteBrowser {
+            command_id,
+            req_seq,
+            browser_session_id,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "close_remote_browser",
+                move || {
+                    close_remote_browser_action(
+                        browser_session_id.clone(),
+                        app_handle.state::<RemoteBrowserStore>(),
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "browserSessionId": browser_session_id,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::ListRemoteBrowserChildren {
+            command_id,
+            req_seq,
+            browser_session_id,
+            path,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "list_remote_browser_children",
+                move || {
+                    let entries = list_remote_browser_children_action(
+                        browser_session_id.clone(),
+                        path.clone(),
+                        app_handle.state::<RemoteBrowserStore>(),
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "browserSessionId": browser_session_id,
+                        "path": path,
+                        "entries": entries,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::StatRemoteBrowserPath {
+            command_id,
+            req_seq,
+            browser_session_id,
+            path,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "stat_remote_browser_path",
+                move || {
+                    let info = stat_remote_browser_path_action(
+                        browser_session_id.clone(),
+                        path.clone(),
+                        app_handle.state::<RemoteBrowserStore>(),
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "browserSessionId": browser_session_id,
+                        "info": info,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::CreateRemoteBrowserDirectory {
+            command_id,
+            req_seq,
+            browser_session_id,
+            path,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "create_remote_browser_directory",
+                move || {
+                    create_remote_browser_directory_action(
+                        browser_session_id.clone(),
+                        path.clone(),
+                        app_handle.state::<RemoteBrowserStore>(),
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "browserSessionId": browser_session_id,
+                        "path": path,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::DeleteRemoteBrowserPath {
+            command_id,
+            req_seq,
+            browser_session_id,
+            path,
+            recursive,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "delete_remote_browser_path",
+                move || {
+                    delete_remote_browser_path_action(
+                        browser_session_id.clone(),
+                        path.clone(),
+                        Some(recursive),
+                        app_handle.state::<RemoteBrowserStore>(),
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "browserSessionId": browser_session_id,
+                        "path": path,
+                        "recursive": recursive,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::ScpUpload {
+            command_id,
+            req_seq,
+            transfer_id,
+            server_id,
+            local_path,
+            remote_path,
+            recursive,
+            overwrite_policy,
+            follow_symlinks,
+            verify_checksum,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_transfer_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "scp_upload",
+                transfer_id.clone(),
+                move || {
+                    let message = cc_scp_upload_service(
+                        &app_handle,
+                        server_id.clone(),
+                        local_path.clone(),
+                        remote_path.clone(),
+                        Some(recursive),
+                        overwrite_policy.as_deref(),
+                        follow_symlinks,
+                        verify_checksum,
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "transferId": transfer_id,
+                        "message": message,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::ScpDownload {
+            command_id,
+            req_seq,
+            transfer_id,
+            server_id,
+            remote_path,
+            local_path,
+            recursive,
+            overwrite_policy,
+            follow_symlinks,
+            verify_checksum,
+        } => {
+            let app_handle = app.clone();
+            run_blocking_transfer_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "scp_download",
+                transfer_id.clone(),
+                move || {
+                    let message = cc_scp_download_service(
+                        &app_handle,
+                        server_id.clone(),
+                        remote_path.clone(),
+                        local_path.clone(),
+                        Some(recursive),
+                        overwrite_policy.as_deref(),
+                        follow_symlinks,
+                        verify_checksum,
+                    )?;
+                    Ok(json!({
+                        "status": "ok",
+                        "transferId": transfer_id,
+                        "message": message,
+                    }))
+                },
+            )
+            .await
+        }
+        InboundServerMessage::StartScpUpload {
+            command_id,
+            req_seq,
+            transfer_id,
+            server_id,
+            local_path,
+            remote_path,
+            recursive,
+            overwrite_policy,
+            follow_symlinks,
+            verify_checksum,
+            resume_token,
+            resume_offset_bytes,
+            temp_path_hint,
+        } => {
+            let app_handle = app.clone();
+            run_pty_backed_transfer_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "start_scp_upload",
+                transfer_id,
+                TransferRuntimeDirection::Upload,
+                server_id.clone(),
+                local_path.clone(),
+                remote_path.clone(),
+                resume_token.clone(),
+                move || {
+                    cc_start_scp_upload_service(
+                        &app_handle,
+                        &app_handle.state::<SessionStore>(),
+                        server_id.clone(),
+                        local_path.clone(),
+                        remote_path.clone(),
+                        Some(recursive),
+                        overwrite_policy.as_deref(),
+                        follow_symlinks,
+                        verify_checksum,
+                        resume_token.clone(),
+                        resume_offset_bytes,
+                        temp_path_hint.clone(),
+                        open_pty_with_command_builder,
+                        update_functions_for_session_exit,
+                    )
+                },
+                &app,
+            )
+            .await
+        }
+        InboundServerMessage::StartScpDownload {
+            command_id,
+            req_seq,
+            transfer_id,
+            server_id,
+            remote_path,
+            local_path,
+            recursive,
+            overwrite_policy,
+            follow_symlinks,
+            verify_checksum,
+            resume_token,
+            resume_offset_bytes,
+            temp_path_hint,
+        } => {
+            let app_handle = app.clone();
+            run_pty_backed_transfer_command_action(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                req_seq,
+                "start_scp_download",
+                transfer_id,
+                TransferRuntimeDirection::Download,
+                server_id.clone(),
+                local_path.clone(),
+                remote_path.clone(),
+                resume_token.clone(),
+                move || {
+                    cc_start_scp_download_service(
+                        &app_handle,
+                        &app_handle.state::<SessionStore>(),
+                        server_id.clone(),
+                        remote_path.clone(),
+                        local_path.clone(),
+                        Some(recursive),
+                        overwrite_policy.as_deref(),
+                        follow_symlinks,
+                        verify_checksum,
+                        resume_token.clone(),
+                        resume_offset_bytes,
+                        temp_path_hint.clone(),
+                        open_pty_with_command_builder,
+                        update_functions_for_session_exit,
+                    )
+                },
+                &app,
+            )
+            .await
+        }
     }
+}
+
+async fn run_blocking_command_action<W, F>(
+    write: Arc<Mutex<W>>,
+    device_id: String,
+    seq_counter: Arc<Mutex<u64>>,
+    command_id: Option<String>,
+    req_seq: u64,
+    action_name: &'static str,
+    action: F,
+) -> Result<(), String>
+where
+    W: futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+    F: FnOnce() -> Result<Value, String> + Send + 'static,
+{
+    if let Some(command_id) = command_id.as_deref() {
+        let mut w = write.lock().await;
+        send_command_status(
+            &mut *w,
+            &device_id,
+            &seq_counter,
+            command_id,
+            "executing",
+            Some(action_name.to_string()),
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+    }
+
+    let result = tokio::task::spawn_blocking(action)
+        .await
+        .map_err(|err| err.to_string())?;
+
+    let mut w = write.lock().await;
+    match result {
+        Ok(payload) => {
+            send_ack(&mut *w, &device_id, &seq_counter, req_seq, Some(payload))
+                .await
+                .map_err(|err| err.to_string())?;
+            if let Some(command_id) = command_id.as_deref() {
+                send_command_status(
+                    &mut *w,
+                    &device_id,
+                    &seq_counter,
+                    command_id,
+                    "succeeded",
+                    Some(action_name.to_string()),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|err| err.to_string())?;
+            }
+        }
+        Err(err) => {
+            let (reason_code, reason_detail) = split_file_op_reason(&err);
+            send_nack(
+                &mut *w,
+                &device_id,
+                &seq_counter,
+                req_seq,
+                &reason_code,
+                &reason_detail,
+            )
+            .await
+            .map_err(|send_err| send_err.to_string())?;
+            if let Some(command_id) = command_id.as_deref() {
+                send_command_status(
+                    &mut *w,
+                    &device_id,
+                    &seq_counter,
+                    command_id,
+                    "failed",
+                    None,
+                    Some(reason_code),
+                    Some(reason_detail),
+                )
+                .await
+                .map_err(|send_err| send_err.to_string())?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_blocking_transfer_command_action<W, F>(
+    write: Arc<Mutex<W>>,
+    device_id: String,
+    seq_counter: Arc<Mutex<u64>>,
+    command_id: Option<String>,
+    req_seq: u64,
+    action_name: &'static str,
+    transfer_id: String,
+    action: F,
+) -> Result<(), String>
+where
+    W: futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+    F: Fn() -> Result<Value, String> + Send + Clone + 'static,
+{
+    if let Some(command_id) = command_id.as_deref() {
+        let mut w = write.lock().await;
+        send_command_status(
+            &mut *w,
+            &device_id,
+            &seq_counter,
+            command_id,
+            "executing",
+            Some(action_name.to_string()),
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+    }
+
+    for attempt in TRANSFER_ATTEMPT..=TRANSFER_MAX_ATTEMPTS {
+        emit_transfer_status(
+            &write,
+            &device_id,
+            &seq_counter,
+            &transfer_id,
+            "starting",
+            "precheck",
+            None,
+            None,
+            Some(action_name.to_string()),
+            attempt,
+            false,
+        )
+        .await;
+
+        let result = tokio::task::spawn_blocking(action.clone())
+            .await
+            .map_err(|err| err.to_string())?;
+        match result {
+            Ok(payload) => {
+                let mut w = write.lock().await;
+                send_ack(&mut *w, &device_id, &seq_counter, req_seq, Some(payload))
+                    .await
+                    .map_err(|err| err.to_string())?;
+                if let Some(command_id) = command_id.as_deref() {
+                    send_command_status(
+                        &mut *w,
+                        &device_id,
+                        &seq_counter,
+                        command_id,
+                        "succeeded",
+                        Some(action_name.to_string()),
+                        None,
+                        None,
+                    )
+                    .await
+                    .map_err(|err| err.to_string())?;
+                }
+                emit_transfer_status(
+                    &write,
+                    &device_id,
+                    &seq_counter,
+                    &transfer_id,
+                    "succeeded",
+                    "finalize",
+                    None,
+                    None,
+                    Some(action_name.to_string()),
+                    attempt,
+                    false,
+                )
+                .await;
+                return Ok(());
+            }
+            Err(err) => {
+                let (reason_code, reason_detail) = split_file_op_reason(&err);
+                let will_retry =
+                    attempt < TRANSFER_MAX_ATTEMPTS && is_retryable_transfer_reason(&reason_code);
+                if will_retry {
+                    emit_transfer_status(
+                        &write,
+                        &device_id,
+                        &seq_counter,
+                        &transfer_id,
+                        "starting",
+                        "precheck",
+                        Some(reason_code.clone()),
+                        Some(reason_detail.clone()),
+                        Some(format!(
+                            "{action_name} attempt {attempt} failed; retrying in {}s",
+                            TRANSFER_RETRY_BACKOFF_SECS
+                        )),
+                        attempt,
+                        true,
+                    )
+                    .await;
+                    tokio::time::sleep(Duration::from_secs(TRANSFER_RETRY_BACKOFF_SECS)).await;
+                    continue;
+                }
+
+                let mut w = write.lock().await;
+                send_nack(
+                    &mut *w,
+                    &device_id,
+                    &seq_counter,
+                    req_seq,
+                    &reason_code,
+                    &reason_detail,
+                )
+                .await
+                .map_err(|send_err| send_err.to_string())?;
+                if let Some(command_id) = command_id.as_deref() {
+                    send_command_status(
+                        &mut *w,
+                        &device_id,
+                        &seq_counter,
+                        command_id,
+                        "failed",
+                        None,
+                        Some(reason_code.clone()),
+                        Some(reason_detail.clone()),
+                    )
+                    .await
+                    .map_err(|send_err| send_err.to_string())?;
+                }
+                drop(w);
+                emit_transfer_status(
+                    &write,
+                    &device_id,
+                    &seq_counter,
+                    &transfer_id,
+                    "failed",
+                    "finalize",
+                    Some(reason_code),
+                    Some(reason_detail),
+                    Some(action_name.to_string()),
+                    attempt,
+                    false,
+                )
+                .await;
+                return Err(err);
+            }
+        }
+    }
+
+    Err("agent_error: transfer retry loop exhausted unexpectedly".to_string())
+}
+
+async fn run_pty_backed_transfer_command_action<W, F>(
+    write: Arc<Mutex<W>>,
+    device_id: String,
+    seq_counter: Arc<Mutex<u64>>,
+    command_id: Option<String>,
+    req_seq: u64,
+    action_name: &'static str,
+    transfer_id: String,
+    transfer_direction: TransferRuntimeDirection,
+    server_id: String,
+    local_path: String,
+    remote_path: String,
+    resume_token: Option<String>,
+    action: F,
+    app: &AppHandle,
+) -> Result<(), String>
+where
+    W: futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+    F: Fn() -> Result<StartScpResult, String> + Send + Clone + 'static,
+{
+    if let Some(command_id) = command_id.as_deref() {
+        let mut w = write.lock().await;
+        send_command_status(
+            &mut *w,
+            &device_id,
+            &seq_counter,
+            command_id,
+            "executing",
+            Some(action_name.to_string()),
+            None,
+            None,
+        )
+        .await
+        .map_err(|err| err.to_string())?;
+    }
+
+    for attempt in TRANSFER_ATTEMPT..=TRANSFER_MAX_ATTEMPTS {
+        emit_transfer_status(
+            &write,
+            &device_id,
+            &seq_counter,
+            &transfer_id,
+            "starting",
+            "precheck",
+            None,
+            None,
+            Some(action_name.to_string()),
+            attempt,
+            false,
+        )
+        .await;
+
+        let result = tokio::task::spawn_blocking(action.clone())
+            .await
+            .map_err(|err| err.to_string())?;
+
+        let mut w = write.lock().await;
+        match result {
+            Ok(start_result) => match start_result {
+                StartScpResult::Started {
+                    session_id,
+                    temp_path_hint,
+                } => {
+                    let _ = app
+                        .state::<CcRuntimeState>()
+                        .bind_transfer_session(
+                            &session_id,
+                            TransferRuntimeContext {
+                                transfer_id: transfer_id.clone(),
+                                direction: transfer_direction,
+                                server_id: server_id.clone(),
+                                local_path: local_path.clone(),
+                                remote_path: remote_path.clone(),
+                                temp_path_hint,
+                                resume_token: resume_token.clone().unwrap_or_else(|| next_transfer_resume_token(&transfer_id)),
+                            },
+                        );
+                    spawn_transfer_watchdog(
+                        write.clone(),
+                        device_id.clone(),
+                        seq_counter.clone(),
+                        transfer_id.clone(),
+                        session_id.clone(),
+                        app.clone(),
+                    );
+                    send_ack(
+                        &mut *w,
+                        &device_id,
+                        &seq_counter,
+                        req_seq,
+                        Some(json!({
+                            "status": "ok",
+                            "transferId": transfer_id,
+                            "sessionId": session_id,
+                            "attempt": attempt,
+                            "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+                            "resumeSupported": false,
+                            "resumeToken": serde_json::Value::Null,
+                            "resumeOffsetBytes": serde_json::Value::Null,
+                        })),
+                    )
+                    .await
+                    .map_err(|err| err.to_string())?;
+                    let _ = send_ws_event(
+                        &mut *w,
+                        "transfer_status",
+                        &device_id,
+                        &seq_counter,
+                        json!({
+                            "transferId": transfer_id,
+                            "state": "running",
+                            "direction": serde_json::Value::Null,
+                            "serverId": serde_json::Value::Null,
+                            "browserSessionId": serde_json::Value::Null,
+                            "phase": "transfer",
+                            "reasonCode": serde_json::Value::Null,
+                            "reasonDetail": serde_json::Value::Null,
+                            "message": action_name,
+                            "attempt": attempt,
+                            "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+                            "resumeSupported": false,
+                            "retryScheduled": false,
+                        }),
+                    )
+                    .await;
+                    if let Some(command_id) = command_id.as_deref() {
+                        send_command_status(
+                            &mut *w,
+                            &device_id,
+                            &seq_counter,
+                            command_id,
+                            "succeeded",
+                            Some(action_name.to_string()),
+                            None,
+                            None,
+                        )
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    }
+                    return Ok(());
+                }
+                StartScpResult::Skipped(message) => {
+                    send_ack(
+                        &mut *w,
+                        &device_id,
+                        &seq_counter,
+                        req_seq,
+                        Some(json!({
+                            "status": "ok",
+                            "transferId": transfer_id,
+                            "skipped": true,
+                            "message": message,
+                            "attempt": attempt,
+                            "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+                            "resumeSupported": false,
+                        })),
+                    )
+                    .await
+                    .map_err(|err| err.to_string())?;
+                    let _ = send_ws_event(
+                        &mut *w,
+                        "transfer_status",
+                        &device_id,
+                        &seq_counter,
+                        json!({
+                            "transferId": transfer_id,
+                            "state": "succeeded",
+                            "direction": serde_json::Value::Null,
+                            "serverId": serde_json::Value::Null,
+                            "browserSessionId": serde_json::Value::Null,
+                            "phase": "finalize",
+                            "reasonCode": serde_json::Value::Null,
+                            "reasonDetail": serde_json::Value::Null,
+                            "message": message,
+                            "attempt": attempt,
+                            "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+                            "resumeSupported": false,
+                            "retryScheduled": false,
+                        }),
+                    )
+                    .await;
+                    if let Some(command_id) = command_id.as_deref() {
+                        send_command_status(
+                            &mut *w,
+                            &device_id,
+                            &seq_counter,
+                            command_id,
+                            "succeeded",
+                            Some("skipped".to_string()),
+                            None,
+                            None,
+                        )
+                        .await
+                        .map_err(|err| err.to_string())?;
+                    }
+                    return Ok(());
+                },
+            },
+            Err(err) => {
+                let (reason_code, reason_detail) = split_file_op_reason(&err);
+                let will_retry =
+                    attempt < TRANSFER_MAX_ATTEMPTS && is_retryable_transfer_reason(&reason_code);
+                if will_retry {
+                    let _ = send_ws_event(
+                        &mut *w,
+                        "transfer_status",
+                        &device_id,
+                        &seq_counter,
+                        json!({
+                            "transferId": transfer_id,
+                            "state": "starting",
+                            "direction": serde_json::Value::Null,
+                            "serverId": serde_json::Value::Null,
+                            "browserSessionId": serde_json::Value::Null,
+                            "phase": "precheck",
+                            "reasonCode": reason_code,
+                            "reasonDetail": reason_detail,
+                            "message": format!(
+                                "{action_name} attempt {attempt} failed; retrying in {}s",
+                                TRANSFER_RETRY_BACKOFF_SECS
+                            ),
+                            "attempt": attempt,
+                            "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+                            "resumeSupported": false,
+                            "retryScheduled": true,
+                        }),
+                    )
+                    .await;
+                    drop(w);
+                    tokio::time::sleep(Duration::from_secs(TRANSFER_RETRY_BACKOFF_SECS)).await;
+                    continue;
+                }
+
+                send_nack(
+                    &mut *w,
+                    &device_id,
+                    &seq_counter,
+                    req_seq,
+                    &reason_code,
+                    &reason_detail,
+                )
+                .await
+                .map_err(|send_err| send_err.to_string())?;
+                let _ = send_ws_event(
+                    &mut *w,
+                    "transfer_status",
+                    &device_id,
+                    &seq_counter,
+                    json!({
+                        "transferId": transfer_id,
+                        "state": "failed",
+                        "direction": serde_json::Value::Null,
+                        "serverId": serde_json::Value::Null,
+                        "browserSessionId": serde_json::Value::Null,
+                        "phase": "finalize",
+                        "reasonCode": reason_code,
+                        "reasonDetail": reason_detail,
+                        "message": action_name,
+                        "attempt": attempt,
+                        "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+                        "resumeSupported": false,
+                        "retryScheduled": false,
+                    }),
+                )
+                .await;
+                if let Some(command_id) = command_id.as_deref() {
+                    send_command_status(
+                        &mut *w,
+                        &device_id,
+                        &seq_counter,
+                        command_id,
+                        "failed",
+                        None,
+                        Some(split_file_op_reason(&err).0),
+                        Some(split_file_op_reason(&err).1),
+                    )
+                    .await
+                    .map_err(|send_err| send_err.to_string())?;
+                }
+                return Err(err);
+            }
+        }
+    }
+
+    Err("agent_error: transfer retry loop exhausted unexpectedly".to_string())
+}
+
+async fn emit_transfer_status<W>(
+    write: &Arc<Mutex<W>>,
+    device_id: &str,
+    seq_counter: &Arc<Mutex<u64>>,
+    transfer_id: &str,
+    state: &str,
+    phase: &str,
+    reason_code: Option<String>,
+    reason_detail: Option<String>,
+    message: Option<String>,
+    attempt: u64,
+    retry_scheduled: bool,
+) where
+    W: futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+{
+    let mut w = write.lock().await;
+    let _ = send_ws_event(
+        &mut *w,
+        "transfer_status",
+        device_id,
+        seq_counter,
+        json!({
+            "transferId": transfer_id,
+            "state": state,
+            "direction": serde_json::Value::Null,
+            "serverId": serde_json::Value::Null,
+            "browserSessionId": serde_json::Value::Null,
+            "phase": phase,
+            "reasonCode": reason_code,
+            "reasonDetail": reason_detail,
+            "message": message,
+            "attempt": attempt,
+            "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+            "resumeSupported": false,
+            "retryScheduled": retry_scheduled,
+        }),
+    )
+    .await;
+}
+
+fn is_retryable_transfer_reason(reason_code: &str) -> bool {
+    matches!(reason_code, "agent_error" | "rate_limited")
+}
+
+fn split_file_op_reason(detail: &str) -> (String, String) {
+    let Some((prefix, rest)) = detail.split_once(':') else {
+        return ("ACTION_FAILED".to_string(), detail.to_string());
+    };
+    let reason_code = prefix.trim();
+    if reason_code.is_empty()
+        || !reason_code
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch == '_')
+    {
+        return ("ACTION_FAILED".to_string(), detail.to_string());
+    }
+    (reason_code.to_string(), rest.trim().to_string())
+}
+
+fn spawn_transfer_watchdog<W>(
+    write: Arc<Mutex<W>>,
+    device_id: String,
+    seq_counter: Arc<Mutex<u64>>,
+    transfer_id: String,
+    local_session_id: String,
+    app: AppHandle,
+) where
+    W: futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+        + Unpin
+        + Send
+        + 'static,
+{
+    tauri::async_runtime::spawn(async move {
+        let started_at = std::time::Instant::now();
+
+        loop {
+            tokio::time::sleep(Duration::from_secs(TRANSFER_HEARTBEAT_INTERVAL_SECS)).await;
+
+            let current_transfer_id = app
+                .state::<CcRuntimeState>()
+                .transfer_id_for_session(&local_session_id)
+                .ok()
+                .flatten();
+            if current_transfer_id.as_deref() != Some(transfer_id.as_str()) {
+                return;
+            }
+
+            let stalled = app
+                .state::<CcRuntimeState>()
+                .transfer_last_activity_elapsed(&local_session_id)
+                .ok()
+                .flatten()
+                .map(|elapsed| elapsed >= Duration::from_secs(TRANSFER_STALL_TIMEOUT_SECS))
+                .unwrap_or(false);
+            if stalled {
+                let session_still_open = lock_err(&app.state::<SessionStore>().sessions)
+                    .map(|sessions| sessions.contains_key(&local_session_id))
+                    .unwrap_or(false);
+                if !session_still_open {
+                    return;
+                }
+
+                let current_transfer_id = app
+                    .state::<CcRuntimeState>()
+                    .transfer_id_for_session(&local_session_id)
+                    .ok()
+                    .flatten();
+                if current_transfer_id.as_deref() != Some(transfer_id.as_str()) {
+                    return;
+                }
+
+                if let Ok(Some(mut payload)) =
+                    close_pty_internal(&local_session_id, &app.state::<SessionStore>())
+                {
+                    payload.reason = format!(
+                        "transfer_stalled: no PTY output observed for {}s",
+                        TRANSFER_STALL_TIMEOUT_SECS
+                    );
+                    emit_pty_exit(&app, payload);
+                }
+
+                return;
+            }
+
+            let progress_stalled = app
+                .state::<CcRuntimeState>()
+                .transfer_last_progress_elapsed(&local_session_id)
+                .ok()
+                .flatten()
+                .map(|elapsed| elapsed >= Duration::from_secs(TRANSFER_PROGRESS_STALL_TIMEOUT_SECS))
+                .unwrap_or(false);
+            if progress_stalled {
+                let session_still_open = lock_err(&app.state::<SessionStore>().sessions)
+                    .map(|sessions| sessions.contains_key(&local_session_id))
+                    .unwrap_or(false);
+                if !session_still_open {
+                    return;
+                }
+
+                let current_transfer_id = app
+                    .state::<CcRuntimeState>()
+                    .transfer_id_for_session(&local_session_id)
+                    .ok()
+                    .flatten();
+                if current_transfer_id.as_deref() != Some(transfer_id.as_str()) {
+                    return;
+                }
+
+                if let Ok(Some(mut payload)) =
+                    close_pty_internal(&local_session_id, &app.state::<SessionStore>())
+                {
+                    payload.reason = format!(
+                        "transfer_stalled: no transfer progress observed for {}s",
+                        TRANSFER_PROGRESS_STALL_TIMEOUT_SECS
+                    );
+                    emit_pty_exit(&app, payload);
+                }
+
+                return;
+            }
+
+            if started_at.elapsed() >= Duration::from_secs(TRANSFER_TOTAL_TIMEOUT_SECS) {
+                let session_still_open = lock_err(&app.state::<SessionStore>().sessions)
+                    .map(|sessions| sessions.contains_key(&local_session_id))
+                    .unwrap_or(false);
+                if !session_still_open {
+                    return;
+                }
+
+                let current_transfer_id = app
+                    .state::<CcRuntimeState>()
+                    .transfer_id_for_session(&local_session_id)
+                    .ok()
+                    .flatten();
+                if current_transfer_id.as_deref() != Some(transfer_id.as_str()) {
+                    return;
+                }
+
+                if let Ok(Some(mut payload)) =
+                    close_pty_internal(&local_session_id, &app.state::<SessionStore>())
+                {
+                    payload.reason = format!(
+                        "transfer_timeout: exceeded {}s total transfer runtime",
+                        TRANSFER_TOTAL_TIMEOUT_SECS
+                    );
+                    emit_pty_exit(&app, payload);
+                }
+
+                return;
+            }
+
+            let sampled_progress = app
+                .state::<CcRuntimeState>()
+                .transfer_context_for_session(&local_session_id)
+                .ok()
+                .flatten()
+                .and_then(|context| {
+                    tokio::task::block_in_place(|| sample_transfer_progress(&app, &context))
+                });
+            if let Some(progress) = sampled_progress.as_ref() {
+                let _ = app
+                    .state::<CcRuntimeState>()
+                    .note_transfer_progress(
+                        &local_session_id,
+                        progress.percent.map(|value| value.floor() as u16),
+                        Some(progress.bytes_transferred),
+                    );
+            }
+
+            let mut w = write.lock().await;
+            let _ = send_ws_event(
+                &mut *w,
+                "transfer_progress",
+                &device_id,
+                &seq_counter,
+                json!({
+                    "transferId": transfer_id,
+                    "bytesTransferred": sampled_progress.as_ref().map(|progress| progress.bytes_transferred).unwrap_or(0),
+                    "bytesTotal": sampled_progress.as_ref().and_then(|progress| progress.bytes_total.map(|value| json!(value))).unwrap_or(serde_json::Value::Null),
+                    "percent": sampled_progress.as_ref().and_then(|progress| progress.percent.map(|value| json!(value))).unwrap_or(serde_json::Value::Null),
+                    "phase": "transfer",
+                    "heartbeat": true,
+                    "message": sampled_progress.as_ref().and_then(|progress| progress.message.clone()).unwrap_or_else(|| "Transfer heartbeat".to_string()),
+                    "attempt": TRANSFER_ATTEMPT,
+                    "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+                    "resumeSupported": false,
+                    "retryScheduled": false,
+                }),
+            )
+            .await;
+        }
+    });
+}
+
+struct SampledTransferProgress {
+    bytes_transferred: u64,
+    bytes_total: Option<u64>,
+    percent: Option<f64>,
+    message: Option<String>,
+}
+
+fn sample_transfer_progress(
+    app: &AppHandle,
+    context: &TransferRuntimeContext,
+) -> Option<SampledTransferProgress> {
+    match context.direction {
+        TransferRuntimeDirection::Upload => sample_upload_progress(app, context),
+        TransferRuntimeDirection::Download => sample_download_progress(app, context),
+    }
+}
+
+fn sample_upload_progress(
+    app: &AppHandle,
+    context: &TransferRuntimeContext,
+) -> Option<SampledTransferProgress> {
+    let temp_path = context.temp_path_hint.as_deref()?;
+    let bytes_total = std::fs::metadata(&context.local_path).ok()?.len();
+    let bytes_transferred = sample_remote_file_size(app, &context.server_id, temp_path)?;
+    Some(SampledTransferProgress {
+        bytes_transferred,
+        bytes_total: Some(bytes_total),
+        percent: percent_from_bytes(bytes_transferred, bytes_total),
+        message: Some("Resuming upload…".to_string()),
+    })
+}
+
+fn sample_download_progress(
+    app: &AppHandle,
+    context: &TransferRuntimeContext,
+) -> Option<SampledTransferProgress> {
+    let local_path = context.temp_path_hint.as_deref()?;
+    let bytes_transferred = std::fs::metadata(local_path).ok()?.len();
+    let bytes_total = sample_remote_file_size(app, &context.server_id, &context.remote_path)?;
+    Some(SampledTransferProgress {
+        bytes_transferred,
+        bytes_total: Some(bytes_total),
+        percent: percent_from_bytes(bytes_transferred, bytes_total),
+        message: Some("Resuming download…".to_string()),
+    })
+}
+
+fn percent_from_bytes(bytes_transferred: u64, bytes_total: u64) -> Option<f64> {
+    if bytes_total == 0 {
+        return None;
+    }
+    Some(((bytes_transferred as f64 / bytes_total as f64) * 100.0).clamp(0.0, 100.0))
+}
+
+fn sample_remote_file_size(app: &AppHandle, server_id: &str, remote_path: &str) -> Option<u64> {
+    let server = load_server_by_id(app, server_id).ok()?;
+    let endpoint = resolve_server_ssh_endpoint(&server, "SCP").ok()?;
+    if let Some(size) = crate::services::open_remote_sftp_session(
+        &endpoint,
+        server.connection_method == ConnectionMethod::Boundary,
+    )
+    .ok()
+    .and_then(|session| session.sftp().ok())
+    .and_then(|sftp| sftp.lstat(Path::new(remote_path)).ok())
+    .and_then(|stat| stat.size)
+    {
+        return Some(size);
+    }
+    let mut ssh = Command::new("ssh");
+    add_common_ssh_options(&mut ssh, "-p", endpoint.port);
+    let output = ssh
+        .arg(ssh_target(&endpoint))
+        .arg(format!("sh -lc {}", shell_quote(&format!("wc -c < {}", shell_quote(remote_path)))))
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()?.trim().parse::<u64>().ok()
+}
+
+fn shell_quote(input: &str) -> String {
+    format!("'{}'", input.replace('\'', "'\"'\"'"))
 }
 
 fn bind_remote_pty_session(
@@ -815,6 +2428,24 @@ pub async fn send_nack(
     };
     let nack = Envelope::nack(device_id.to_string(), seq, req_seq, code, message);
     let msg = serde_json::to_string(&nack)?;
+    write.send(Message::Text(msg)).await?;
+    Ok(())
+}
+
+pub async fn send_ws_event(
+    write: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
+    msg_type: &str,
+    device_id: &str,
+    seq_counter: &Arc<Mutex<u64>>,
+    payload: serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let seq = {
+        let mut s = seq_counter.lock().await;
+        *s += 1;
+        *s
+    };
+    let envelope = Envelope::new(msg_type, device_id.to_string(), seq, Some(payload));
+    let msg = serde_json::to_string(&envelope)?;
     write.send(Message::Text(msg)).await?;
     Ok(())
 }
