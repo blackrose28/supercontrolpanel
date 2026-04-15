@@ -29,7 +29,7 @@ This file tracks execution of the Phase 5 Admin UI UX hardening plan. Items are 
 - [x] **2.3** Status dots (🟢 connected, 🟡 degraded, 🔴 disconnected)
 - [x] **2.4** Function status dots (● running, ○ idle, ● error)
 - [x] **2.5** Actions dropdown (View Details, Request Snapshot, View Logs, Config)
-- [ ] **2.6** Implement sortable columns
+- [x] **2.6** Implement sortable columns
 - [x] **2.7** Add search/filter input
 - [x] **2.8** Device detail opens on selection (existing inline view, not modal)
 
@@ -98,8 +98,8 @@ This file tracks execution of the Phase 5 Admin UI UX hardening plan. Items are 
 ### 8. API Token Display + Copy
 
 - [x] **8.1** API token section in Config (existing UI)
-- [ ] **8.2** Display masked token (not implemented - shows full)
-- [ ] **8.3** Click-to-reveal (not implemented)
+- [x] **8.2** Display masked token
+- [x] **8.3** Click-to-reveal
 - [x] **8.4** Copy button on token creation
 - [x] **8.5** Success message on copy
 - [x] **8.6** Regenerate Token button (existing UI)
@@ -161,7 +161,7 @@ This file tracks execution of the Phase 5 Admin UI UX hardening plan. Items are 
 ### Required Endpoints
 
 - [x] `GET /admin/v1/alerts` - List current alerts (admin session only)
-- [ ] `POST /admin/v1/alerts/dismiss` - Mark alert as read (not implemented)
+- [x] `POST /admin/v1/alerts/dismiss` - Mark alert as read
 - [x] `GET /v1/commands` - List commands (with pagination, filters)
 - [x] `GET /v1/commands/:id` - Single command detail
 - [x] `GET /v1/commands/:id/audit` - Audit trail for command
