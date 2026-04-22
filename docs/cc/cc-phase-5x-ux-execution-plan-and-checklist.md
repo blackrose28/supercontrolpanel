@@ -18,14 +18,14 @@ This file tracks execution of the Phase 5 Admin UI UX hardening plan. Items are 
   - [x] **1.3.4** Implement "Clear all" button
 - [x] **1.4** Persist read state in localStorage
 - [x] **1.5** Status pill showing device health (connected count)
-- [ ] **1.6** Navigation dropdown (not implemented - using button nav instead)
-- [ ] **1.7** Config gear / User menu (not implemented)
+- [x] **1.6** Navigation dropdown (dropdown menu with Devices/Config, click-outside-to-close)
+- [x] **1.7** Config gear icon (⚙ gear button scrolls to config section)
 
 ### 2. Devices Page - Compact Table
 
 - [x] **2.1** Create new compact devices table component
 - [x] **2.2** Table columns: Status, Device, Last Seen, Functions, Actions
-- [ ] **2.2b** Type column (not implemented - shows OS in Device name instead)
+- [x] **2.2b** OS column (agent reports OS in heartbeat, persisted in DB, displayed in devices table)
 - [x] **2.3** Status dots (🟢 connected, 🟡 degraded, 🔴 disconnected)
 - [x] **2.4** Function status dots (● running, ○ idle, ● error)
 - [x] **2.5** Actions dropdown (View Details, Request Snapshot, View Logs, Config)
@@ -41,8 +41,8 @@ This file tracks execution of the Phase 5 Admin UI UX hardening plan. Items are 
   - [x] **3.1.3** No actions on card (device-level actions exist)
 - [x] **3.2** Status pill states (running/idle/error)
 - [x] **3.3** Grid layout (auto-fit)
-- [ ] **3.4** Responsive breakpoints (not implemented)
-- [ ] **3.5** Click-to-navigate (not implemented)
+- [x] **3.4** Responsive breakpoints (960px, 768px, 480px media queries)
+- [x] **3.5** Click-to-navigate (clickable cards scroll to command history)
 
 ### 4. Transfer Queue with Progress
 

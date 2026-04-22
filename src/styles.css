@@ -883,3 +883,433 @@ h3 {
         flex-direction: column;
     }
 }
+
+/* Enhanced mobile viewport fixes for narrow screens (iPhone 14 Pro Max: 430px) */
+
+/* Prevent horizontal overflow */
+html {
+    overflow-x: hidden;
+}
+
+body {
+    overflow-x: hidden;
+}
+
+.app {
+    overflow-x: hidden;
+    max-width: 100vw;
+}
+
+.views {
+    overflow-x: hidden;
+    max-width: 100%;
+}
+
+.view {
+    overflow-x: hidden;
+    max-width: 100%;
+}
+
+/* Mobile viewport optimizations */
+@media (max-width: 768px) {
+    /* Prevent any horizontal scroll */
+    * {
+        max-width: 100%;
+    }
+
+    /* Toolbar navigation - ensure it wraps properly */
+    .toolbar {
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px 8px;
+        overflow-x: hidden;
+    }
+
+    .nav-btn {
+        font-size: 12px;
+        padding: 4px 8px;
+        flex: 0 1 auto;
+        white-space: nowrap;
+    }
+
+    .toolbar-version {
+        font-size: 10px;
+        padding: 2px 6px;
+        flex: 0 0 auto;
+    }
+
+    /* Main content */
+    .views {
+        padding: 8px;
+        overflow-x: hidden;
+    }
+
+    h2 {
+        font-size: 16px;
+        word-wrap: break-word;
+    }
+
+    h3 {
+        font-size: 14px;
+        word-wrap: break-word;
+    }
+
+    .hint {
+        font-size: 12px;
+        word-wrap: break-word;
+    }
+
+    /* Form grids */
+    .form-grid {
+        grid-template-columns: 1fr;
+        gap: 6px;
+        max-width: 100%;
+        overflow-x: hidden;
+    }
+
+    .form-grid label {
+        font-weight: 600;
+        margin-bottom: -2px;
+        word-wrap: break-word;
+    }
+
+    .form-grid input,
+    .form-grid select {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .server-editor-grid {
+        grid-template-columns: 1fr;
+    }
+
+    /* Inline input actions */
+    .inline-input-actions {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+
+    .inline-input-actions input {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Actions - ensure buttons don't overflow */
+    .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .actions button {
+        flex: 1 1 calc(50% - 3px);
+        min-width: 0;
+        max-width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Server actions */
+    .server-ssh-actions {
+        flex-direction: column;
+    }
+
+    .server-ssh-actions button {
+        width: 100%;
+        flex: 1 1 auto;
+    }
+
+    /* Servers toolbar */
+    .servers-toolbar {
+        flex-direction: column;
+        gap: 8px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .servers-search-bar {
+        width: 100%;
+        display: flex;
+        gap: 6px;
+    }
+
+    .servers-search-bar input {
+        flex: 1;
+        min-width: 0;
+        box-sizing: border-box;
+    }
+
+    .servers-search-bar button {
+        flex: 0 0 auto;
+    }
+
+    /* Tables - horizontal scroll */
+    .servers-table-wrap {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .servers-table {
+        min-width: 600px;
+        font-size: 12px;
+    }
+
+    .servers-table th,
+    .servers-table td {
+        padding: 6px 8px;
+    }
+
+    /* Status cards */
+    .status-card {
+        padding: 8px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .status-card-head {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+    }
+
+    .status-card-actions {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+
+    /* Modals */
+    .modal-overlay {
+        padding: 8px;
+        align-items: flex-start;
+    }
+
+    .modal-panel {
+        padding: 12px 16px;
+        max-height: 95vh;
+        margin-top: 8px;
+        width: 100%;
+        max-width: calc(100vw - 16px);
+        box-sizing: border-box;
+    }
+
+    .modal-panel-wide {
+        max-width: calc(100vw - 16px);
+    }
+
+    .modal-actions {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .modal-actions button {
+        width: 100%;
+    }
+
+    /* SCP picker */
+    .scp-picker-toolbar {
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .scp-picker-toolbar button {
+        flex: 0 1 auto;
+    }
+
+    .scp-picker-tree,
+    .scp-picker-list-wrap {
+        max-height: 240px;
+    }
+
+    /* Terminal adjustments */
+    .terminal-host {
+        font-size: 12px;
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    /* Boundary search */
+    .boundary-search-bar {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .boundary-search-bar input {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* SCP history */
+    .scp-history-head {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 6px;
+    }
+
+    .scp-entry {
+        padding: 8px 10px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .scp-entry-head {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+    }
+
+    .scp-entry-progress {
+        flex-direction: column;
+        gap: 6px;
+        width: 100%;
+    }
+
+    .scp-entry-progress-bar {
+        width: 100%;
+    }
+
+    .scp-entry-progress-label {
+        width: 100%;
+        text-align: left;
+    }
+
+    /* Config sync actions - allow wrapping on mobile */
+    .config-sync-actions {
+        flex-wrap: wrap;
+    }
+}
+
+@media (max-width: 480px) {
+    /* Extra small screens */
+    .toolbar {
+        padding: 4px 6px;
+        gap: 3px;
+    }
+
+    .nav-btn {
+        font-size: 11px;
+        padding: 3px 6px;
+    }
+
+    .views {
+        padding: 6px;
+    }
+
+    h2 {
+        font-size: 15px;
+    }
+
+    .hint {
+        font-size: 11px;
+    }
+
+    button {
+        padding: 5px 8px;
+        font-size: 13px;
+    }
+
+    input,
+    select {
+        font-size: 14px;
+        padding: 5px 7px;
+    }
+
+    .servers-table {
+        min-width: 500px;
+        font-size: 11px;
+    }
+
+    .servers-table th,
+    .servers-table td {
+        padding: 5px 6px;
+    }
+
+    .status-card {
+        padding: 6px 8px;
+    }
+
+    .modal-panel {
+        padding: 10px 12px;
+    }
+
+    .scp-picker-tree,
+    .scp-picker-list-wrap {
+        max-height: 200px;
+    }
+
+    /* Hide version badge on very small screens */
+    .toolbar-version {
+        display: none;
+    }
+
+    /* Make buttons stack on very small screens */
+    .actions button {
+        flex: 1 1 100%;
+    }
+}
+
+/* Touch-friendly improvements */
+@media (hover: none) and (pointer: coarse) {
+    /* Increase touch targets */
+    button {
+        min-height: 44px;
+        padding: 8px 12px;
+    }
+
+    .nav-btn {
+        min-height: 40px;
+    }
+
+    input,
+    select {
+        min-height: 44px;
+    }
+
+    .link-btn {
+        min-height: 40px;
+        padding: 8px 10px;
+    }
+
+    .scp-picker-tree-toggle {
+        width: 32px;
+        height: 32px;
+    }
+
+    .scp-picker-tree-label {
+        padding: 8px 10px;
+    }
+
+    .scp-picker-crumb {
+        padding: 6px 10px;
+    }
+
+    .servers-table tr {
+        cursor: default;
+    }
+
+    .scp-picker-table tr {
+        cursor: default;
+    }
+}
+
+/* Landscape mobile optimization */
+@media (max-width: 768px) and (orientation: landscape) {
+    .app {
+        height: 100vh;
+    }
+
+    .views {
+        overflow-y: auto;
+    }
+
+    .modal-overlay {
+        align-items: center;
+    }
+
+    .modal-panel {
+        max-height: 85vh;
+    }
+}

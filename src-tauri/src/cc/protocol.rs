@@ -106,6 +106,7 @@ impl Envelope {
     pub fn heartbeat(device_id: String, seq: u64, uptime_sec: u64) -> Self {
         let payload = serde_json::json!({
             "uptimeSec": uptime_sec,
+            "os": std::env::consts::OS,
             "versions": {
                 "app": env!("CARGO_PKG_VERSION"),
                 "rust": "1.76.0",

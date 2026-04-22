@@ -57,3 +57,11 @@ dist-linux/
 
 # OpenCode
 opencode.json
+
+# Test files
+mobile-test.html
+
+# Work-in-progress code (new implementations)
+src-tauri/src/cc/connection_new/
+src-tauri/src/cc/dispatcher_new/
+src-tauri/src/cc/telemetry_queue_disk_new/

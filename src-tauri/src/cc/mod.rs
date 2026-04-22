@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod connection;
 pub mod dispatcher;
+pub mod dispatcher_new;
 pub mod protocol;
 pub mod telemetry;
 pub mod telemetry_queue;
