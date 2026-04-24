@@ -148,7 +148,7 @@ pub(crate) fn update_functions_for_session_exit(
                     .map(|v| v.to_string())
                     .unwrap_or_else(|| "unknown".to_string())
             );
-            status.session_id = None;
+            // Keep sessionId so tunnel logs remain queryable after PTY exits.
             status.updated_at_ms = now_ms();
             changed.push(status.clone());
             if function_id == OPENVPN_FUNCTION_ID {

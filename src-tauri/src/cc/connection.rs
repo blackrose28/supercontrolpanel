@@ -150,7 +150,7 @@ impl CcConnection {
         println!("CC connection established");
 
         // Send initial status_snapshot
-        send_status_snapshot(&mut write, &self.device_id, &self.seq).await?;
+        send_status_snapshot(&mut write, &self.device_id, &self.seq, &self.app).await?;
         let initial_inventory_hash =
             send_inventory(&mut write, &self.device_id, &self.seq, &self.app).await?;
 

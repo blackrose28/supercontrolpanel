@@ -21,7 +21,10 @@ use crate::commands::{
         delete_remote_browser_path_action, list_remote_browser_children_action,
         stat_remote_browser_path_action,
     },
-    server::{restart_server_ssh_action, restart_server_tunnel_action},
+    server::{
+        restart_server_ssh_action, restart_server_tunnel_action, start_server_tunnel_action,
+        stop_server_tunnel_action,
+    },
 };
 use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
 use crate::services::{
@@ -80,6 +83,14 @@ pub enum InboundServerMessage {
     RequestRecentLogs { command_id: Option<String> },
     RequestRestartOpenvpn { command_id: Option<String> },
     RequestRestartBoundaryAuth { command_id: Option<String> },
+    RequestStartServerTunnel {
+        command_id: Option<String>,
+        server_id: String,
+    },
+    RequestStopServerTunnel {
+        command_id: Option<String>,
+        server_id: String,
+    },
     RequestRestartServerTunnel {
         command_id: Option<String>,
         server_id: String,
@@ -213,6 +224,8 @@ impl InboundServerMessage {
             | Self::RequestRecentLogs { command_id }
             | Self::RequestRestartOpenvpn { command_id }
             | Self::RequestRestartBoundaryAuth { command_id }
+            | Self::RequestStartServerTunnel { command_id, .. }
+            | Self::RequestStopServerTunnel { command_id, .. }
             | Self::RequestRestartServerTunnel { command_id, .. }
             | Self::RequestRestartServerSsh { command_id, .. }
             | Self::OpenPty { command_id, .. }
@@ -370,6 +383,20 @@ pub fn parse_inbound_server_message(
         }
         MessageType::RequestRestartBoundaryAuth => {
             Ok(InboundServerMessage::RequestRestartBoundaryAuth { command_id })
+        }
+        MessageType::RequestStartServerTunnel => {
+            let payload = parse_restart_server_payload(envelope)?;
+            Ok(InboundServerMessage::RequestStartServerTunnel {
+                command_id,
+                server_id: payload.server_id,
+            })
+        }
+        MessageType::RequestStopServerTunnel => {
+            let payload = parse_restart_server_payload(envelope)?;
+            Ok(InboundServerMessage::RequestStopServerTunnel {
+                command_id,
+                server_id: payload.server_id,
+            })
         }
         MessageType::RequestRestartServerTunnel => {
             let payload = parse_restart_server_payload(envelope)?;
@@ -706,7 +733,7 @@ where
                 )
                 .await
                 .map_err(|err| err.to_string())?;
-                send_status_snapshot(&mut *w, &device_id, &seq_counter)
+                send_status_snapshot(&mut *w, &device_id, &seq_counter, &app)
                     .await
                     .map_err(|err| err.to_string())?;
                 send_command_status(
@@ -723,7 +750,7 @@ where
                 .map_err(|err| err.to_string())?;
             } else {
                 let mut w = write.lock().await;
-                send_status_snapshot(&mut *w, &device_id, &seq_counter)
+                send_status_snapshot(&mut *w, &device_id, &seq_counter, &app)
                     .await
                     .map_err(|err| err.to_string())?;
             }
@@ -826,6 +853,64 @@ where
                 "restart_boundary_auth",
                 None,
                 move || restart_boundary_auth_action(app.clone()),
+            );
+            Ok(())
+        }
+        InboundServerMessage::RequestStartServerTunnel {
+            command_id,
+            server_id,
+        } => {
+            let action_server_id = server_id.clone();
+            spawn_restart_task(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                "start_server_tunnel",
+                Some(server_id),
+                move || {
+                    let cfg = crate::commands::load_app_config_from_disk(&app)?;
+                    let session_store = app.state::<SessionStore>();
+                    let function_store = app.state::<FunctionStore>();
+                    let browser_store = app.state::<RemoteBrowserStore>();
+                    start_server_tunnel_action(
+                        action_server_id.clone(),
+                        cfg.app.default_terminal_cols,
+                        cfg.app.default_terminal_rows,
+                        app.clone(),
+                        session_store,
+                        function_store,
+                        browser_store,
+                    )
+                    .map(|_| ())
+                },
+            );
+            Ok(())
+        }
+        InboundServerMessage::RequestStopServerTunnel {
+            command_id,
+            server_id,
+        } => {
+            let action_server_id = server_id.clone();
+            spawn_restart_task(
+                write,
+                device_id,
+                seq_counter,
+                command_id,
+                "stop_server_tunnel",
+                Some(server_id),
+                move || {
+                    let session_store = app.state::<SessionStore>();
+                    let function_store = app.state::<FunctionStore>();
+                    let browser_store = app.state::<RemoteBrowserStore>();
+                    stop_server_tunnel_action(
+                        action_server_id.clone(),
+                        app.clone(),
+                        session_store,
+                        function_store,
+                        browser_store,
+                    )
+                },
             );
             Ok(())
         }
@@ -1473,6 +1558,65 @@ where
                 &app,
             )
             .await
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_inbound_server_message, InboundServerMessage};
+    use crate::cc::protocol::Envelope;
+    use serde_json::json;
+
+    #[test]
+    fn parses_request_start_server_tunnel_message() {
+        let envelope = Envelope {
+            msg_type: "request_start_server_tunnel".to_string(),
+            device_id: "device-1".to_string(),
+            seq: 1,
+            ts: "2026-04-23T00:00:00.000Z".to_string(),
+            payload: Some(json!({ "serverId": "srv-1" })),
+            command_id: Some("cmd-1".to_string()),
+            req_seq: None,
+        };
+
+        let parsed = parse_inbound_server_message(envelope).expect("expected parser success");
+
+        match parsed {
+            InboundServerMessage::RequestStartServerTunnel {
+                command_id,
+                server_id,
+            } => {
+                assert_eq!(command_id.as_deref(), Some("cmd-1"));
+                assert_eq!(server_id, "srv-1");
+            }
+            other => panic!("unexpected parsed message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_request_stop_server_tunnel_message() {
+        let envelope = Envelope {
+            msg_type: "request_stop_server_tunnel".to_string(),
+            device_id: "device-1".to_string(),
+            seq: 2,
+            ts: "2026-04-23T00:00:00.000Z".to_string(),
+            payload: Some(json!({ "serverId": "srv-2" })),
+            command_id: Some("cmd-2".to_string()),
+            req_seq: None,
+        };
+
+        let parsed = parse_inbound_server_message(envelope).expect("expected parser success");
+
+        match parsed {
+            InboundServerMessage::RequestStopServerTunnel {
+                command_id,
+                server_id,
+            } => {
+                assert_eq!(command_id.as_deref(), Some("cmd-2"));
+                assert_eq!(server_id, "srv-2");
+            }
+            other => panic!("unexpected parsed message: {other:?}"),
         }
     }
 }
@@ -2571,13 +2715,20 @@ pub async fn send_status_snapshot(
     write: &mut (impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin),
     device_id: &str,
     seq_counter: &Arc<Mutex<u64>>,
+    app: &AppHandle,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let function_store = app.state::<FunctionStore>();
+    let function_states: Vec<_> = {
+        let statuses = function_store.statuses.lock().map_err(|_| "mutex poisoned")?;
+        statuses.values().cloned().collect()
+    };
+
     let seq = {
         let mut s = seq_counter.lock().await;
         *s += 1;
         *s
     };
-    let snapshot = Envelope::status_snapshot(device_id.to_string(), seq);
+    let snapshot = Envelope::status_snapshot(device_id.to_string(), seq, function_states);
     let msg = serde_json::to_string(&snapshot)?;
     write.send(Message::Text(msg)).await?;
     Ok(())

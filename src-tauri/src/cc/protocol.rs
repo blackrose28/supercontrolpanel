@@ -33,6 +33,8 @@ pub enum MessageType {
     RequestRestartBoundaryAuth,
     RequestRestartServerTunnel,
     RequestRestartServerSsh,
+    RequestStartServerTunnel,
+    RequestStopServerTunnel,
     OpenPty,
     WritePty,
     ResizePty,
@@ -69,6 +71,8 @@ impl From<&str> for MessageType {
             "request_restart_boundary_auth" => MessageType::RequestRestartBoundaryAuth,
             "request_restart_server_tunnel" => MessageType::RequestRestartServerTunnel,
             "request_restart_server_ssh" => MessageType::RequestRestartServerSsh,
+            "request_start_server_tunnel" => MessageType::RequestStartServerTunnel,
+            "request_stop_server_tunnel" => MessageType::RequestStopServerTunnel,
             "open_pty" => MessageType::OpenPty,
             "write_pty" => MessageType::WritePty,
             "resize_pty" => MessageType::ResizePty,
@@ -116,10 +120,21 @@ impl Envelope {
         Self::new("heartbeat", device_id, seq, Some(payload))
     }
 
-    pub fn status_snapshot(device_id: String, seq: u64) -> Self {
+    pub fn status_snapshot(device_id: String, seq: u64, function_states: Vec<crate::models::FunctionStatus>) -> Self {
+        let states_json: Vec<serde_json::Value> = function_states.iter().map(|s| {
+            serde_json::json!({
+                "functionId": s.function_id,
+                "state": s.state,
+                "message": s.message,
+                "sessionId": s.session_id,
+                "boundaryTokenSource": s.boundary_token_source,
+                "updatedAtMs": s.updated_at_ms,
+            })
+        }).collect();
         let payload = serde_json::json!({
             "activeSessions": [],
-            "lastSeqByStream": {}
+            "lastSeqByStream": {},
+            "functionStates": states_json,
         });
         Self::new("status_snapshot", device_id, seq, Some(payload))
     }
@@ -163,5 +178,66 @@ impl Envelope {
         let mut envelope = Self::new("nack", device_id, seq, Some(payload));
         envelope.req_seq = Some(req_seq);
         envelope
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Envelope, MessageType};
+
+    #[test]
+    fn status_snapshot_includes_function_states() {
+        let states = vec![
+            crate::models::FunctionStatus {
+                function_id: "server-tunnel-srv1".to_string(),
+                state: "running".to_string(),
+                message: "Tunnel active".to_string(),
+                boundary_token_source: None,
+                session_id: Some("pty-abc123".to_string()),
+                updated_at_ms: 1714000000000,
+            },
+            crate::models::FunctionStatus {
+                function_id: "openvpn-connect".to_string(),
+                state: "idle".to_string(),
+                message: "Ready".to_string(),
+                boundary_token_source: None,
+                session_id: None,
+                updated_at_ms: 1714000000001,
+            },
+        ];
+
+        let snapshot = Envelope::status_snapshot("device-1".to_string(), 42, states);
+        assert_eq!(snapshot.msg_type, "status_snapshot");
+        assert_eq!(snapshot.device_id, "device-1");
+        assert_eq!(snapshot.seq, 42);
+
+        let payload = snapshot.payload.unwrap();
+        let func_states = payload.get("functionStates").unwrap().as_array().unwrap();
+        assert_eq!(func_states.len(), 2);
+
+        let tunnel = &func_states[0];
+        assert_eq!(tunnel.get("functionId").unwrap(), "server-tunnel-srv1");
+        assert_eq!(tunnel.get("state").unwrap(), "running");
+        assert_eq!(tunnel.get("sessionId").unwrap(), "pty-abc123");
+        assert_eq!(tunnel.get("message").unwrap(), "Tunnel active");
+
+        let openvpn = &func_states[1];
+        assert_eq!(openvpn.get("functionId").unwrap(), "openvpn-connect");
+        assert_eq!(openvpn.get("state").unwrap(), "idle");
+        assert!(openvpn.get("sessionId").unwrap().is_null());
+    }
+
+    #[test]
+    fn status_snapshot_includes_active_sessions_and_last_seq() {
+        let states: Vec<crate::models::FunctionStatus> = vec![];
+        let snapshot = Envelope::status_snapshot("device-1".to_string(), 1, states);
+        let payload = snapshot.payload.unwrap();
+
+        // Existing fields are still present
+        assert!(payload.get("activeSessions").is_some());
+        assert!(payload.get("lastSeqByStream").is_some());
+        // New field is present even when empty
+        assert!(payload.get("functionStates").is_some());
+        assert_eq!(payload.get("functionStates").unwrap().as_array().unwrap().len(), 0);
     }
 }
