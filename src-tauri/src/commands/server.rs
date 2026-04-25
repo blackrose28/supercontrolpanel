@@ -140,8 +140,18 @@ pub(crate) fn stop_server_tunnel_action(
         close_pty_internal,
         emit_pty_exit,
         upsert_function_status,
+        load_servers,
         server_tunnel_function_id,
     )
+}
+
+async fn run_stop_server_tunnel_blocking<F>(action: F) -> Result<(), String>
+where
+    F: FnOnce() -> Result<(), String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(action)
+        .await
+        .map_err(|err| format!("failed to join stop server tunnel task: {err}"))?
 }
 
 pub(crate) fn restart_server_tunnel_action(
@@ -220,14 +230,20 @@ pub(crate) fn restart_server_tunnel_action(
 }
 
 #[tauri::command]
-pub fn stop_server_tunnel(
-    server_id: String,
-    app: AppHandle,
-    session_store: State<'_, SessionStore>,
-    function_store: State<'_, FunctionStore>,
-    browser_store: State<'_, RemoteBrowserStore>,
-) -> Result<(), String> {
-    stop_server_tunnel_action(server_id, app, session_store, function_store, browser_store)
+pub async fn stop_server_tunnel(server_id: String, app: AppHandle) -> Result<(), String> {
+    run_stop_server_tunnel_blocking(move || {
+        let session_store = app.state::<SessionStore>();
+        let function_store = app.state::<FunctionStore>();
+        let browser_store = app.state::<RemoteBrowserStore>();
+        stop_server_tunnel_action(
+            server_id,
+            app.clone(),
+            session_store,
+            function_store,
+            browser_store,
+        )
+    })
+    .await
 }
 
 pub(crate) fn start_server_ssh_action(
@@ -370,4 +386,34 @@ pub fn stop_server_ssh(
     function_store: State<'_, FunctionStore>,
 ) -> Result<(), String> {
     stop_server_ssh_action(server_id, app, session_store, function_store)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::run_stop_server_tunnel_blocking;
+    use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn stop_server_tunnel_blocking_helper_runs_action_off_async_task() {
+        let thread_id = std::thread::current().id();
+        let action_thread_id = Arc::new(Mutex::new(None));
+        let action_thread_id_clone = action_thread_id.clone();
+
+        run_stop_server_tunnel_blocking(move || {
+            *action_thread_id_clone
+                .lock()
+                .expect("action thread id lock") = Some(std::thread::current().id());
+            Ok(())
+        })
+        .await
+        .expect("blocking action should succeed");
+
+        assert_ne!(
+            action_thread_id
+                .lock()
+                .expect("action thread id lock")
+                .unwrap(),
+            thread_id
+        );
+    }
 }

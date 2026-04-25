@@ -33,6 +33,8 @@ pub enum MessageType {
     RequestRestartBoundaryAuth,
     RequestRestartServerTunnel,
     RequestRestartServerSsh,
+    RequestStartServerSsh,
+    RequestAttachServerSsh,
     RequestStartServerTunnel,
     RequestStopServerTunnel,
     OpenPty,
@@ -71,6 +73,8 @@ impl From<&str> for MessageType {
             "request_restart_boundary_auth" => MessageType::RequestRestartBoundaryAuth,
             "request_restart_server_tunnel" => MessageType::RequestRestartServerTunnel,
             "request_restart_server_ssh" => MessageType::RequestRestartServerSsh,
+            "request_start_server_ssh" => MessageType::RequestStartServerSsh,
+            "request_attach_server_ssh" => MessageType::RequestAttachServerSsh,
             "request_start_server_tunnel" => MessageType::RequestStartServerTunnel,
             "request_stop_server_tunnel" => MessageType::RequestStopServerTunnel,
             "open_pty" => MessageType::OpenPty,
@@ -120,17 +124,24 @@ impl Envelope {
         Self::new("heartbeat", device_id, seq, Some(payload))
     }
 
-    pub fn status_snapshot(device_id: String, seq: u64, function_states: Vec<crate::models::FunctionStatus>) -> Self {
-        let states_json: Vec<serde_json::Value> = function_states.iter().map(|s| {
-            serde_json::json!({
-                "functionId": s.function_id,
-                "state": s.state,
-                "message": s.message,
-                "sessionId": s.session_id,
-                "boundaryTokenSource": s.boundary_token_source,
-                "updatedAtMs": s.updated_at_ms,
+    pub fn status_snapshot(
+        device_id: String,
+        seq: u64,
+        function_states: Vec<crate::models::FunctionStatus>,
+    ) -> Self {
+        let states_json: Vec<serde_json::Value> = function_states
+            .iter()
+            .map(|s| {
+                serde_json::json!({
+                    "functionId": s.function_id,
+                    "state": s.state,
+                    "message": s.message,
+                    "sessionId": s.session_id,
+                    "boundaryTokenSource": s.boundary_token_source,
+                    "updatedAtMs": s.updated_at_ms,
+                })
             })
-        }).collect();
+            .collect();
         let payload = serde_json::json!({
             "activeSessions": [],
             "lastSeqByStream": {},
@@ -151,12 +162,7 @@ impl Envelope {
         Self::new("recent_logs", device_id, seq, Some(logs))
     }
 
-    pub fn command_status(
-        device_id: String,
-        seq: u64,
-        command_id: String,
-        status: Value,
-    ) -> Self {
+    pub fn command_status(device_id: String, seq: u64, command_id: String, status: Value) -> Self {
         let mut envelope = Self::new("command_status", device_id, seq, Some(status));
         envelope.command_id = Some(command_id);
         envelope
@@ -238,6 +244,14 @@ mod tests {
         assert!(payload.get("lastSeqByStream").is_some());
         // New field is present even when empty
         assert!(payload.get("functionStates").is_some());
-        assert_eq!(payload.get("functionStates").unwrap().as_array().unwrap().len(), 0);
+        assert_eq!(
+            payload
+                .get("functionStates")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
     }
 }

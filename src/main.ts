@@ -8,6 +8,13 @@ import {
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "./styles.css";
+import { syncServerSessionFromStatus } from "./serverSessionState";
+import {
+  applyScpTransferStatusUpdate,
+  type ScpTransferEntry,
+  type ScpTransferState,
+  type ScpTransferStatusPayload,
+} from "./scpTransferState";
 
 type PtyOutputPayload = {
   id: string;
@@ -164,19 +171,6 @@ type ScpPickerMode =
 type ScpPickerSelection = {
   path: string;
   kind: RemotePathKind;
-};
-
-type ScpTransferState = "pending" | "success" | "error";
-
-type ScpTransferEntry = {
-  id: string;
-  title: string;
-  detail: string;
-  state: ScpTransferState;
-  createdAtMs: number;
-  progressPercent: number | null;
-  source?: string;
-  destination?: string;
 };
 
 const BOUNDARY_AUTH_FUNCTION_ID = "boundary-auth";
@@ -515,6 +509,7 @@ let unlistenOutput: UnlistenFn | null = null;
 let unlistenExit: UnlistenFn | null = null;
 let unlistenFunctionStatus: UnlistenFn | null = null;
 let unlistenOpenVpnLog: UnlistenFn | null = null;
+let unlistenScpTransferStatus: UnlistenFn | null = null;
 let openvpnReconnectRenderTimer: number | null = null;
 
 async function attachListeners() {
@@ -647,31 +642,46 @@ async function attachListeners() {
         syncCaddyButtons();
       }
       if (event.payload.functionId.startsWith(SERVER_TUNNEL_PREFIX)) {
-        const serverId = event.payload.functionId.slice(
-          SERVER_TUNNEL_PREFIX.length,
+        syncServerSessionFromStatus(
+          serverTunnelSessions,
+          SERVER_TUNNEL_PREFIX,
+          event.payload,
         );
-        if (event.payload.sessionId) {
-          serverTunnelSessions[serverId] = event.payload.sessionId;
-        } else {
-          delete serverTunnelSessions[serverId];
-        }
         syncServerActions();
       }
       if (event.payload.functionId.startsWith(SERVER_SSH_PREFIX)) {
-        const serverId = event.payload.functionId.slice(
-          SERVER_SSH_PREFIX.length,
+        syncServerSessionFromStatus(
+          serverSshSessions,
+          SERVER_SSH_PREFIX,
+          event.payload,
         );
-        if (event.payload.sessionId) {
-          serverSshSessions[serverId] = event.payload.sessionId;
-        } else {
-          delete serverSshSessions[serverId];
-        }
         syncServerActions();
       }
       if (event.payload.functionId === BOUNDARY_AUTH_FUNCTION_ID) {
         boundarySessionId = event.payload.sessionId;
         syncBoundaryButtons();
       }
+    },
+  );
+
+  unlistenScpTransferStatus = await listen<ScpTransferStatusPayload>(
+    "scp-transfer-status",
+    (event) => {
+      const nextState = applyScpTransferStatusUpdate(
+        {
+          counter: scpTransferCounter,
+          history: scpTransferHistory,
+          sessionIds: scpTransferSessionIds,
+          sessionOutput: scpTransferSessionOutput,
+        },
+        event.payload,
+        Date.now(),
+      );
+      scpTransferCounter = nextState.counter;
+      scpTransferHistory = nextState.history;
+      scpTransferSessionIds = nextState.sessionIds;
+      scpTransferSessionOutput = nextState.sessionOutput;
+      renderScpHistory();
     },
   );
 
@@ -704,6 +714,10 @@ async function detachListeners() {
   if (unlistenOpenVpnLog) {
     await unlistenOpenVpnLog();
     unlistenOpenVpnLog = null;
+  }
+  if (unlistenScpTransferStatus) {
+    await unlistenScpTransferStatus();
+    unlistenScpTransferStatus = null;
   }
 }
 
@@ -1487,20 +1501,10 @@ async function refreshStatuses() {
       caddySessionId = status.sessionId;
     }
     if (status.functionId.startsWith(SERVER_TUNNEL_PREFIX)) {
-      const serverId = status.functionId.slice(SERVER_TUNNEL_PREFIX.length);
-      if (status.sessionId) {
-        serverTunnelSessions[serverId] = status.sessionId;
-      } else {
-        delete serverTunnelSessions[serverId];
-      }
+      syncServerSessionFromStatus(serverTunnelSessions, SERVER_TUNNEL_PREFIX, status);
     }
     if (status.functionId.startsWith(SERVER_SSH_PREFIX)) {
-      const serverId = status.functionId.slice(SERVER_SSH_PREFIX.length);
-      if (status.sessionId) {
-        serverSshSessions[serverId] = status.sessionId;
-      } else {
-        delete serverSshSessions[serverId];
-      }
+      syncServerSessionFromStatus(serverSshSessions, SERVER_SSH_PREFIX, status);
     }
     if (status.functionId === BOUNDARY_AUTH_FUNCTION_ID) {
       boundarySessionId = status.sessionId;

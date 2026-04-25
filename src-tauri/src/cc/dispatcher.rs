@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::tungstenite::Message;
@@ -15,28 +15,27 @@ use crate::commands::{
     boundary::restart_boundary_auth_action,
     openvpn::restart_openvpn_action,
     pty::open_pty_internal,
-    update_functions_for_session_exit,
     remote_browser::{
         close_remote_browser_action, create_remote_browser_directory_action,
         delete_remote_browser_path_action, list_remote_browser_children_action,
         stat_remote_browser_path_action,
     },
     server::{
-        restart_server_ssh_action, restart_server_tunnel_action, start_server_tunnel_action,
-        stop_server_tunnel_action,
+        restart_server_ssh_action, restart_server_tunnel_action, start_server_ssh_action,
+        start_server_tunnel_action, stop_server_tunnel_action,
     },
+    update_functions_for_session_exit,
 };
 use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
 use crate::services::{
     add_common_ssh_options, cc_scp_download_service, cc_scp_upload_service,
-    cc_start_scp_download_service, cc_start_scp_upload_service, close_pty_internal,
-    emit_pty_exit, load_server_by_id, lock_err, open_pty_with_command_builder,
-    open_remote_browser_with_id, resolve_server_ssh_endpoint, ssh_target, StartScpResult,
-    write_pty_internal,
+    cc_start_scp_download_service, cc_start_scp_upload_service, close_pty_internal, emit_pty_exit,
+    load_server_by_id, lock_err, open_pty_with_command_builder, open_remote_browser_with_id,
+    resolve_server_ssh_endpoint, ssh_target, write_pty_internal, StartScpResult,
 };
 use crate::stores::{
-    next_transfer_resume_token, CcRuntimeState, FunctionStore, RemoteBrowserStore,
-    RemotePtyStore, SessionStore, TransferRuntimeContext, TransferRuntimeDirection,
+    next_transfer_resume_token, CcRuntimeState, FunctionStore, RemoteBrowserStore, RemotePtyStore,
+    SessionStore, TransferRuntimeContext, TransferRuntimeDirection,
 };
 use portable_pty::PtySize;
 use std::path::Path;
@@ -78,11 +77,21 @@ impl CcDispatcher {
 
 #[derive(Debug, Clone)]
 pub enum InboundServerMessage {
-    RequestStatusSnapshot { command_id: Option<String> },
-    RequestInventory { command_id: Option<String> },
-    RequestRecentLogs { command_id: Option<String> },
-    RequestRestartOpenvpn { command_id: Option<String> },
-    RequestRestartBoundaryAuth { command_id: Option<String> },
+    RequestStatusSnapshot {
+        command_id: Option<String>,
+    },
+    RequestInventory {
+        command_id: Option<String>,
+    },
+    RequestRecentLogs {
+        command_id: Option<String>,
+    },
+    RequestRestartOpenvpn {
+        command_id: Option<String>,
+    },
+    RequestRestartBoundaryAuth {
+        command_id: Option<String>,
+    },
     RequestStartServerTunnel {
         command_id: Option<String>,
         server_id: String,
@@ -98,6 +107,23 @@ pub enum InboundServerMessage {
     RequestRestartServerSsh {
         command_id: Option<String>,
         server_id: String,
+    },
+    RequestStartServerSsh {
+        command_id: Option<String>,
+        req_seq: u64,
+        server_id: String,
+        session_id: String,
+        cols: u16,
+        rows: u16,
+    },
+    RequestAttachServerSsh {
+        command_id: Option<String>,
+        req_seq: u64,
+        server_id: String,
+        session_id: String,
+        local_session_id: String,
+        cols: u16,
+        rows: u16,
     },
     OpenPty {
         command_id: Option<String>,
@@ -228,6 +254,8 @@ impl InboundServerMessage {
             | Self::RequestStopServerTunnel { command_id, .. }
             | Self::RequestRestartServerTunnel { command_id, .. }
             | Self::RequestRestartServerSsh { command_id, .. }
+            | Self::RequestStartServerSsh { command_id, .. }
+            | Self::RequestAttachServerSsh { command_id, .. }
             | Self::OpenPty { command_id, .. }
             | Self::WritePty { command_id, .. }
             | Self::ResizePty { command_id, .. }
@@ -257,6 +285,28 @@ pub struct InboundServerMessageError {
 struct RestartServerPayload {
     #[serde(rename = "serverId")]
     server_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct StartServerSshPayload {
+    #[serde(rename = "serverId")]
+    server_id: String,
+    #[serde(rename = "sessionId")]
+    session_id: String,
+    cols: u16,
+    rows: u16,
+}
+
+#[derive(Debug, Deserialize)]
+struct AttachServerSshPayload {
+    #[serde(rename = "serverId")]
+    server_id: String,
+    #[serde(rename = "sessionId")]
+    session_id: String,
+    #[serde(rename = "localSessionId")]
+    local_session_id: String,
+    cols: u16,
+    rows: u16,
 }
 
 #[derive(Debug, Deserialize)]
@@ -377,7 +427,9 @@ pub fn parse_inbound_server_message(
             Ok(InboundServerMessage::RequestStatusSnapshot { command_id })
         }
         MessageType::RequestInventory => Ok(InboundServerMessage::RequestInventory { command_id }),
-        MessageType::RequestRecentLogs => Ok(InboundServerMessage::RequestRecentLogs { command_id }),
+        MessageType::RequestRecentLogs => {
+            Ok(InboundServerMessage::RequestRecentLogs { command_id })
+        }
         MessageType::RequestRestartOpenvpn => {
             Ok(InboundServerMessage::RequestRestartOpenvpn { command_id })
         }
@@ -410,6 +462,31 @@ pub fn parse_inbound_server_message(
             Ok(InboundServerMessage::RequestRestartServerSsh {
                 command_id,
                 server_id: payload.server_id,
+            })
+        }
+        MessageType::RequestStartServerSsh => {
+            let req_seq = envelope.seq;
+            let payload = parse_start_server_ssh_payload(envelope)?;
+            Ok(InboundServerMessage::RequestStartServerSsh {
+                command_id,
+                req_seq,
+                server_id: payload.server_id,
+                session_id: payload.session_id,
+                cols: payload.cols,
+                rows: payload.rows,
+            })
+        }
+        MessageType::RequestAttachServerSsh => {
+            let req_seq = envelope.seq;
+            let payload = parse_attach_server_ssh_payload(envelope)?;
+            Ok(InboundServerMessage::RequestAttachServerSsh {
+                command_id,
+                req_seq,
+                server_id: payload.server_id,
+                session_id: payload.session_id,
+                local_session_id: payload.local_session_id,
+                cols: payload.cols,
+                rows: payload.rows,
             })
         }
         MessageType::OpenPty => {
@@ -494,8 +571,7 @@ pub fn parse_inbound_server_message(
         }
         MessageType::CreateRemoteBrowserDirectory => {
             let req_seq = envelope.seq;
-            let payload =
-                parse_browser_path_payload(envelope, "create_remote_browser_directory")?;
+            let payload = parse_browser_path_payload(envelope, "create_remote_browser_directory")?;
             Ok(InboundServerMessage::CreateRemoteBrowserDirectory {
                 command_id,
                 req_seq,
@@ -505,8 +581,7 @@ pub fn parse_inbound_server_message(
         }
         MessageType::DeleteRemoteBrowserPath => {
             let req_seq = envelope.seq;
-            let payload =
-                parse_delete_remote_browser_path_payload(envelope)?;
+            let payload = parse_delete_remote_browser_path_payload(envelope)?;
             Ok(InboundServerMessage::DeleteRemoteBrowserPath {
                 command_id,
                 req_seq,
@@ -595,6 +670,18 @@ pub fn parse_inbound_server_message(
 
 fn parse_open_pty_payload(envelope: Envelope) -> Result<OpenPtyPayload, InboundServerMessageError> {
     parse_payload(envelope, "open_pty")
+}
+
+fn parse_start_server_ssh_payload(
+    envelope: Envelope,
+) -> Result<StartServerSshPayload, InboundServerMessageError> {
+    parse_payload(envelope, "request_start_server_ssh")
+}
+
+fn parse_attach_server_ssh_payload(
+    envelope: Envelope,
+) -> Result<AttachServerSshPayload, InboundServerMessageError> {
+    parse_payload(envelope, "request_attach_server_ssh")
 }
 
 fn parse_write_pty_payload(
@@ -946,6 +1033,133 @@ where
             );
             Ok(())
         }
+        InboundServerMessage::RequestStartServerSsh {
+            command_id,
+            req_seq,
+            server_id,
+            session_id,
+            cols,
+            rows,
+        } => {
+            let mut w = write.lock().await;
+            let session_store = app.state::<SessionStore>();
+            let function_store = app.state::<FunctionStore>();
+            let result = match start_server_ssh_action(
+                server_id.clone(),
+                cols,
+                rows,
+                app.clone(),
+                session_store,
+                function_store,
+            ) {
+                Ok(result) => result,
+                Err(err) => {
+                    send_nack(
+                        &mut *w,
+                        &device_id,
+                        &seq_counter,
+                        req_seq,
+                        "PTY_SPAWN_ERROR",
+                        &err,
+                    )
+                    .await
+                    .map_err(|send_err| send_err.to_string())?;
+                    return Ok(());
+                }
+            };
+            bind_remote_pty_session(&app, &session_id, &result.session_id)?;
+            send_ack(
+                &mut *w,
+                &device_id,
+                &seq_counter,
+                req_seq,
+                Some(json!({
+                    "status": "ok",
+                    "serverId": server_id,
+                    "sessionId": session_id,
+                    "localSessionId": result.session_id,
+                    "functionId": result.function_id,
+                })),
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+            if let Some(command_id) = command_id {
+                send_command_status(
+                    &mut *w,
+                    &device_id,
+                    &seq_counter,
+                    &command_id,
+                    "succeeded",
+                    Some("request_start_server_ssh".to_string()),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|err| err.to_string())?;
+            }
+            Ok(())
+        }
+        InboundServerMessage::RequestAttachServerSsh {
+            command_id,
+            req_seq,
+            server_id,
+            session_id,
+            local_session_id,
+            cols,
+            rows,
+        } => {
+            let mut w = write.lock().await;
+            let session_store = app.state::<SessionStore>();
+            if let Err(err) = resize_local_pty(&session_store, &local_session_id, cols, rows) {
+                let code = pty_error_code(&err, "PTY_NOT_FOUND");
+                send_nack(&mut *w, &device_id, &seq_counter, req_seq, &code, &err)
+                    .await
+                    .map_err(|send_err| send_err.to_string())?;
+                return Ok(());
+            }
+            if let Err(err) = bind_remote_pty_session(&app, &session_id, &local_session_id) {
+                send_nack(
+                    &mut *w,
+                    &device_id,
+                    &seq_counter,
+                    req_seq,
+                    "PTY_BIND_ERROR",
+                    &err,
+                )
+                .await
+                .map_err(|send_err| send_err.to_string())?;
+                return Ok(());
+            }
+            send_ack(
+                &mut *w,
+                &device_id,
+                &seq_counter,
+                req_seq,
+                Some(json!({
+                    "status": "ok",
+                    "serverId": server_id,
+                    "sessionId": session_id,
+                    "localSessionId": local_session_id,
+                })),
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+            if let Some(command_id) = command_id {
+                send_command_status(
+                    &mut *w,
+                    &device_id,
+                    &seq_counter,
+                    &command_id,
+                    "succeeded",
+                    Some("request_attach_server_ssh".to_string()),
+                    None,
+                    None,
+                )
+                .await
+                .map_err(|err| err.to_string())?;
+            }
+            Ok(())
+        }
         InboundServerMessage::OpenPty {
             command_id,
             req_seq,
@@ -1039,7 +1253,9 @@ where
                 &device_id,
                 &seq_counter,
                 req_seq,
-                Some(json!({ "status": "ok", "sessionId": session_id, "acceptedBytes": data.len() })),
+                Some(
+                    json!({ "status": "ok", "sessionId": session_id, "acceptedBytes": data.len() }),
+                ),
             )
             .await
             .map_err(|err| err.to_string())?;
@@ -1102,7 +1318,9 @@ where
                 &device_id,
                 &seq_counter,
                 req_seq,
-                Some(json!({ "status": "ok", "sessionId": session_id, "cols": cols, "rows": rows })),
+                Some(
+                    json!({ "status": "ok", "sessionId": session_id, "cols": cols, "rows": rows }),
+                ),
             )
             .await
             .map_err(|err| err.to_string())?;
@@ -1564,8 +1782,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_inbound_server_message, InboundServerMessage};
+    use super::{local_transfer_status_payload, parse_inbound_server_message, InboundServerMessage};
     use crate::cc::protocol::Envelope;
+    use crate::stores::TransferRuntimeDirection;
     use serde_json::json;
 
     #[test]
@@ -1619,6 +1838,115 @@ mod tests {
             other => panic!("unexpected parsed message: {other:?}"),
         }
     }
+
+    #[test]
+    fn parses_request_attach_server_ssh_message() {
+        let envelope = Envelope {
+            msg_type: "request_attach_server_ssh".to_string(),
+            device_id: "device-1".to_string(),
+            seq: 4,
+            ts: "2026-04-23T00:00:00.000Z".to_string(),
+            payload: Some(json!({
+                "serverId": "srv-ssh",
+                "sessionId": "server-ssh-srv-ssh-remote",
+                "localSessionId": "local-ssh-session-1",
+                "cols": 120,
+                "rows": 32,
+            })),
+            command_id: Some("cmd-4".to_string()),
+            req_seq: None,
+        };
+
+        let parsed = parse_inbound_server_message(envelope).expect("expected parser success");
+
+        match parsed {
+            InboundServerMessage::RequestAttachServerSsh {
+                command_id,
+                req_seq,
+                server_id,
+                session_id,
+                local_session_id,
+                cols,
+                rows,
+            } => {
+                assert_eq!(command_id.as_deref(), Some("cmd-4"));
+                assert_eq!(req_seq, 4);
+                assert_eq!(server_id, "srv-ssh");
+                assert_eq!(session_id, "server-ssh-srv-ssh-remote");
+                assert_eq!(local_session_id, "local-ssh-session-1");
+                assert_eq!(cols, 120);
+                assert_eq!(rows, 32);
+            }
+            other => panic!("unexpected parsed message: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_request_start_server_ssh_message() {
+        let envelope = Envelope {
+            msg_type: "request_start_server_ssh".to_string(),
+            device_id: "device-1".to_string(),
+            seq: 3,
+            ts: "2026-04-23T00:00:00.000Z".to_string(),
+            payload: Some(json!({
+                "serverId": "srv-ssh",
+                "sessionId": "ssh-session-1",
+                "cols": 120,
+                "rows": 32,
+            })),
+            command_id: Some("cmd-3".to_string()),
+            req_seq: None,
+        };
+
+        let parsed = parse_inbound_server_message(envelope).expect("expected parser success");
+
+        match parsed {
+            InboundServerMessage::RequestStartServerSsh {
+                command_id,
+                req_seq,
+                server_id,
+                session_id,
+                cols,
+                rows,
+            } => {
+                assert_eq!(command_id.as_deref(), Some("cmd-3"));
+                assert_eq!(req_seq, 3);
+                assert_eq!(server_id, "srv-ssh");
+                assert_eq!(session_id, "ssh-session-1");
+                assert_eq!(cols, 120);
+                assert_eq!(rows, 32);
+            }
+            other => panic!("unexpected parsed message: {other:?}"),
+        }
+    }
+    #[test]
+    fn local_transfer_status_payload_includes_visible_trace_fields() {
+        let payload = local_transfer_status_payload(
+            "transfer-1",
+            Some("session-1"),
+            "running",
+            "transfer",
+            None,
+            None,
+            Some("start_scp_upload".to_string()),
+            TransferRuntimeDirection::Upload,
+            "srv-1",
+            "/tmp/source.txt",
+            "/var/source.txt",
+            1,
+            false,
+        );
+
+        assert_eq!(payload["transferId"], json!("transfer-1"));
+        assert_eq!(payload["sessionId"], json!("session-1"));
+        assert_eq!(payload["state"], json!("running"));
+        assert_eq!(payload["direction"], json!("upload"));
+        assert_eq!(payload["serverId"], json!("srv-1"));
+        assert_eq!(payload["localPath"], json!("/tmp/source.txt"));
+        assert_eq!(payload["remotePath"], json!("/var/source.txt"));
+        assert_eq!(payload["message"], json!("start_scp_upload"));
+    }
+
 }
 
 async fn run_blocking_command_action<W, F>(
@@ -1758,7 +2086,6 @@ where
             false,
         )
         .await;
-
         let result = tokio::task::spawn_blocking(action.clone())
             .await
             .map_err(|err| err.to_string())?;
@@ -1926,6 +2253,24 @@ where
             false,
         )
         .await;
+        emit_local_transfer_status(
+            app,
+            local_transfer_status_payload(
+                &transfer_id,
+                None,
+                "starting",
+                "precheck",
+                None,
+                None,
+                Some(action_name.to_string()),
+                transfer_direction,
+                &server_id,
+                &local_path,
+                &remote_path,
+                attempt,
+                false,
+            ),
+        );
 
         let result = tokio::task::spawn_blocking(action.clone())
             .await
@@ -1938,20 +2283,38 @@ where
                     session_id,
                     temp_path_hint,
                 } => {
-                    let _ = app
-                        .state::<CcRuntimeState>()
-                        .bind_transfer_session(
-                            &session_id,
-                            TransferRuntimeContext {
-                                transfer_id: transfer_id.clone(),
-                                direction: transfer_direction,
-                                server_id: server_id.clone(),
-                                local_path: local_path.clone(),
-                                remote_path: remote_path.clone(),
-                                temp_path_hint,
-                                resume_token: resume_token.clone().unwrap_or_else(|| next_transfer_resume_token(&transfer_id)),
-                            },
-                        );
+                    let _ = app.state::<CcRuntimeState>().bind_transfer_session(
+                        &session_id,
+                        TransferRuntimeContext {
+                            transfer_id: transfer_id.clone(),
+                            direction: transfer_direction,
+                            server_id: server_id.clone(),
+                            local_path: local_path.clone(),
+                            remote_path: remote_path.clone(),
+                            temp_path_hint,
+                            resume_token: resume_token
+                                .clone()
+                                .unwrap_or_else(|| next_transfer_resume_token(&transfer_id)),
+                        },
+                    );
+                    emit_local_transfer_status(
+                        app,
+                        local_transfer_status_payload(
+                            &transfer_id,
+                            Some(&session_id),
+                            "running",
+                            "transfer",
+                            None,
+                            None,
+                            Some(action_name.to_string()),
+                            transfer_direction,
+                            &server_id,
+                            &local_path,
+                            &remote_path,
+                            attempt,
+                            false,
+                        ),
+                    );
                     spawn_transfer_watchdog(
                         write.clone(),
                         device_id.clone(),
@@ -2056,6 +2419,24 @@ where
                         }),
                     )
                     .await;
+                    emit_local_transfer_status(
+                        app,
+                        local_transfer_status_payload(
+                            &transfer_id,
+                            None,
+                            "succeeded",
+                            "finalize",
+                            None,
+                            None,
+                            Some(message.clone()),
+                            transfer_direction,
+                            &server_id,
+                            &local_path,
+                            &remote_path,
+                            attempt,
+                            false,
+                        ),
+                    );
                     if let Some(command_id) = command_id.as_deref() {
                         send_command_status(
                             &mut *w,
@@ -2071,7 +2452,7 @@ where
                         .map_err(|err| err.to_string())?;
                     }
                     return Ok(());
-                },
+                }
             },
             Err(err) => {
                 let (reason_code, reason_detail) = split_file_op_reason(&err);
@@ -2103,6 +2484,27 @@ where
                         }),
                     )
                     .await;
+                    emit_local_transfer_status(
+                        app,
+                        local_transfer_status_payload(
+                            &transfer_id,
+                            None,
+                            "starting",
+                            "precheck",
+                            Some(reason_code.clone()),
+                            Some(reason_detail.clone()),
+                            Some(format!(
+                                "{action_name} attempt {attempt} failed; retrying in {}s",
+                                TRANSFER_RETRY_BACKOFF_SECS
+                            )),
+                            transfer_direction,
+                            &server_id,
+                            &local_path,
+                            &remote_path,
+                            attempt,
+                            true,
+                        ),
+                    );
                     drop(w);
                     tokio::time::sleep(Duration::from_secs(TRANSFER_RETRY_BACKOFF_SECS)).await;
                     continue;
@@ -2140,6 +2542,24 @@ where
                     }),
                 )
                 .await;
+                emit_local_transfer_status(
+                    app,
+                    local_transfer_status_payload(
+                        &transfer_id,
+                        None,
+                        "failed",
+                        "finalize",
+                        Some(reason_code.clone()),
+                        Some(reason_detail.clone()),
+                        Some(action_name.to_string()),
+                        transfer_direction,
+                        &server_id,
+                        &local_path,
+                        &remote_path,
+                        attempt,
+                        false,
+                    ),
+                );
                 if let Some(command_id) = command_id.as_deref() {
                     send_command_status(
                         &mut *w,
@@ -2160,6 +2580,50 @@ where
     }
 
     Err("agent_error: transfer retry loop exhausted unexpectedly".to_string())
+}
+
+fn transfer_direction_label(direction: TransferRuntimeDirection) -> &'static str {
+    match direction {
+        TransferRuntimeDirection::Upload => "upload",
+        TransferRuntimeDirection::Download => "download",
+    }
+}
+
+fn local_transfer_status_payload(
+    transfer_id: &str,
+    session_id: Option<&str>,
+    state: &str,
+    phase: &str,
+    reason_code: Option<String>,
+    reason_detail: Option<String>,
+    message: Option<String>,
+    direction: TransferRuntimeDirection,
+    server_id: &str,
+    local_path: &str,
+    remote_path: &str,
+    attempt: u64,
+    retry_scheduled: bool,
+) -> Value {
+    json!({
+        "transferId": transfer_id,
+        "sessionId": session_id,
+        "state": state,
+        "direction": transfer_direction_label(direction),
+        "serverId": server_id,
+        "localPath": local_path,
+        "remotePath": remote_path,
+        "phase": phase,
+        "reasonCode": reason_code,
+        "reasonDetail": reason_detail,
+        "message": message,
+        "attempt": attempt,
+        "maxAttempts": TRANSFER_MAX_ATTEMPTS,
+        "retryScheduled": retry_scheduled,
+    })
+}
+
+fn emit_local_transfer_status(app: &AppHandle, payload: Value) {
+    let _ = app.emit("scp-transfer-status", payload);
 }
 
 async fn emit_transfer_status<W>(
@@ -2365,13 +2829,11 @@ fn spawn_transfer_watchdog<W>(
                     tokio::task::block_in_place(|| sample_transfer_progress(&app, &context))
                 });
             if let Some(progress) = sampled_progress.as_ref() {
-                let _ = app
-                    .state::<CcRuntimeState>()
-                    .note_transfer_progress(
-                        &local_session_id,
-                        progress.percent.map(|value| value.floor() as u16),
-                        Some(progress.bytes_transferred),
-                    );
+                let _ = app.state::<CcRuntimeState>().note_transfer_progress(
+                    &local_session_id,
+                    progress.percent.map(|value| value.floor() as u16),
+                    Some(progress.bytes_transferred),
+                );
             }
 
             let mut w = write.lock().await;
@@ -2471,13 +2933,20 @@ fn sample_remote_file_size(app: &AppHandle, server_id: &str, remote_path: &str) 
     add_common_ssh_options(&mut ssh, "-p", endpoint.port);
     let output = ssh
         .arg(ssh_target(&endpoint))
-        .arg(format!("sh -lc {}", shell_quote(&format!("wc -c < {}", shell_quote(remote_path)))))
+        .arg(format!(
+            "sh -lc {}",
+            shell_quote(&format!("wc -c < {}", shell_quote(remote_path)))
+        ))
         .output()
         .ok()?;
     if !output.status.success() {
         return None;
     }
-    String::from_utf8(output.stdout).ok()?.trim().parse::<u64>().ok()
+    String::from_utf8(output.stdout)
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()
 }
 
 fn shell_quote(input: &str) -> String {
@@ -2495,9 +2964,12 @@ fn bind_remote_pty_session(
 
 fn resolve_remote_pty_session(app: &AppHandle, remote_session_id: &str) -> Result<String, String> {
     let store = app.state::<RemotePtyStore>();
-    store
-        .resolve_local_session(remote_session_id)
-        .map_err(|_| pty_error("PTY_NOT_FOUND", format!("Remote PTY session not found: {remote_session_id}")))
+    store.resolve_local_session(remote_session_id).map_err(|_| {
+        pty_error(
+            "PTY_NOT_FOUND",
+            format!("Remote PTY session not found: {remote_session_id}"),
+        )
+    })
 }
 
 fn unbind_remote_pty_session(
@@ -2517,10 +2989,12 @@ fn resize_local_pty(
 ) -> Result<(), String> {
     let session = {
         let sessions = lock_err(&store.sessions)?;
-        sessions
-            .get(local_session_id)
-            .cloned()
-            .ok_or_else(|| pty_error("PTY_NOT_FOUND", format!("session not found: {local_session_id}")))?
+        sessions.get(local_session_id).cloned().ok_or_else(|| {
+            pty_error(
+                "PTY_NOT_FOUND",
+                format!("session not found: {local_session_id}"),
+            )
+        })?
     };
 
     let master = lock_err(&session.master)?;
@@ -2533,6 +3007,17 @@ fn resize_local_pty(
         })
         .map_err(|e| pty_error("PTY_INVALID_SIZE", format!("failed to resize pty: {e}")))?;
     Ok(())
+}
+
+fn pty_error_code(detail: &str, fallback: &str) -> String {
+    let Some((prefix, _)) = detail.split_once(':') else {
+        return fallback.to_string();
+    };
+    let code = prefix.trim();
+    if code.is_empty() || !code.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_') {
+        return fallback.to_string();
+    }
+    code.to_string()
 }
 
 fn pty_error(code: &str, detail: impl Into<String>) -> String {
@@ -2719,7 +3204,10 @@ pub async fn send_status_snapshot(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let function_store = app.state::<FunctionStore>();
     let function_states: Vec<_> = {
-        let statuses = function_store.statuses.lock().map_err(|_| "mutex poisoned")?;
+        let statuses = function_store
+            .statuses
+            .lock()
+            .map_err(|_| "mutex poisoned")?;
         statuses.values().cloned().collect()
     };
 
@@ -2840,7 +3328,8 @@ pub async fn send_command_status(
         *s += 1;
         *s
     };
-    let status = Envelope::command_status(device_id.to_string(), seq, command_id.to_string(), payload);
+    let status =
+        Envelope::command_status(device_id.to_string(), seq, command_id.to_string(), payload);
     let msg = serde_json::to_string(&status)?;
     write.send(Message::Text(msg)).await?;
     Ok(())

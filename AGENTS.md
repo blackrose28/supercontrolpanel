@@ -61,6 +61,7 @@ Additional commands/events added in this iteration:
   - `start_server_tunnel({ serverId, cols, rows }) -> { functionId, sessionId }`
   - `stop_server_tunnel({ serverId })`
   - `start_server_ssh({ serverId, cols, rows }) -> { functionId, sessionId }`
+  - `request_attach_server_ssh` control-plane message adopts an existing local SSH PTY with `{ serverId, sessionId, localSessionId, cols, rows }` so admin UI reloads can attach to live local sessions.
   - `stop_server_ssh({ serverId })`
   - `start_server_rdp({ serverId }) -> void`
   - New remote browser contract used by the picker:
@@ -79,6 +80,7 @@ Additional commands/events added in this iteration:
   - `scp_download({ serverId, remotePath, localPath, recursive? }) -> string`
   - `start_scp_upload({ serverId, localPath, remotePath, recursive? }) -> string` (PTY-backed session id for progress-aware transfers)
   - `start_scp_download({ serverId, remotePath, localPath, recursive? }) -> string` (PTY-backed session id for progress-aware transfers)
+  - `scp-transfer-status` desktop event mirrors CC/admin-started SCP transfer lifecycle with `{ transferId, sessionId?, state, direction, serverId, localPath, remotePath, phase, message?, reasonCode?, reasonDetail? }` so the app can show Recent transfers even when the action started remotely.
   - Function IDs:
     - OpenVPN: `openvpn-connect`
     - Boundary auth: `boundary-auth`

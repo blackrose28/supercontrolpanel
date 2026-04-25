@@ -236,6 +236,7 @@ Pre-MCP refactor planning docs live under `docs/refactor/`:
   - A **Show tunnel panel** checkbox in the Servers actions bar lets you hide the tunnel PTY to reclaim space for the SSH terminal when you mostly care about the interactive shell.
   - Only one pair of xterms is rendered; each server has its own PTY session IDs and **buffered scrollback**.
   - When you select a server row, the app restores that server’s buffered tunnel/SSH output so switching servers preserves their terminal history.
+  - When Runtime Summary loads a running SSH status, the admin UI reattaches to the existing browser PTY or adopts the live local SSH PTY with recent history.
 - Controls:
   - Start/Stop Tunnel.
   - Start/Stop SSH.
@@ -257,6 +258,7 @@ Pre-MCP refactor planning docs live under `docs/refactor/`:
     - Supports explicit file and folder actions; folder transfers use recursive SCP.
     - Shows an in-session transfer history below the buttons with running, success, and error states plus source/destination summaries.
     - Transfer history now includes a progress bar and percentage when SCP reports progress through the PTY-backed transfer path.
+    - SCP transfers launched through CC/admin also appear in the desktop Recent transfers history and bind their PTY session so progress and completion remain visible.
     - For Boundary servers, the app now checks that the tunnel is running before browse/transfer actions and shows a clearer error if it is not.
     - Upload flows normalize remote paths and confirm before overwriting known remote targets.
   - Remote browse groundwork:
