@@ -1,8 +1,9 @@
 use std::{env, fs, path::PathBuf, process::Command};
 
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, State};
 
-use crate::cc::sync_cc_status_from_settings;
+use crate::cc::{init_cc_connection, sync_cc_status_from_settings};
 use crate::mcp::{sync_mcp_runtime_from_settings, McpRuntimeState};
 use crate::models::{AppConfig, AppConfigForDisk};
 use crate::services::{
@@ -241,6 +242,12 @@ pub(crate) fn save_sync_settings_action(
     if let Some(cc_device_id) = settings.cc_device_id {
         merged.cc_device_id = cc_device_id;
     }
+    if let Some(cc_device_name) = settings.cc_device_name {
+        merged.cc_device_name = cc_device_name;
+    }
+    if let Some(first_run_completed) = settings.first_run_completed {
+        merged.first_run_completed = first_run_completed;
+    }
     save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
     let _ = sync_mcp_runtime_from_settings(&app, &mcp_state, &merged, crate::services::now_ms);
     let _ = sync_cc_status_from_settings(&app);
@@ -254,6 +261,175 @@ pub fn save_sync_settings(
     mcp_state: State<'_, McpRuntimeState>,
 ) -> Result<(), String> {
     save_sync_settings_action(app, settings, mcp_state).map(|_| ())
+}
+
+#[tauri::command]
+pub async fn enroll_device(
+    app: AppHandle,
+    server_url: String,
+    bootstrap_token: String,
+    device_name: Option<String>,
+    mcp_state: State<'_, McpRuntimeState>,
+) -> Result<EnrollResult, String> {
+    let server_url = server_url.trim();
+    let bootstrap_token = bootstrap_token.trim();
+
+    if server_url.is_empty() {
+        return Err("Server URL cannot be empty".to_string());
+    }
+    if bootstrap_token.is_empty() {
+        return Err("Bootstrap token cannot be empty".to_string());
+    }
+
+    let enroll_url = format!(
+        "{}/v1/enroll",
+        server_url.trim_end_matches('/')
+    );
+
+    let body = serde_json::json!({
+        "bootstrapToken": bootstrap_token,
+        "deviceName": device_name.as_deref().unwrap_or(""),
+    });
+
+    let enroll_url_clone = enroll_url.clone();
+    let body_string = serde_json::to_string(&body)
+        .map_err(|e| format!("Failed to encode enrollment body: {e}"))?;
+
+    let (status_code, response_body) = tokio::task::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+
+        let response = client
+            .post(&enroll_url_clone)
+            .header("Content-Type", "application/json")
+            .body(body_string)
+            .send()
+            .map_err(|e| format!("Enrollment request failed: {e}"))?;
+
+        let status = response.status().as_u16();
+        let body = response
+            .text()
+            .map_err(|e| format!("Failed to read enrollment response: {e}"))?;
+        Ok::<_, String>((status, body))
+    })
+    .await
+    .map_err(|e| format!("Enrollment task panicked: {e}"))??;
+
+    if !(200..300).contains(&status_code) {
+        return Err(format!(
+            "Enrollment failed (HTTP {}): {}",
+            status_code, response_body
+        ));
+    }
+
+    let enroll_response: EnrollResponse =
+        serde_json::from_str(&response_body)
+            .map_err(|e| format!("Invalid enrollment response: {e}"))?;
+
+    let mut merged =
+        load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+    merged.cc_enabled = true;
+    merged.cc_server_url = server_url.to_string();
+    merged.cc_device_id = enroll_response.device_id.clone();
+    merged.cc_agent_token = enroll_response.cc_agent_token.clone();
+    merged.cc_device_name = enroll_response.device_name.clone();
+    merged.first_run_completed = true;
+    save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
+
+    let _ = sync_mcp_runtime_from_settings(
+        &app,
+        &mcp_state,
+        &merged,
+        crate::services::now_ms,
+    );
+    let _ = sync_cc_status_from_settings(&app);
+
+    let app_handle = app.clone();
+    tauri::async_runtime::spawn(async move {
+        if let Err(err) = init_cc_connection(app_handle).await {
+            eprintln!("CC post-enrollment init failed: {err}");
+        }
+    });
+
+    Ok(EnrollResult {
+        device_id: enroll_response.device_id,
+        cc_agent_token: enroll_response.cc_agent_token,
+        device_name: enroll_response.device_name,
+    })
+}
+
+#[derive(Serialize, Deserialize)]
+struct EnrollResponse {
+    #[serde(alias = "deviceId")]
+    device_id: String,
+    #[serde(alias = "ccAgentToken")]
+    cc_agent_token: String,
+    #[serde(alias = "deviceName", default)]
+    device_name: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EnrollResult {
+    pub device_id: String,
+    pub cc_agent_token: String,
+    pub device_name: String,
+}
+
+#[tauri::command]
+pub async fn revoke_my_device(app: AppHandle) -> Result<String, String> {
+    let settings =
+        load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+
+    if !settings.cc_enabled
+        || settings.cc_agent_token.trim().is_empty()
+        || settings.cc_server_url.trim().is_empty()
+    {
+        return Err("CC is not configured. Nothing to revoke.".to_string());
+    }
+
+    let server_url = settings.cc_server_url.trim().to_string();
+    let agent_token = settings.cc_agent_token.trim().to_string();
+
+    let revoke_url = format!("{}/v1/revoke", server_url.trim_end_matches('/'));
+    let token_for_url = agent_token.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let client = reqwest::blocking::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .timeout(std::time::Duration::from_secs(15))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {e}"))?;
+        let response = client
+            .post(&revoke_url)
+            .header("Authorization", format!("Bearer {token_for_url}"))
+            .send()
+            .map_err(|e| format!("Revoke request failed: {e}"))?;
+        let status_code = response.status().as_u16();
+        if !(200..300).contains(&status_code) {
+            let body = response.text().unwrap_or_default();
+            return Err(format!("Server revoke failed (HTTP {status_code}): {body}"));
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Revoke task panicked: {e}"))??;
+
+    let mut merged =
+        load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+    merged.cc_enabled = false;
+    merged.cc_server_url = String::new();
+    merged.cc_agent_token = String::new();
+    merged.cc_device_id = String::new();
+    merged.cc_device_name = String::new();
+    save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
+
+    let _ = sync_cc_status_from_settings(&app);
+
+    Ok("Device revoked and local CC configuration cleared.".to_string())
 }
 
 pub(crate) fn sync_config_pull_action(app: AppHandle, repo_root: String) -> Result<(), String> {
@@ -504,4 +680,46 @@ pub fn save_app_config(app: AppHandle, config: AppConfig) -> Result<AppConfig, S
 pub fn detect_openvpn_executable() -> Result<String, String> {
     detect_openvpn_executable_path()
         .ok_or_else(|| "OpenVPN executable not found in PATH/common locations".to_string())
+}
+
+#[tauri::command]
+pub fn is_first_run(app: AppHandle) -> Result<bool, String> {
+    let settings = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+    Ok(!settings.first_run_completed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_first_run_returns_true_when_flag_not_set() {
+        let settings = crate::services::SyncSettings::default();
+        assert!(!settings.first_run_completed);
+    }
+
+    #[test]
+    fn is_first_run_returns_false_when_flag_set() {
+        let mut settings = crate::services::SyncSettings::default();
+        settings.first_run_completed = true;
+        assert!(settings.first_run_completed);
+    }
+
+    #[test]
+    fn enroll_response_parses_camel_case_json() {
+        let json = r#"{"deviceId":"abc-123","ccAgentToken":"tok-456","deviceName":"my-laptop"}"#;
+        let resp: EnrollResponse = serde_json::from_str(json).expect("should parse");
+        assert_eq!(resp.device_id, "abc-123");
+        assert_eq!(resp.cc_agent_token, "tok-456");
+        assert_eq!(resp.device_name, "my-laptop");
+    }
+
+    #[test]
+    fn enroll_response_parses_missing_device_name() {
+        let json = r#"{"deviceId":"abc-123","ccAgentToken":"tok-456"}"#;
+        let resp: EnrollResponse = serde_json::from_str(json).expect("should parse");
+        assert_eq!(resp.device_id, "abc-123");
+        assert_eq!(resp.cc_agent_token, "tok-456");
+        assert_eq!(resp.device_name, "");
+    }
 }

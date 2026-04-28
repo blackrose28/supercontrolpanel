@@ -46,9 +46,11 @@ Function runtime contract:
 - `detect_openvpn_executable() -> string`
 - `start_openvpn_function({ command, username, password }) -> { functionId, sessionId }`
 - `stop_openvpn_function()`
- - `get_config_paths() -> { appConfigPath }`
- - `sync_config_pull({ repoRoot }) -> void`
- - `sync_config_push({ repoRoot }) -> void`
+- `get_config_paths() -> { appConfigPath }`
+- `sync_config_pull({ repoRoot }) -> void`
+- `sync_config_push({ repoRoot }) -> void`
+- `is_first_run() -> bool`
+- `enroll_device({ serverUrl, bootstrapToken, deviceName? }) -> { deviceId, ccAgentToken, deviceName }`
 - `function-status` event with:
   - `{ functionId, state, message, boundaryTokenSource?, sessionId, updatedAtMs }`
 
@@ -86,6 +88,13 @@ Additional commands/events added in this iteration:
     - Boundary auth: `boundary-auth`
     - Server tunnel: `server-tunnel-{serverId}`
     - Server SSH: `server-ssh-{serverId}`
+
+- **Device enrollment (first-run onboarding)**
+  - `is_first_run()` checks `firstRunCompleted` in `sync-local.json` (defaults to false).
+  - On first launch, the app shows an **enrollment overlay** with fields for CC Server URL, Bootstrap Token, and optional Device Name.
+  - `enroll_device({ serverUrl, bootstrapToken, deviceName? })` POSTs to `{serverUrl}/v1/enroll`, saves the returned `ccDeviceId` / `ccAgentToken` to `sync-local.json`, enables CC, marks `firstRunCompleted`, and initiates the CC WebSocket connection.
+  - Users can skip enrollment; clicking "Skip for now" sets `firstRunCompleted: true` without enrolling.
+  - On subsequent launches, `is_first_run()` returns false and the overlay is not shown.
 
 - **Boundary integration**
   - `start_boundary_auth({ cols, rows }) -> { functionId, sessionId }`

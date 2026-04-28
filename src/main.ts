@@ -108,6 +108,8 @@ type SyncSettings = {
   ccAuthMode?: string;
   ccAgentToken?: string;
   ccDeviceId?: string;
+  ccDeviceName?: string;
+  firstRunCompleted?: boolean;
 };
 
 type ServerService = { name: string; port: number };
@@ -160,6 +162,12 @@ type ScpTreeNode = {
   loading: boolean;
   expanded: boolean;
   error: string | null;
+};
+
+type EnrollResult = {
+  deviceId: string;
+  ccAgentToken: string;
+  deviceName: string;
 };
 
 type ScpPickerMode =
@@ -321,6 +329,16 @@ const cfgCcAgentToken = mustElement<HTMLInputElement>("#cfg-cc-agent-token");
 const cfgCcDeviceId = mustElement<HTMLInputElement>("#cfg-cc-device-id");
 const cfgCcSaveBtn = mustElement<HTMLButtonElement>("#cfg-cc-save");
 const cfgCcReinitBtn = mustElement<HTMLButtonElement>("#cfg-cc-reinit");
+const cfgCcRevokeBtn = mustElement<HTMLButtonElement>("#cfg-cc-revoke");
+const cfgCcDeviceNameHint = mustElement<HTMLElement>("#cfg-cc-device-name-hint");
+
+const enrollOverlay = mustElement<HTMLElement>("#enroll-overlay");
+const enrollServerUrl = mustElement<HTMLInputElement>("#enroll-server-url");
+const enrollBootstrapToken = mustElement<HTMLInputElement>("#enroll-bootstrap-token");
+const enrollDeviceName = mustElement<HTMLInputElement>("#enroll-device-name");
+const enrollStatus = mustElement<HTMLElement>("#enroll-status");
+const enrollSubmitBtn = mustElement<HTMLButtonElement>("#enroll-submit");
+const enrollSkipBtn = mustElement<HTMLButtonElement>("#enroll-skip");
 
 const serversTbody = mustElement<HTMLElement>("#servers-tbody");
 const serversStatus = mustElement<HTMLElement>("#servers-status");
@@ -511,6 +529,90 @@ let unlistenFunctionStatus: UnlistenFn | null = null;
 let unlistenOpenVpnLog: UnlistenFn | null = null;
 let unlistenScpTransferStatus: UnlistenFn | null = null;
 let openvpnReconnectRenderTimer: number | null = null;
+
+async function checkFirstRun() {
+  try {
+    const firstRun = await invoke<boolean>("is_first_run");
+    if (firstRun) {
+      const settings = await invoke<SyncSettings>("get_sync_settings").catch(() => null);
+      const ccAlreadyConfigured =
+        settings?.ccEnabled &&
+        settings?.ccDeviceId?.trim() &&
+        settings?.ccAgentToken?.trim();
+      if (ccAlreadyConfigured) {
+        await invoke("save_sync_settings", { settings: { firstRunCompleted: true } });
+        return;
+      }
+      showEnrollOverlay();
+    }
+  } catch (error) {
+    console.error("Failed to check first run:", error);
+  }
+}
+
+function showEnrollOverlay() {
+  enrollOverlay.classList.remove("hidden");
+  enrollOverlay.setAttribute("aria-hidden", "false");
+  enrollStatus.textContent = "";
+  enrollStatus.className = "hint";
+}
+
+function hideEnrollOverlay() {
+  enrollOverlay.classList.add("hidden");
+  enrollOverlay.setAttribute("aria-hidden", "true");
+}
+
+async function handleEnrollSubmit() {
+  const serverUrl = enrollServerUrl.value.trim();
+  const bootstrapToken = enrollBootstrapToken.value.trim();
+  const deviceName = enrollDeviceName.value.trim() || undefined;
+
+  if (!serverUrl) {
+    enrollStatus.textContent = "Server URL is required.";
+    enrollStatus.className = "hint error";
+    return;
+  }
+  if (!bootstrapToken) {
+    enrollStatus.textContent = "Bootstrap token is required.";
+    enrollStatus.className = "hint error";
+    return;
+  }
+
+  enrollSubmitBtn.disabled = true;
+  enrollSkipBtn.disabled = true;
+  enrollStatus.textContent = "Enrolling...";
+  enrollStatus.className = "hint";
+
+  try {
+    const result = await invoke<EnrollResult>("enroll_device", {
+      serverUrl,
+      bootstrapToken,
+      deviceName,
+    });
+    enrollStatus.textContent = `Enrolled as "${result.deviceName}" (${result.deviceId}). Connecting to CC...`;
+    enrollStatus.className = "hint success";
+
+    await loadSyncSettings();
+    await refreshStatuses();
+
+    setTimeout(() => hideEnrollOverlay(), 1500);
+  } catch (error) {
+    enrollStatus.textContent = `Enrollment failed: ${String(error)}`;
+    enrollStatus.className = "hint error";
+  } finally {
+    enrollSubmitBtn.disabled = false;
+    enrollSkipBtn.disabled = false;
+  }
+}
+
+async function handleEnrollSkip() {
+  try {
+    await invoke("save_sync_settings", { settings: { firstRunCompleted: true } });
+  } catch (error) {
+    console.error("Failed to mark first run as completed:", error);
+  }
+  hideEnrollOverlay();
+}
 
 async function attachListeners() {
   unlistenOutput = await listen<PtyOutputPayload>("pty-output", (event) => {
@@ -1121,6 +1223,23 @@ async function reinitCcConnection() {
   }
 }
 
+async function handleRevokeDevice() {
+  if (!confirm("Revoke this device from the CC server? This will remove it from the device list and clear local CC configuration.")) {
+    return;
+  }
+  try {
+    cfgCcRevokeBtn.disabled = true;
+    const result = await invoke<string>("revoke_my_device");
+    cfgStatus.textContent = result;
+    await loadSyncSettings();
+    await refreshStatuses();
+  } catch (error) {
+    cfgStatus.textContent = `Revoke failed: ${String(error)}`;
+  } finally {
+    cfgCcRevokeBtn.disabled = false;
+  }
+}
+
 function renderConfigForm() {
   if (!appConfig) {
     return;
@@ -1335,6 +1454,10 @@ async function loadSyncSettings() {
   cfgCcAuthMode.value = syncSettings.ccAuthMode ?? "token";
   cfgCcAgentToken.value = syncSettings.ccAgentToken ?? "";
   cfgCcDeviceId.value = syncSettings.ccDeviceId ?? "";
+  const deviceName = syncSettings.ccDeviceName?.trim();
+  cfgCcDeviceNameHint.textContent = deviceName
+    ? `Enrolled as: ${deviceName}`
+    : "";
   renderMcpSnippet();
   await refreshMcpRuntimeStatus();
 }
@@ -2846,7 +2969,7 @@ function renderServersTable() {
     btn.addEventListener("click", async (ev) => {
       ev.stopPropagation();
       const id = (btn as HTMLButtonElement).dataset.del!;
-      if (!confirm("Delete this server?")) {
+      if (!(await openConfirmOverlay("Delete this server?"))) {
         return;
       }
       try {
@@ -3810,11 +3933,24 @@ cfgCcReinitBtn.addEventListener("click", () => {
   void reinitCcConnection();
 });
 
+enrollSubmitBtn.addEventListener("click", () => {
+  void handleEnrollSubmit();
+});
+
+enrollSkipBtn.addEventListener("click", () => {
+  void handleEnrollSkip();
+});
+
+cfgCcRevokeBtn.addEventListener("click", () => {
+  void handleRevokeDevice();
+});
+
 void attachListeners();
 void refreshStatuses();
 void loadAppVersion();
 void loadConfig();
 void loadSyncSettings();
+void checkFirstRun();
 setActiveView("status");
 syncFunctionButtons();
 syncCaddyButtons();

@@ -870,6 +870,49 @@ h3 {
     margin-top: 16px;
 }
 
+button.secondary {
+    border-color: #3a4050;
+    background: #1e212a;
+    color: #aeb6cc;
+}
+
+button.danger {
+    border-color: #6b3030;
+    background: #2a1a1a;
+    color: #f88;
+}
+
+button.danger:hover {
+    border-color: #994040;
+    background: #3a2020;
+}
+
+.enroll-overlay .modal-panel {
+    max-width: 480px;
+}
+
+.enroll-overlay h2 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    color: #eef4ff;
+}
+
+.enroll-overlay .hint {
+    margin-bottom: 16px;
+}
+
+#enroll-status {
+    margin-top: 8px;
+}
+
+#enroll-status.error {
+    color: #f88;
+}
+
+#enroll-status.success {
+    color: #86e5a1;
+}
+
 .terminal-host .xterm {
     height: 100%;
 }

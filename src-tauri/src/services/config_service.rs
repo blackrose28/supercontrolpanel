@@ -56,6 +56,10 @@ pub struct SyncSettings {
     pub cc_agent_token: String,
     #[serde(default)]
     pub cc_device_id: String,
+    #[serde(default)]
+    pub cc_device_name: String,
+    #[serde(default)]
+    pub first_run_completed: bool,
 }
 
 impl Default for SyncSettings {
@@ -77,6 +81,8 @@ impl Default for SyncSettings {
             cc_auth_mode: String::from("token"),
             cc_agent_token: String::new(),
             cc_device_id: String::new(),
+            cc_device_name: String::new(),
+            first_run_completed: false,
         }
     }
 }
@@ -116,6 +122,10 @@ pub struct SyncSettingsPatch {
     pub cc_agent_token: Option<String>,
     #[serde(default)]
     pub cc_device_id: Option<String>,
+    #[serde(default)]
+    pub cc_device_name: Option<String>,
+    #[serde(default)]
+    pub first_run_completed: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -375,4 +385,50 @@ pub fn apply_boundary_token_arg_if_present_builder(cmd: &mut CommandBuilder) -> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sync_settings_first_run_completed_defaults_to_false() {
+        let settings = SyncSettings::default();
+        assert!(!settings.first_run_completed, "first_run_completed should default to false");
+    }
+
+    #[test]
+    fn sync_settings_round_trips_first_run_completed() {
+        let json = r#"{"repoRoot":"/tmp","firstRunCompleted":true}"#;
+        let settings: SyncSettings = serde_json::from_str(json).expect("should deserialize");
+        assert!(settings.first_run_completed);
+        assert_eq!(settings.repo_root, "/tmp");
+
+        let serialized = serde_json::to_string(&settings).expect("should serialize");
+        assert!(serialized.contains("firstRunCompleted"));
+        assert!(serialized.contains("true"));
+    }
+
+    #[test]
+    fn sync_settings_deserialize_without_first_run_completed_defaults_false() {
+        let json = r#"{"repoRoot":"/tmp", "ccServerUrl":"http://example.com"}"#;
+        let settings: SyncSettings = serde_json::from_str(json).expect("should deserialize");
+        assert!(!settings.first_run_completed, "missing field should default to false");
+        assert_eq!(settings.cc_server_url, "http://example.com");
+    }
+
+    #[test]
+    fn sync_settings_patch_includes_first_run_completed() {
+        let json = r#"{"firstRunCompleted":true,"ccServerUrl":"http://example.com"}"#;
+        let patch: SyncSettingsPatch = serde_json::from_str(json).expect("should deserialize");
+        assert_eq!(patch.first_run_completed, Some(true));
+        assert_eq!(patch.cc_server_url, Some("http://example.com".to_string()));
+    }
+
+    #[test]
+    fn sync_settings_patch_excludes_first_run_completed_defaults_none() {
+        let json = r#"{"ccServerUrl":"http://example.com"}"#;
+        let patch: SyncSettingsPatch = serde_json::from_str(json).expect("should deserialize");
+        assert!(patch.first_run_completed.is_none());
+    }
 }

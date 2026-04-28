@@ -26,19 +26,29 @@ pub(crate) fn sync_cc_status_from_settings(app: &AppHandle) -> Result<(), String
                 .to_string(),
         )
     } else if runtime.is_connected() {
+        let label = if settings.cc_device_name.trim().is_empty() {
+            settings.cc_device_id.clone()
+        } else {
+            settings.cc_device_name.clone()
+        };
         (
             "connected",
             format!(
                 "Connected as {} to {}.",
-                settings.cc_device_id, settings.cc_server_url
+                label, settings.cc_server_url
             ),
         )
     } else {
+        let label = if settings.cc_device_name.trim().is_empty() {
+            settings.cc_device_id.clone()
+        } else {
+            settings.cc_device_name.clone()
+        };
         (
             "idle",
             format!(
                 "Configured for {} at {}. Use Re-init CC from Config to connect.",
-                settings.cc_device_id, settings.cc_server_url
+                label, settings.cc_server_url
             ),
         )
     };

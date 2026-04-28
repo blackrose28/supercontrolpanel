@@ -791,6 +791,7 @@
                             spellcheck="false"
                         />
                         <div class="form-grid-span hint">
+                            <span id="cfg-cc-device-name-hint"></span>
                             CC connection state appears on the
                             <strong>Status</strong> page as its own runtime
                             card.
@@ -800,6 +801,9 @@
                         <button id="cfg-cc-save" type="button">Save CC</button>
                         <button id="cfg-cc-reinit" type="button">
                             Re-init CC
+                        </button>
+                        <button id="cfg-cc-revoke" type="button" class="danger">
+                            Revoke Device
                         </button>
                     </div>
 
@@ -952,6 +956,45 @@
                     </div>
                 </section>
             </main>
+            <div id="enroll-overlay" class="modal-overlay enroll-overlay hidden" aria-hidden="true">
+                <div class="modal-panel" role="dialog" aria-label="Device enrollment">
+                    <h2>Welcome to Super Control Panel</h2>
+                    <p class="hint">
+                        Looks like this is your first time running the app on this device.
+                        Enroll with the Control Plane to get started, or skip and configure manually later.
+                    </p>
+                    <div class="form-grid">
+                        <label for="enroll-server-url">CC Server URL</label>
+                        <input
+                            id="enroll-server-url"
+                            type="text"
+                            placeholder="http://your-cc-server:3000"
+                            autocomplete="off"
+                        />
+                        <label for="enroll-bootstrap-token">Bootstrap Token</label>
+                        <input
+                            id="enroll-bootstrap-token"
+                            type="text"
+                            class="masked-secret"
+                            placeholder="Paste your bootstrap token"
+                            autocomplete="off"
+                            spellcheck="false"
+                        />
+                        <label for="enroll-device-name">Device name <span class="hint">(optional)</span></label>
+                        <input
+                            id="enroll-device-name"
+                            type="text"
+                            placeholder="e.g. Office Desktop"
+                            autocomplete="off"
+                        />
+                    </div>
+                    <div id="enroll-status" class="hint"></div>
+                    <div class="modal-actions">
+                        <button id="enroll-skip" type="button" class="secondary">Skip for now</button>
+                        <button id="enroll-submit" type="button">Enroll</button>
+                    </div>
+                </div>
+            </div>
         </div>
         <script type="module" src="/src/main.ts"></script>
     </body>
