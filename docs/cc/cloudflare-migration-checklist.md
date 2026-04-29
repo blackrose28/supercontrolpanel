@@ -125,40 +125,40 @@ Use this checklist one item at a time. For implementation items, do not check th
 - [x] GREEN: implement Worker `pty_attach`/`pty_detach` flow with D1 session ownership updates, audit records, and admin WebSocket acknowledgements.
 - [x] RED: write/resize enforce policy and rate limits. Covered by `cc-server/src/worker/admin-pty.spec.ts`.
 - [x] GREEN: implement Worker `pty_write`/`pty_resize` forwarding with attached-session policy, write size/rate limits, D1 audit, and Durable Object dispatch.
-- [ ] RED: close/delete update state and audit records.
-- [ ] GREEN: implement close/delete flow.
-- [ ] RED: agent `pty-output` fanout reaches attached admin clients.
-- [ ] GREEN: implement output fanout.
+- [x] RED: close/delete update state and audit records. Covered by `cc-server/src/worker/admin-pty.spec.ts`.
+- [x] GREEN: implement close/delete flow.
+- [x] RED: agent `pty-output` fanout reaches attached admin clients. Covered by `cc-server/src/worker/admin-pty.spec.ts`.
+- [x] GREEN: implement output fanout using Worker in-isolate admin subscriber fanout plus D1 output timestamp updates; Durable Object routing remains the long-term production hardening path.
 - [ ] Manual smoke: browser xterm can interact with real agent PTY.
 
 ## Phase 8 — File operations and remote browser parity
 
-- [ ] RED: open remote browser creates command and browser session state.
-- [ ] GREEN: implement open remote browser dispatch.
-- [ ] RED: list/stat/mkdir/delete/close validate payloads and dispatch correctly.
-- [ ] GREEN: implement remote browser command routes.
-- [ ] RED: SCP upload/download command tests.
-- [ ] GREEN: implement SCP command dispatch.
-- [ ] RED: transfer progress/status messages update transfer state.
-- [ ] GREEN: implement transfer lifecycle handlers.
-- [ ] RED: stop/dismiss/force-remove/dismiss-finished tests.
-- [ ] GREEN: implement transfer mutation routes.
+- [x] RED: open remote browser creates command and browser session state. Covered by `cc-server/src/worker/file-transfers.spec.ts`.
+- [x] GREEN: implement open remote browser dispatch.
+- [x] RED: list/stat/mkdir/delete/close validate payloads and dispatch correctly. Covered by `cc-server/src/worker/file-transfers.spec.ts`.
+- [x] GREEN: implement remote browser command routes.
+- [x] RED: SCP upload/download command tests. Covered by `cc-server/src/worker/file-transfers.spec.ts`.
+- [x] GREEN: implement SCP command dispatch.
+- [x] RED: transfer progress/status messages update transfer state. Covered by `cc-server/src/worker/file-transfers.spec.ts`.
+- [x] GREEN: implement transfer lifecycle handlers.
+- [x] RED: stop/dismiss/force-remove/dismiss-finished tests. Covered by `cc-server/src/worker/file-transfers.spec.ts`.
+- [x] GREEN: implement transfer mutation routes.
 - [ ] Manual smoke: transfer lifecycle appears in admin-next.
 
 ## Phase 9 — Dual-runtime operations and production rollout
 
-- [ ] Document Cloudflare account/project setup.
-- [ ] Document required Worker secrets and bindings.
-- [ ] Document Pages deployment steps.
-- [ ] Document existing NestJS normal-server deployment remains supported.
-- [ ] Document D1 migration and rollback.
+- [x] Document Cloudflare account/project setup. See `cc-server/README.md` and `docs/cc/cloudflare-local-preview-validation.md`.
+- [x] Document required Worker secrets and bindings. See `cc-server/README.md`.
+- [x] Document Pages deployment steps. See `cc-server/README.md` and `docs/cc/cloudflare-local-preview-validation.md`.
+- [x] Document existing NestJS normal-server deployment remains supported. See `cc-server/README.md`.
+- [x] Document D1 migration and rollback. See `docs/cc/cloudflare-d1-migration-runbook.md` and `cc-server/README.md`.
 - [ ] RED: any legacy cleanup test coverage needed.
-- [ ] GREEN: document both runtime paths; do not remove/deprecate legacy Nest paths in this migration.
-- [ ] Run full Worker test suite.
-- [ ] Run full admin-next test suite.
-- [ ] Run admin-next production build.
+- [x] GREEN: document both runtime paths; do not remove/deprecate legacy Nest paths in this migration.
+- [ ] Run full Worker test suite. Attempted `npm test` on 2026-04-29: Worker-focused tests passed, but legacy store specs failed during Windows temp directory cleanup with `EPERM` after 226/254 tests passed; targeted Worker suites passed.
+- [x] Run full admin-next test suite. `npm --prefix cc-server/admin-next run test -- --run` passed on 2026-04-29 (154 tests).
+- [x] Run admin-next production build. `npm --prefix cc-server/admin-next run build` passed on 2026-04-29.
 - [ ] Run real E2E smoke: enroll, connect, logs, commands, PTY, file transfer.
-- [ ] Update `cc-server/README.md` with Cloudflare deployment instructions.
+- [x] Update `cc-server/README.md` with Cloudflare deployment instructions.
 
 ## Per-item TDD gate
 
