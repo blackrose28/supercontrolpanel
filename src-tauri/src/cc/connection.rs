@@ -19,6 +19,7 @@ use super::dispatcher::{
     send_command_status, send_inventory, send_status_snapshot,
 };
 use super::protocol::{Envelope, MessageType};
+use super::protocol_detector::{detect_protocol, ConnectionProtocol};
 use crate::server_mgmt::ConnectionMethod;
 use crate::services::{
     add_common_ssh_options, close_pty_internal, load_server_by_id, open_remote_sftp_session,
@@ -118,11 +119,41 @@ impl CcConnection {
     }
 
     async fn connect(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Detect server capability: WebSocket vs SSE
+        let protocol = match detect_protocol(&self.server_url, &self.agent_token).await {
+            Ok(protocol) => protocol,
+            Err(e) => {
+                return Err(Box::new(IoError::new(
+                    ErrorKind::ConnectionRefused,
+                    format!("Protocol detection failed: {}", e),
+                )));
+            }
+        };
+
+        println!("CC using protocol: {:?}", protocol);
+
+        match protocol {
+            ConnectionProtocol::WebSocket => {
+                return self.connect_websocket().await;
+            }
+            ConnectionProtocol::Sse => {
+                // Delegate to SSE connection
+                return self.connect_sse().await;
+            }
+        }
+    }
+
+    async fn connect_websocket(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let url = self
             .server_url
             .replace("http://", "ws://")
             .replace("https://", "wss://");
-        let ws_url = format!("{}/agent", url);
+        // Handle both cases where URL ends with /agent or not
+        let ws_url = if url.trim_end_matches('/').ends_with("/agent") {
+            url.trim_end_matches('/').to_string()
+        } else {
+            format!("{}/agent", url)
+        };
 
         let mut request = ws_url.into_client_request()?;
         request.headers_mut().insert(
@@ -775,6 +806,28 @@ impl CcConnection {
         self.app
             .state::<CcRuntimeState>()
             .is_generation_current(self.generation)
+    }
+
+    async fn connect_sse(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // Create SSE connection and run it
+        let sse = super::sse_connection::SseConnection::new(
+            self.server_url.clone(),
+            self.agent_token.clone(),
+            self.device_id.clone(),
+            self.app.clone(),
+            self.generation,
+        );
+
+        match sse.connect_with_retry().await {
+            Ok(_) => {
+                // SSE connection ended normally (generation not current)
+                Ok(())
+            }
+            Err(e) => {
+                // SSE connection failed
+                Err(Box::new(IoError::new(ErrorKind::ConnectionAborted, e)) as Box<dyn std::error::Error + Send + Sync>)
+            }
+        }
     }
 
 }
