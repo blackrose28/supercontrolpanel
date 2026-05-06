@@ -35,6 +35,12 @@ const INVENTORY_PUBLISH_INTERVAL_SECS: u64 = 5 * 60;
 const INVENTORY_CHANGE_POLL_SECS: u64 = 30;
 const REMOTE_PTY_GC_CHECK_INTERVAL_MS: u64 = 5_000;
 
+fn socket_read_disconnect_status_message(
+    _error: &tokio_tungstenite::tungstenite::Error,
+) -> &'static str {
+    "Connection lost. Reconnecting..."
+}
+
 pub struct CcConnection {
     server_url: String,
     agent_token: String,
@@ -187,6 +193,11 @@ impl CcConnection {
 
         // Start heartbeat task
         let device_id = self.device_id.clone();
+        let agent_run_id = self
+            .app
+            .state::<CcRuntimeState>()
+            .agent_run_id()
+            .to_string();
         let seq_counter = self.seq.clone();
         let status_app = self.app.clone();
         let generation = self.generation;
@@ -215,7 +226,8 @@ impl CcConnection {
                     *s
                 };
 
-                let heartbeat = Envelope::heartbeat(device_id.clone(), seq, uptime_sec);
+                let heartbeat =
+                    Envelope::heartbeat(device_id.clone(), seq, agent_run_id.clone(), uptime_sec);
                 if let Ok(msg) = serde_json::to_string(&heartbeat) {
                     let mut w = heartbeat_write.lock().await;
                     if w.send(Message::Text(msg)).await.is_err() {
@@ -258,8 +270,13 @@ impl CcConnection {
                 }
 
                 let mut w = inventory_write.lock().await;
-                match send_inventory(&mut *w, &inventory_device_id, &inventory_seq, &inventory_app)
-                    .await
+                match send_inventory(
+                    &mut *w,
+                    &inventory_device_id,
+                    &inventory_seq,
+                    &inventory_app,
+                )
+                .await
                 {
                     Ok(sent_hash) => {
                         last_inventory_hash = sent_hash;
@@ -757,7 +774,7 @@ impl CcConnection {
                     let _ = set_cc_status(
                         &self.app,
                         "disconnected",
-                        &format!("Socket read error: {e}"),
+                        socket_read_disconnect_status_message(&e),
                     );
                     return Err(IoError::new(
                         ErrorKind::ConnectionAborted,
@@ -825,11 +842,11 @@ impl CcConnection {
             }
             Err(e) => {
                 // SSE connection failed
-                Err(Box::new(IoError::new(ErrorKind::ConnectionAborted, e)) as Box<dyn std::error::Error + Send + Sync>)
+                Err(Box::new(IoError::new(ErrorKind::ConnectionAborted, e))
+                    as Box<dyn std::error::Error + Send + Sync>)
             }
         }
     }
-
 }
 
 fn remote_pty_session_for_local(app: &AppHandle, local_session_id: &str) -> Option<String> {
@@ -968,7 +985,10 @@ fn progress_resume_fields(context: &TransferRuntimeContext) -> ResumeTelemetryFi
     }
 }
 
-fn derive_resume_fields(app: &AppHandle, context: &TransferRuntimeContext) -> ResumeTelemetryFields {
+fn derive_resume_fields(
+    app: &AppHandle,
+    context: &TransferRuntimeContext,
+) -> ResumeTelemetryFields {
     let offset = match context.direction {
         TransferRuntimeDirection::Upload => derive_remote_resume_offset(app, context),
         TransferRuntimeDirection::Download => derive_local_resume_offset(context),
@@ -1043,7 +1063,9 @@ fn shell_quote(input: &str) -> String {
 
 fn derive_local_resume_offset(context: &TransferRuntimeContext) -> Option<u64> {
     let temp_path = context.temp_path_hint.as_deref()?;
-    std::fs::metadata(temp_path).ok().map(|metadata| metadata.len())
+    std::fs::metadata(temp_path)
+        .ok()
+        .map(|metadata| metadata.len())
 }
 
 fn transfer_reason_code(reason: &str) -> String {
@@ -1051,11 +1073,7 @@ fn transfer_reason_code(reason: &str) -> String {
         return "ACTION_FAILED".to_string();
     };
     let code = prefix.trim();
-    if code.is_empty()
-        || !code
-            .chars()
-            .all(|ch| ch.is_ascii_lowercase() || ch == '_')
-    {
+    if code.is_empty() || !code.chars().all(|ch| ch.is_ascii_lowercase() || ch == '_') {
         "ACTION_FAILED".to_string()
     } else {
         code.to_string()
@@ -1072,4 +1090,24 @@ fn extract_scp_progress_percent(output: &str) -> Option<u16> {
         }
     }
     last
+}
+
+#[cfg(test)]
+mod tests {
+    use super::socket_read_disconnect_status_message;
+    use std::io::{Error as IoError, ErrorKind};
+    use tokio_tungstenite::tungstenite::Error as WsError;
+
+    #[test]
+    fn socket_read_disconnect_status_hides_raw_network_loss_error() {
+        let error = WsError::Io(IoError::new(
+            ErrorKind::ConnectionAborted,
+            "Network connection lost.",
+        ));
+
+        assert_eq!(
+            socket_read_disconnect_status_message(&error),
+            "Connection lost. Reconnecting..."
+        );
+    }
 }

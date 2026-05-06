@@ -1255,7 +1255,8 @@ pub fn start_openvpn_admin_worker(
             if let Some(pid) = cached_helper_pid {
                 if !is_windows_pid_running(pid) {
                     let _ = fs::remove_file(&helper_pid_path_watch);
-                    let msg = "Elevated helper exited unexpectedly before reporting terminal status";
+                    let msg =
+                        "Elevated helper exited unexpectedly before reporting terminal status";
                     let _ = upsert_function_status(
                         &status_app,
                         &status_app.state::<FunctionStore>(),

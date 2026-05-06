@@ -23,7 +23,11 @@ impl FileOpPathError {
 }
 
 pub fn validate_local_upload_source(path: &str) -> Result<String, FileOpPathError> {
-    let path = parse_local_path(path, "invalid_source_path", "Local upload source path is required.")?;
+    let path = parse_local_path(
+        path,
+        "invalid_source_path",
+        "Local upload source path is required.",
+    )?;
     if !path.exists() {
         return Err(FileOpPathError::new(
             "invalid_source_path",
@@ -34,7 +38,11 @@ pub fn validate_local_upload_source(path: &str) -> Result<String, FileOpPathErro
 }
 
 pub fn validate_local_download_target(path: &str) -> Result<String, FileOpPathError> {
-    let path = parse_local_path(path, "invalid_target_path", "Local download target path is required.")?;
+    let path = parse_local_path(
+        path,
+        "invalid_target_path",
+        "Local download target path is required.",
+    )?;
     if is_root_like(&path) {
         return Err(FileOpPathError::new(
             "invalid_target_path",
@@ -69,7 +77,10 @@ pub fn normalize_remote_transfer_path(
         trimmed
     };
     if raw.trim().is_empty() {
-        return Err(FileOpPathError::new(reason_code, "Remote path is required."));
+        return Err(FileOpPathError::new(
+            reason_code,
+            "Remote path is required.",
+        ));
     }
     if contains_forbidden_chars(raw) {
         return Err(FileOpPathError::new(
@@ -137,10 +148,7 @@ fn parse_local_path(
     }
     let path = PathBuf::from(trimmed);
     if !path.is_absolute() {
-        return Err(FileOpPathError::new(
-            reason_code,
-            "Path must be absolute.",
-        ));
+        return Err(FileOpPathError::new(reason_code, "Path must be absolute."));
     }
     #[cfg(target_os = "windows")]
     validate_windows_components(&path, reason_code)?;
@@ -152,7 +160,11 @@ fn contains_forbidden_chars(value: &str) -> bool {
 }
 
 fn join_remote_base(base: &str, child: &str) -> String {
-    let clean_base = if base.trim().is_empty() { "/" } else { base.trim() };
+    let clean_base = if base.trim().is_empty() {
+        "/"
+    } else {
+        base.trim()
+    };
     if clean_base == "/" {
         format!("/{}", child.trim_start_matches('/'))
     } else {
@@ -174,9 +186,8 @@ fn validate_windows_components(
     reason_code: &'static str,
 ) -> Result<(), FileOpPathError> {
     let reserved = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8",
-        "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     for component in path.components() {
         match component {
@@ -205,7 +216,10 @@ fn validate_windows_components(
                         "Windows path uses a reserved device name.",
                     ));
                 }
-                if segment.chars().any(|ch| matches!(ch, '<' | '>' | '"' | '|' | '?' | '*')) {
+                if segment
+                    .chars()
+                    .any(|ch| matches!(ch, '<' | '>' | '"' | '|' | '?' | '*'))
+                {
                     return Err(FileOpPathError::new(
                         reason_code,
                         "Windows path contains invalid characters.",

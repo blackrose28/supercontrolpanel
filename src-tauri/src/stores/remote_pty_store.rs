@@ -38,7 +38,11 @@ pub struct RemotePtyStore {
 }
 
 impl RemotePtyStore {
-    pub fn bind_session(&self, remote_session_id: &str, local_session_id: &str) -> Result<(), String> {
+    pub fn bind_session(
+        &self,
+        remote_session_id: &str,
+        local_session_id: &str,
+    ) -> Result<(), String> {
         {
             let mut sessions = self
                 .sessions
@@ -70,7 +74,9 @@ impl RemotePtyStore {
         sessions
             .get(remote_session_id)
             .map(|session| session.local_session_id.clone())
-            .ok_or_else(|| format!("PTY_NOT_FOUND: Remote PTY session not found: {remote_session_id}"))
+            .ok_or_else(|| {
+                format!("PTY_NOT_FOUND: Remote PTY session not found: {remote_session_id}")
+            })
     }
 
     pub fn remote_session_for_local(&self, local_session_id: &str) -> Option<String> {
@@ -101,7 +107,10 @@ impl RemotePtyStore {
         Ok(())
     }
 
-    pub fn clear_session_for_local(&self, local_session_id: &str) -> Result<Option<String>, String> {
+    pub fn clear_session_for_local(
+        &self,
+        local_session_id: &str,
+    ) -> Result<Option<String>, String> {
         let remote_session_id = {
             let mut local_to_remote = self
                 .local_to_remote
@@ -131,7 +140,8 @@ impl RemotePtyStore {
             return Ok(false);
         };
 
-        let available = MAX_PENDING_OUTPUT_BYTES_PER_SESSION.saturating_sub(session.pending_output.len());
+        let available =
+            MAX_PENDING_OUTPUT_BYTES_PER_SESSION.saturating_sub(session.pending_output.len());
         if available > 0 {
             let appended = truncate_to_char_boundary(data, available);
             session.pending_output.push_str(appended);
@@ -203,7 +213,10 @@ impl RemotePtyStore {
         Ok(())
     }
 
-    pub fn mark_all_detached(&self, detached_at_ms: u64) -> Result<Vec<RemotePtyDetachSnapshot>, String> {
+    pub fn mark_all_detached(
+        &self,
+        detached_at_ms: u64,
+    ) -> Result<Vec<RemotePtyDetachSnapshot>, String> {
         let mut sessions = self
             .sessions
             .lock()

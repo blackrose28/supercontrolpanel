@@ -25,6 +25,7 @@ pub enum TransferRuntimeDirection {
 }
 
 pub struct CcRuntimeState {
+    agent_run_id: String,
     connected: AtomicBool,
     generation: AtomicU64,
     scp_session_context: Mutex<HashMap<String, TransferRuntimeContext>>,
@@ -39,6 +40,10 @@ struct TransferProgressState {
 }
 
 impl CcRuntimeState {
+    pub fn agent_run_id(&self) -> &str {
+        &self.agent_run_id
+    }
+
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Relaxed)
     }
@@ -91,7 +96,9 @@ impl CcRuntimeState {
             .scp_session_context
             .lock()
             .map_err(|_| "cc runtime transfer map lock poisoned".to_string())?;
-        Ok(guard.get(session_id).map(|context| context.transfer_id.clone()))
+        Ok(guard
+            .get(session_id)
+            .map(|context| context.transfer_id.clone()))
     }
 
     pub fn transfer_context_for_session(
@@ -168,7 +175,10 @@ impl CcRuntimeState {
         Ok(())
     }
 
-    pub fn transfer_last_activity_elapsed(&self, session_id: &str) -> Result<Option<std::time::Duration>, String> {
+    pub fn transfer_last_activity_elapsed(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<std::time::Duration>, String> {
         let guard = self
             .scp_session_last_activity
             .lock()
@@ -184,13 +194,16 @@ impl CcRuntimeState {
             .scp_session_progress_state
             .lock()
             .map_err(|_| "cc runtime transfer progress map lock poisoned".to_string())?;
-        Ok(guard.get(session_id).map(|entry| entry.last_progress_at.elapsed()))
+        Ok(guard
+            .get(session_id)
+            .map(|entry| entry.last_progress_at.elapsed()))
     }
 }
 
 impl Default for CcRuntimeState {
     fn default() -> Self {
         Self {
+            agent_run_id: uuid::Uuid::new_v4().to_string(),
             connected: AtomicBool::new(false),
             generation: AtomicU64::new(0),
             scp_session_context: Mutex::new(HashMap::new()),

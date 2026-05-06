@@ -567,9 +567,13 @@ pub fn list_remote_browser_children(
     browser_store: &RemoteBrowserStore,
 ) -> Result<Vec<RemoteBrowseEntry>, String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path =
-        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", true)
-            .map_err(|err| err.into_string())?;
+    let target_path = normalize_remote_transfer_path(
+        &path,
+        Some(&browser.root_path),
+        "invalid_target_path",
+        true,
+    )
+    .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session
@@ -607,9 +611,13 @@ pub fn stat_remote_browser_path(
     browser_store: &RemoteBrowserStore,
 ) -> Result<RemoteBrowseNodeInfo, String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path =
-        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", true)
-            .map_err(|err| err.into_string())?;
+    let target_path = normalize_remote_transfer_path(
+        &path,
+        Some(&browser.root_path),
+        "invalid_target_path",
+        true,
+    )
+    .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session
@@ -640,9 +648,13 @@ pub fn create_remote_browser_directory(
     browser_store: &RemoteBrowserStore,
 ) -> Result<(), String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path =
-        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", false)
-            .map_err(|err| err.into_string())?;
+    let target_path = normalize_remote_transfer_path(
+        &path,
+        Some(&browser.root_path),
+        "invalid_target_path",
+        false,
+    )
+    .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session
@@ -665,9 +677,13 @@ pub fn delete_remote_browser_path(
     browser_store: &RemoteBrowserStore,
 ) -> Result<(), String> {
     let browser = remote_browser_state(&browser_id, browser_store)?;
-    let target_path =
-        normalize_remote_transfer_path(&path, Some(&browser.root_path), "invalid_target_path", false)
-            .map_err(|err| err.into_string())?;
+    let target_path = normalize_remote_transfer_path(
+        &path,
+        Some(&browser.root_path),
+        "invalid_target_path",
+        false,
+    )
+    .map_err(|err| err.into_string())?;
     match &browser.transport {
         RemoteBrowserTransport::Sftp(session) => {
             let sftp = session

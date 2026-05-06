@@ -16,9 +16,9 @@ use crate::{
     server_tunnel_function_id,
     services::{
         add_common_ssh_options, build_scp_command, ensure_boundary_tunnel_running,
-        load_server_by_id, normalize_remote_transfer_path, resolve_server_ssh_endpoint,
-        ssh_target, validate_local_download_target, validate_local_upload_source,
-        open_remote_sftp_session, remote_kind_from_file_stat,
+        load_server_by_id, normalize_remote_transfer_path, open_remote_sftp_session,
+        remote_kind_from_file_stat, resolve_server_ssh_endpoint, ssh_target,
+        validate_local_download_target, validate_local_upload_source,
     },
     stores::{FunctionStore, SessionStore},
 };
@@ -65,15 +65,15 @@ pub fn scp_upload_service(
     recursive: Option<bool>,
 ) -> Result<String, String> {
     let local_path = validate_local_upload_source(&local_path).map_err(|err| err.into_string())?;
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_target_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_target_path", false)
+            .map_err(|err| err.into_string())?;
     let server = load_server_by_id(app, &server_id)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
     let remote_spec = format!("{}:{}", ssh_target(&endpoint), remote_path);
     let mut scp = Command::new("scp");
@@ -116,15 +116,15 @@ pub fn start_scp_upload_service(
     ) -> Result<(), String>,
 ) -> Result<String, String> {
     let local_path = validate_local_upload_source(&local_path).map_err(|err| err.into_string())?;
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_target_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_target_path", false)
+            .map_err(|err| err.into_string())?;
     let server = load_server_by_id(app, &server_id)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
     let cmd = build_scp_command(
         &endpoint,
@@ -154,19 +154,19 @@ pub fn cc_scp_upload_service(
     verify_checksum: bool,
 ) -> Result<String, String> {
     let local_path = validate_local_upload_source(&local_path).map_err(|err| err.into_string())?;
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_target_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_target_path", false)
+            .map_err(|err| err.into_string())?;
     let overwrite_policy = parse_overwrite_policy(overwrite_policy)?;
     enforce_symlink_policy_for_upload(&local_path, follow_symlinks)?;
     ensure_checksum_supported(recursive.unwrap_or(false), verify_checksum)?;
     let server = load_server_by_id(app, &server_id)?;
     let remote_path = resolve_remote_upload_target_path(&server, &local_path, &remote_path)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     match check_remote_target_overwrite(&server, &remote_path, overwrite_policy)? {
         OverwriteDecision::Proceed => {}
         OverwriteDecision::Skipped(message) => return Ok(message),
@@ -206,16 +206,17 @@ pub fn scp_download_service(
     local_path: String,
     recursive: Option<bool>,
 ) -> Result<String, String> {
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_source_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
-    let local_path = validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_source_path", false)
+            .map_err(|err| err.into_string())?;
+    let local_path =
+        validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
     let server = load_server_by_id(app, &server_id)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
     let remote_spec = format!("{}:{}", ssh_target(&endpoint), remote_path);
     let mut scp = Command::new("scp");
@@ -257,16 +258,17 @@ pub fn start_scp_download_service(
         &str,
     ) -> Result<(), String>,
 ) -> Result<String, String> {
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_source_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
-    let local_path = validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_source_path", false)
+            .map_err(|err| err.into_string())?;
+    let local_path =
+        validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
     let server = load_server_by_id(app, &server_id)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
     let cmd = build_scp_command(
         &endpoint,
@@ -315,19 +317,19 @@ pub fn cc_start_scp_upload_service(
     ) -> Result<(), String>,
 ) -> Result<StartScpResult, String> {
     let local_path = validate_local_upload_source(&local_path).map_err(|err| err.into_string())?;
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_target_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_target_path", false)
+            .map_err(|err| err.into_string())?;
     let overwrite_policy = parse_overwrite_policy(overwrite_policy)?;
     enforce_symlink_policy_for_upload(&local_path, follow_symlinks)?;
     ensure_checksum_supported(recursive.unwrap_or(false), verify_checksum)?;
     let server = load_server_by_id(app, &server_id)?;
     let remote_path = resolve_remote_upload_target_path(&server, &local_path, &remote_path)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     match check_remote_target_overwrite(&server, &remote_path, overwrite_policy)? {
         OverwriteDecision::Proceed => {}
         OverwriteDecision::Skipped(message) => return Ok(StartScpResult::Skipped(message)),
@@ -382,14 +384,11 @@ pub fn cc_scp_download_service(
     follow_symlinks: bool,
     verify_checksum: bool,
 ) -> Result<String, String> {
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_source_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
-    let local_path = validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_source_path", false)
+            .map_err(|err| err.into_string())?;
+    let local_path =
+        validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
     let overwrite_policy = parse_overwrite_policy(overwrite_policy)?;
     enforce_symlink_policy_for_download(follow_symlinks)?;
     ensure_checksum_supported(recursive.unwrap_or(false), verify_checksum)?;
@@ -398,7 +397,11 @@ pub fn cc_scp_download_service(
         OverwriteDecision::Skipped(message) => return Ok(message),
     }
     let server = load_server_by_id(app, &server_id)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
     let remote_spec = format!("{}:{}", ssh_target(&endpoint), remote_path);
     let mut scp = Command::new("scp");
@@ -454,14 +457,11 @@ pub fn cc_start_scp_download_service(
         &str,
     ) -> Result<(), String>,
 ) -> Result<StartScpResult, String> {
-    let remote_path = normalize_remote_transfer_path(
-        &remote_path,
-        None,
-        "invalid_source_path",
-        false,
-    )
-    .map_err(|err| err.into_string())?;
-    let local_path = validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
+    let remote_path =
+        normalize_remote_transfer_path(&remote_path, None, "invalid_source_path", false)
+            .map_err(|err| err.into_string())?;
+    let local_path =
+        validate_local_download_target(&local_path).map_err(|err| err.into_string())?;
     let overwrite_policy = parse_overwrite_policy(overwrite_policy)?;
     enforce_symlink_policy_for_download(follow_symlinks)?;
     ensure_checksum_supported(recursive.unwrap_or(false), verify_checksum)?;
@@ -473,7 +473,11 @@ pub fn cc_start_scp_download_service(
         }
     }
     let server = load_server_by_id(app, &server_id)?;
-    ensure_boundary_tunnel_running(&app.state::<FunctionStore>(), &server, server_tunnel_function_id)?;
+    ensure_boundary_tunnel_running(
+        &app.state::<FunctionStore>(),
+        &server,
+        server_tunnel_function_id,
+    )?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP")?;
     let recursive = recursive.unwrap_or(false);
     let local_temp_path = resume_request
@@ -555,8 +559,8 @@ fn resolve_remote_upload_target_path(
     local_path: &str,
     remote_path: &str,
 ) -> Result<String, String> {
-    let endpoint = resolve_server_ssh_endpoint(server, "SCP")
-        .map_err(|err| format!("agent_error: {err}"))?;
+    let endpoint =
+        resolve_server_ssh_endpoint(server, "SCP").map_err(|err| format!("agent_error: {err}"))?;
     let session = open_remote_sftp_session(
         &endpoint,
         server.connection_method == ConnectionMethod::Boundary,
@@ -570,7 +574,10 @@ fn resolve_remote_upload_target_path(
             let file_name = Path::new(local_path)
                 .file_name()
                 .and_then(|value| value.to_str())
-                .ok_or_else(|| "invalid_source_path: Local upload source must have a file or folder name".to_string())?;
+                .ok_or_else(|| {
+                    "invalid_source_path: Local upload source must have a file or folder name"
+                        .to_string()
+                })?;
             Ok(join_remote_path(remote_path, file_name))
         }
         Ok(_) => Ok(remote_path.to_string()),
@@ -721,7 +728,6 @@ fn build_atomic_upload_command(
     }
 }
 
-
 fn build_resume_upload_command(
     endpoint: &crate::models::SshEndpoint,
     local_path: &str,
@@ -733,7 +739,10 @@ fn build_resume_upload_command(
 ) -> Result<CommandBuilder, String> {
     let _ = &resume.resume_token;
     if recursive {
-        return Err("resume_not_supported: Upload resume is not supported for recursive transfers".to_string());
+        return Err(
+            "resume_not_supported: Upload resume is not supported for recursive transfers"
+                .to_string(),
+        );
     }
     #[cfg(target_os = "windows")]
     {
@@ -742,7 +751,9 @@ fn build_resume_upload_command(
         let _ = temp_remote_path;
         let _ = remote_path;
         let _ = verify_checksum;
-        return Err("resume_not_supported: Upload resume is not supported on Windows yet".to_string());
+        return Err(
+            "resume_not_supported: Upload resume is not supported on Windows yet".to_string(),
+        );
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -760,7 +771,10 @@ fi",
                 &build_remote_append_command(temp_remote_path, resume.resume_offset_bytes),
             ),
         );
-        let finalize_cmd = build_ssh_remote_command(endpoint, &build_remote_finalize_command(temp_remote_path, remote_path));
+        let finalize_cmd = build_ssh_remote_command(
+            endpoint,
+            &build_remote_finalize_command(temp_remote_path, remote_path),
+        );
         let mut script = format!("{resume_script} && {finalize_cmd}");
         if verify_checksum {
             let verify_script = format!(
@@ -863,7 +877,6 @@ fn build_verified_download_command(
     }
 }
 
-
 fn build_resume_download_command(
     endpoint: &crate::models::SshEndpoint,
     local_path: &str,
@@ -874,7 +887,10 @@ fn build_resume_download_command(
 ) -> Result<CommandBuilder, String> {
     let _ = &resume.resume_token;
     if recursive {
-        return Err("resume_not_supported: Download resume is not supported for recursive transfers".to_string());
+        return Err(
+            "resume_not_supported: Download resume is not supported for recursive transfers"
+                .to_string(),
+        );
     }
     #[cfg(target_os = "windows")]
     {
@@ -882,7 +898,9 @@ fn build_resume_download_command(
         let _ = local_path;
         let _ = remote_path;
         let _ = verify_checksum;
-        return Err("resume_not_supported: Download resume is not supported on Windows yet".to_string());
+        return Err(
+            "resume_not_supported: Download resume is not supported on Windows yet".to_string(),
+        );
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -971,7 +989,10 @@ fn ensure_checksum_supported(recursive: bool, verify_checksum: bool) -> Result<(
     Ok(())
 }
 
-fn enforce_symlink_policy_for_upload(local_path: &str, follow_symlinks: bool) -> Result<(), String> {
+fn enforce_symlink_policy_for_upload(
+    local_path: &str,
+    follow_symlinks: bool,
+) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(local_path)
         .map_err(|err| format!("agent_error: failed to inspect local upload source: {err}"))?;
     if metadata.file_type().is_symlink() && !follow_symlinks {
@@ -986,8 +1007,7 @@ fn enforce_symlink_policy_for_upload(local_path: &str, follow_symlinks: bool) ->
 fn enforce_symlink_policy_for_download(follow_symlinks: bool) -> Result<(), String> {
     if !follow_symlinks {
         return Err(
-            "agent_error: followSymlinks=false is not supported for downloads yet"
-                .to_string(),
+            "agent_error: followSymlinks=false is not supported for downloads yet".to_string(),
         );
     }
     Ok(())
@@ -1015,7 +1035,11 @@ fn verify_remote_and_local_sha256(
     ensure_matching_sha256(&local_hash, &remote_hash, operation)
 }
 
-fn ensure_matching_sha256(local_hash: &str, remote_hash: &str, operation: &str) -> Result<(), String> {
+fn ensure_matching_sha256(
+    local_hash: &str,
+    remote_hash: &str,
+    operation: &str,
+) -> Result<(), String> {
     if local_hash.eq_ignore_ascii_case(remote_hash) {
         Ok(())
     } else {
@@ -1026,8 +1050,8 @@ fn ensure_matching_sha256(local_hash: &str, remote_hash: &str, operation: &str) 
 }
 
 fn compute_local_sha256(path: &str) -> Result<String, String> {
-    let mut file =
-        File::open(path).map_err(|err| format!("agent_error: failed to open file for checksum: {err}"))?;
+    let mut file = File::open(path)
+        .map_err(|err| format!("agent_error: failed to open file for checksum: {err}"))?;
     let mut hasher = Sha256::new();
     let mut buffer = [0_u8; 8192];
     loop {
@@ -1146,8 +1170,8 @@ fn check_remote_target_overwrite(
     if overwrite_policy == OverwritePolicy::Force {
         return Ok(OverwriteDecision::Proceed);
     }
-    let endpoint = resolve_server_ssh_endpoint(server, "SCP")
-        .map_err(|err| format!("agent_error: {err}"))?;
+    let endpoint =
+        resolve_server_ssh_endpoint(server, "SCP").map_err(|err| format!("agent_error: {err}"))?;
     let session = open_remote_sftp_session(
         &endpoint,
         server.connection_method == ConnectionMethod::Boundary,

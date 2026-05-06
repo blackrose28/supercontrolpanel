@@ -33,10 +33,7 @@ pub(crate) fn sync_cc_status_from_settings(app: &AppHandle) -> Result<(), String
         };
         (
             "connected",
-            format!(
-                "Connected as {} to {}.",
-                label, settings.cc_server_url
-            ),
+            format!("Connected as {} to {}.", label, settings.cc_server_url),
         )
     } else {
         let label = if settings.cc_device_name.trim().is_empty() {

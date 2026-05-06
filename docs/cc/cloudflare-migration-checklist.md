@@ -152,11 +152,11 @@ Use this checklist one item at a time. For implementation items, do not check th
 - [x] Document Pages deployment steps. See `cc-server/README.md` and `docs/cc/cloudflare-local-preview-validation.md`.
 - [x] Document existing NestJS normal-server deployment remains supported. See `cc-server/README.md`.
 - [x] Document D1 migration and rollback. See `docs/cc/cloudflare-d1-migration-runbook.md` and `cc-server/README.md`.
-- [ ] RED: any legacy cleanup test coverage needed.
+- [x] RED: any legacy cleanup test coverage needed. No legacy cleanup/deprecation is included in this dual-runtime migration, so no additional cleanup-specific regression test was required.
 - [x] GREEN: document both runtime paths; do not remove/deprecate legacy Nest paths in this migration.
-- [ ] Run full Worker test suite. Attempted `npm test` on 2026-04-29: Worker-focused tests passed, but legacy store specs failed during Windows temp directory cleanup with `EPERM` after 226/254 tests passed; targeted Worker suites passed.
-- [x] Run full admin-next test suite. `npm --prefix cc-server/admin-next run test -- --run` passed on 2026-04-29 (154 tests).
-- [x] Run admin-next production build. `npm --prefix cc-server/admin-next run build` passed on 2026-04-29.
+- [x] Run full Worker test suite. `npm test -- --run` passed on 2026-05-05 (49 files / 278 tests). The previous Windows temp directory cleanup `EPERM` failures were resolved by closing test SQLite handles before removing temp directories.
+- [x] Run full admin-next test suite. `npm --prefix cc-server/admin-next run test -- --run` passed on 2026-05-05 (16 files / 157 tests).
+- [x] Run admin-next production build. `npm --prefix cc-server/admin-next run build` passed on 2026-05-05.
 - [ ] Run real E2E smoke: enroll, connect, logs, commands, PTY, file transfer.
 - [x] Update `cc-server/README.md` with Cloudflare deployment instructions.
 

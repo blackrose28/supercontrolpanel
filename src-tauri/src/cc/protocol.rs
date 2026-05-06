@@ -111,8 +111,9 @@ impl Envelope {
         }
     }
 
-    pub fn heartbeat(device_id: String, seq: u64, uptime_sec: u64) -> Self {
+    pub fn heartbeat(device_id: String, seq: u64, agent_run_id: String, uptime_sec: u64) -> Self {
         let payload = serde_json::json!({
+            "agentRunId": agent_run_id,
             "uptimeSec": uptime_sec,
             "os": std::env::consts::OS,
             "versions": {
@@ -127,6 +128,7 @@ impl Envelope {
     pub fn status_snapshot(
         device_id: String,
         seq: u64,
+        agent_run_id: String,
         function_states: Vec<crate::models::FunctionStatus>,
     ) -> Self {
         let states_json: Vec<serde_json::Value> = function_states
@@ -143,6 +145,7 @@ impl Envelope {
             })
             .collect();
         let payload = serde_json::json!({
+            "agentRunId": agent_run_id,
             "activeSessions": [],
             "lastSeqByStream": {},
             "functionStates": states_json,
@@ -189,7 +192,7 @@ impl Envelope {
 
 #[cfg(test)]
 mod tests {
-    use super::{Envelope, MessageType};
+    use super::Envelope;
 
     #[test]
     fn status_snapshot_includes_function_states() {
@@ -212,12 +215,14 @@ mod tests {
             },
         ];
 
-        let snapshot = Envelope::status_snapshot("device-1".to_string(), 42, states);
+        let snapshot =
+            Envelope::status_snapshot("device-1".to_string(), 42, "run-abc".to_string(), states);
         assert_eq!(snapshot.msg_type, "status_snapshot");
         assert_eq!(snapshot.device_id, "device-1");
         assert_eq!(snapshot.seq, 42);
 
         let payload = snapshot.payload.unwrap();
+        assert_eq!(payload.get("agentRunId").unwrap(), "run-abc");
         let func_states = payload.get("functionStates").unwrap().as_array().unwrap();
         assert_eq!(func_states.len(), 2);
 
@@ -234,14 +239,26 @@ mod tests {
     }
 
     #[test]
+    fn heartbeat_includes_agent_run_id() {
+        let heartbeat =
+            Envelope::heartbeat("device-1".to_string(), 7, "run-heartbeat".to_string(), 12);
+        assert_eq!(heartbeat.msg_type, "heartbeat");
+        let payload = heartbeat.payload.unwrap();
+        assert_eq!(payload.get("agentRunId").unwrap(), "run-heartbeat");
+        assert_eq!(payload.get("uptimeSec").unwrap(), 12);
+    }
+
+    #[test]
     fn status_snapshot_includes_active_sessions_and_last_seq() {
         let states: Vec<crate::models::FunctionStatus> = vec![];
-        let snapshot = Envelope::status_snapshot("device-1".to_string(), 1, states);
+        let snapshot =
+            Envelope::status_snapshot("device-1".to_string(), 1, "run-empty".to_string(), states);
         let payload = snapshot.payload.unwrap();
 
         // Existing fields are still present
         assert!(payload.get("activeSessions").is_some());
         assert!(payload.get("lastSeqByStream").is_some());
+        assert_eq!(payload.get("agentRunId").unwrap(), "run-empty");
         // New field is present even when empty
         assert!(payload.get("functionStates").is_some());
         assert_eq!(

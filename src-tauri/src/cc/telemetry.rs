@@ -43,7 +43,6 @@ const TELEMETRY_BURST_BYTES: f64 = TELEMETRY_RATE_BYTES_PER_SEC * 5.0;
 const TELEMETRY_SERVER_BACKOFF_DEFAULT_MS: u64 = 1_000;
 const TELEMETRY_SERVER_BACKOFF_MAX_MS: u64 = 5_000;
 
-
 #[derive(Debug, Deserialize)]
 struct TelemetryNackResponse {
     #[serde(rename = "type")]
@@ -202,7 +201,8 @@ fn ensure_telemetry_worker_started(app: AppHandle) {
                         .as_ref()
                         .and_then(|payload| payload.retry_after_ms)
                         .or(retry_after_header);
-                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+                    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+                    {
                         apply_server_backoff(retry_after);
                     }
                     let reason = if let Some(payload) = nack {
@@ -210,7 +210,9 @@ fn ensure_telemetry_worker_started(app: AppHandle) {
                             format!(
                                 "server returned {} (rate_limited, retryAfterMs={})",
                                 status,
-                                payload.retry_after_ms.unwrap_or(TELEMETRY_SERVER_BACKOFF_DEFAULT_MS)
+                                payload
+                                    .retry_after_ms
+                                    .unwrap_or(TELEMETRY_SERVER_BACKOFF_DEFAULT_MS)
                             )
                         } else {
                             format!("server returned {}", status)

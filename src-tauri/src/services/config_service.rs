@@ -394,7 +394,10 @@ mod tests {
     #[test]
     fn sync_settings_first_run_completed_defaults_to_false() {
         let settings = SyncSettings::default();
-        assert!(!settings.first_run_completed, "first_run_completed should default to false");
+        assert!(
+            !settings.first_run_completed,
+            "first_run_completed should default to false"
+        );
     }
 
     #[test]
@@ -413,7 +416,10 @@ mod tests {
     fn sync_settings_deserialize_without_first_run_completed_defaults_false() {
         let json = r#"{"repoRoot":"/tmp", "ccServerUrl":"http://example.com"}"#;
         let settings: SyncSettings = serde_json::from_str(json).expect("should deserialize");
-        assert!(!settings.first_run_completed, "missing field should default to false");
+        assert!(
+            !settings.first_run_completed,
+            "missing field should default to false"
+        );
         assert_eq!(settings.cc_server_url, "http://example.com");
     }
 

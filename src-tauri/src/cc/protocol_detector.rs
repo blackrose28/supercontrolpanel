@@ -1,5 +1,4 @@
 use std::time::Duration;
-use reqwest::header::HeaderMap;
 
 /// Supported connection protocols for cc-server communication
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -10,7 +9,6 @@ pub enum ConnectionProtocol {
     Sse,
 }
 
-
 fn websocket_upgrade_probe_url(server_url: &str) -> String {
     let url = server_url.trim_end_matches('/').to_string();
     if url.ends_with("/agent") {
@@ -20,14 +18,23 @@ fn websocket_upgrade_probe_url(server_url: &str) -> String {
     }
 }
 
-/// Detect the supported protocol by attempting WebSocket upgrade first
+fn protocol_probe_url(server_url: &str) -> String {
+    format!("{}/protocol", websocket_upgrade_probe_url(server_url))
+}
+
+fn protocol_probe_supports_websocket(body: &str) -> bool {
+    body.contains("\"websocket\"")
+}
+
+/// Detect the supported protocol through a lightweight HTTP endpoint.
+///
+/// Do not perform a throwaway WebSocket upgrade here: wrangler dev can retain
+/// abandoned Durable Object WebSockets until the local Node process runs out of
+/// heap.
 pub async fn detect_protocol(
     server_url: &str,
     agent_token: &str,
 ) -> Result<ConnectionProtocol, String> {
-    // Try WebSocket first
-    let ws_url = websocket_upgrade_probe_url(server_url);
-
     let client = match reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .timeout(Duration::from_secs(5))
@@ -37,34 +44,27 @@ pub async fn detect_protocol(
         Err(e) => return Err(format!("Failed to create HTTP client: {}", e)),
     };
 
-    // Attempt WebSocket upgrade to see if it's supported
-    let mut headers = HeaderMap::new();
-    headers.insert("Authorization", format!("Bearer {}", agent_token).parse().unwrap());
-    headers.insert("Sec-WebSocket-Protocol", "scp.cc.v1".parse().unwrap());
-
     match client
-        .get(&ws_url)
-        .headers(headers)
-        .header("Connection", "Upgrade")
-        .header("Upgrade", "websocket")
-        .header("Sec-WebSocket-Version", "13")
-        .header("Sec-WebSocket-Key", generate_websocket_key())
+        .get(protocol_probe_url(server_url))
+        .header("Authorization", format!("Bearer {}", agent_token))
         .send()
         .await
     {
         Ok(response) => {
             let status = response.status();
-            if status.is_success() || status.as_u16() == 101 {
-                // WebSocket upgrade succeeded
+            if status.is_success()
+                && protocol_probe_supports_websocket(&response.text().await.unwrap_or_default())
+            {
                 return Ok(ConnectionProtocol::WebSocket);
             }
-            // WebSocket not supported
-            println!("WebSocket not supported (HTTP {}), falling back to polling", status);
+            println!(
+                "Protocol probe returned HTTP {}; falling back to polling",
+                status
+            );
             Ok(ConnectionProtocol::Sse)
         }
         Err(e) => {
-            println!("WebSocket connection failed ({}), falling back to polling", e);
-            // If WebSocket fails completely, fall back to polling (SSE mode)
+            println!("Protocol probe failed ({}), falling back to polling", e);
             Ok(ConnectionProtocol::Sse)
         }
     }
@@ -78,8 +78,6 @@ pub async fn is_protocol_supported(
 ) -> Result<bool, String> {
     match protocol {
         ConnectionProtocol::WebSocket => {
-            let ws_url = websocket_upgrade_probe_url(server_url);
-
             let client = match reqwest::Client::builder()
                 .danger_accept_invalid_certs(true)
                 .timeout(Duration::from_secs(5))
@@ -89,21 +87,20 @@ pub async fn is_protocol_supported(
                 Err(e) => return Err(format!("Failed to create HTTP client: {}", e)),
             };
 
-            let mut headers = HeaderMap::new();
-            headers.insert("Authorization", format!("Bearer {}", agent_token).parse().unwrap());
-            headers.insert("Sec-WebSocket-Protocol", "scp.cc.v1".parse().unwrap());
-
             match client
-                .get(&ws_url)
-                .headers(headers)
-                .header("Connection", "Upgrade")
-                .header("Upgrade", "websocket")
-                .header("Sec-WebSocket-Version", "13")
-                .header("Sec-WebSocket-Key", generate_websocket_key())
+                .get(protocol_probe_url(server_url))
+                .header("Authorization", format!("Bearer {}", agent_token))
                 .send()
                 .await
             {
-                Ok(response) => Ok(response.status().is_success() || response.status().as_u16() == 101),
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        return Ok(false);
+                    }
+                    Ok(protocol_probe_supports_websocket(
+                        &response.text().await.unwrap_or_default(),
+                    ))
+                }
                 Err(_) => Ok(false),
             }
         }
@@ -161,8 +158,18 @@ fn generate_websocket_key() -> String {
         let b3 = if i + 2 < key.len() { key[i + 2] } else { 0 };
 
         result.push(BASE64_CHARS.chars().nth((b1 >> 2) as usize).unwrap());
-        result.push(BASE64_CHARS.chars().nth((((b1 & 0x03) << 4) | (b2 >> 4)) as usize).unwrap());
-        result.push(BASE64_CHARS.chars().nth((((b2 & 0x0F) << 2) | (b3 >> 6)) as usize).unwrap());
+        result.push(
+            BASE64_CHARS
+                .chars()
+                .nth((((b1 & 0x03) << 4) | (b2 >> 4)) as usize)
+                .unwrap(),
+        );
+        result.push(
+            BASE64_CHARS
+                .chars()
+                .nth((((b2 & 0x0F) << 2) | (b3 >> 6)) as usize)
+                .unwrap(),
+        );
         result.push(BASE64_CHARS.chars().nth((b3 & 0x3F) as usize).unwrap());
 
         i += 3;
@@ -179,8 +186,26 @@ mod tests {
 
     #[test]
     fn websocket_upgrade_probe_uses_http_scheme() {
-        assert_eq!(websocket_upgrade_probe_url("https://cc.example.test"), "https://cc.example.test/agent");
-        assert_eq!(websocket_upgrade_probe_url("http://localhost:8787/agent"), "http://localhost:8787/agent");
+        assert_eq!(
+            websocket_upgrade_probe_url("https://cc.example.test"),
+            "https://cc.example.test/agent"
+        );
+        assert_eq!(
+            websocket_upgrade_probe_url("http://localhost:8787/agent"),
+            "http://localhost:8787/agent"
+        );
+    }
+
+    #[test]
+    fn protocol_probe_uses_http_endpoint_without_websocket_upgrade() {
+        assert_eq!(
+            protocol_probe_url("https://cc.example.test"),
+            "https://cc.example.test/agent/protocol"
+        );
+        assert_eq!(
+            protocol_probe_url("http://localhost:8787/agent"),
+            "http://localhost:8787/agent/protocol"
+        );
     }
 
     #[test]
@@ -196,7 +221,7 @@ mod tests {
         let key2 = generate_websocket_key();
         assert_eq!(key1.len(), 24); // base64 of 16 bytes
         assert_ne!(key1, key2); // Should be random
-        
+
         // Verify it's valid base64 characters
         for c in key1.chars() {
             assert!(c.is_alphanumeric() || c == '+' || c == '/');

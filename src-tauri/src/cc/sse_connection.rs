@@ -1,10 +1,10 @@
-use std::sync::Arc;
 use std::io::{Error as IoError, ErrorKind};
+use std::sync::Arc;
 use std::time::Duration;
 
 use rand::Rng;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager, Listener};
+use tauri::{AppHandle, Listener, Manager};
 use tokio::sync::Mutex;
 use tokio::time::{interval, sleep};
 
@@ -12,8 +12,8 @@ use super::commands::set_cc_status;
 use super::protocol::Envelope;
 use crate::stores::{CcRuntimeState, RemotePtyStore};
 
-const POLL_INTERVAL_SECS: u64 = 60;  // Reduced from 5s to reduce load
-const HEARTBEAT_INTERVAL_SECS: u64 = 120;  // 2 minutes heartbeat
+const POLL_INTERVAL_SECS: u64 = 60; // Reduced from 5s to reduce load
+const HEARTBEAT_INTERVAL_SECS: u64 = 120; // 2 minutes heartbeat
 
 pub struct SseConnection {
     server_url: String,
@@ -109,7 +109,13 @@ impl SseConnection {
         };
 
         // First, do a test POST to verify the server is reachable
-        let test_heartbeat = Envelope::heartbeat(self.device_id.clone(), 1, 0);
+        let agent_run_id = self
+            .app
+            .state::<CcRuntimeState>()
+            .agent_run_id()
+            .to_string();
+        let test_heartbeat =
+            Envelope::heartbeat(self.device_id.clone(), 1, agent_run_id.clone(), 0);
         match post_to_server(&agent_url, &self.agent_token, json!(test_heartbeat)).await {
             Ok(resp) => {
                 println!("CC polling connection verified: {:?}", resp);
@@ -131,7 +137,10 @@ impl SseConnection {
         let _ = set_cc_status(
             &self.app,
             "connected",
-            &format!("Connected as {} to {} via polling.", self.device_id, self.server_url),
+            &format!(
+                "Connected as {} to {} via polling.",
+                self.device_id, self.server_url
+            ),
         );
         println!("CC polling connection established");
 
@@ -142,6 +151,7 @@ impl SseConnection {
         let status_app = self.app.clone();
         let generation = self.generation;
         let heartbeat_seq = self.seq.clone();
+        let heartbeat_agent_run_id = agent_run_id.clone();
 
         tokio::spawn(async move {
             let mut heartbeat_interval = interval(Duration::from_secs(HEARTBEAT_INTERVAL_SECS));
@@ -165,13 +175,20 @@ impl SseConnection {
                     *s
                 };
 
-                let heartbeat = Envelope::heartbeat(heartbeat_device_id.clone(), seq, uptime_sec);
+                let heartbeat = Envelope::heartbeat(
+                    heartbeat_device_id.clone(),
+                    seq,
+                    heartbeat_agent_run_id.clone(),
+                    uptime_sec,
+                );
 
                 if let Err(e) = post_to_server(
                     &heartbeat_server_url,
                     &heartbeat_agent_token,
                     json!(heartbeat),
-                ).await {
+                )
+                .await
+                {
                     eprintln!("Polling heartbeat failed: {}", e);
                 }
             }
@@ -207,7 +224,9 @@ impl SseConnection {
 
                 match poll_for_commands_get(&poll_server_url, &poll_agent_token).await {
                     Ok(commands) => {
-                        if let Some(commands_array) = commands.get("commands").and_then(Value::as_array) {
+                        if let Some(commands_array) =
+                            commands.get("commands").and_then(Value::as_array)
+                        {
                             if !commands_array.is_empty() {
                                 println!("Polling: Received {} commands", commands_array.len());
                                 for command in commands_array {
@@ -259,18 +278,24 @@ impl SseConnection {
                     *s
                 };
 
+                let remote_session_id = payload_value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .and_then(|local_session_id| {
+                        app.state::<RemotePtyStore>()
+                            .remote_session_for_local(local_session_id)
+                    });
+                let payload_value =
+                    pty_output_payload_for_polling(payload_value.clone(), remote_session_id);
+
                 let envelope = Envelope::new(
                     "pty-output",
                     device_id.clone(),
                     seq,
-                    Some(payload_value.clone()),
+                    Some(payload_value),
                 );
 
-                if let Err(e) = post_to_server(
-                    &server_url,
-                    &agent_token,
-                    json!(envelope)
-                ).await {
+                if let Err(e) = post_to_server(&server_url, &agent_token, json!(envelope)).await {
                     eprintln!("Polling pty-output send failed: {}", e);
                 }
             });
@@ -319,11 +344,7 @@ impl SseConnection {
                     Some(payload_value.clone()),
                 );
 
-                if let Err(e) = post_to_server(
-                    &server_url,
-                    &agent_token,
-                    json!(envelope)
-                ).await {
+                if let Err(e) = post_to_server(&server_url, &agent_token, json!(envelope)).await {
                     eprintln!("Polling pty-exit send failed: {}", e);
                 }
             });
@@ -346,11 +367,7 @@ impl SseConnection {
             return Ok(());
         }
         self.app.state::<CcRuntimeState>().set_connected(false);
-        let _ = set_cc_status(
-            &self.app,
-            "disconnected",
-            "Polling connection ended."
-        );
+        let _ = set_cc_status(&self.app, "disconnected", "Polling connection ended.");
         Err(IoError::new(ErrorKind::UnexpectedEof, "Polling connection ended").into())
     }
 
@@ -407,7 +424,7 @@ async fn poll_for_commands_get(
     agent_token: &str,
 ) -> Result<Value, Box<dyn std::error::Error + Send + Sync>> {
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(120))  // 2 minute timeout for long-poll
+        .timeout(Duration::from_secs(120)) // 2 minute timeout for long-poll
         .danger_accept_invalid_certs(true)
         .build()?;
 
@@ -419,7 +436,7 @@ async fn poll_for_commands_get(
     let response = client
         .get(&url)
         .header("Authorization", format!("Bearer {}", agent_token))
-        .header("Accept", "application/json")  // Expect JSON response
+        .header("Accept", "application/json") // Expect JSON response
         .send()
         .await?;
 
@@ -434,4 +451,48 @@ async fn poll_for_commands_get(
     }
 
     Ok(serde_json::from_str(&body)?)
+}
+
+fn pty_output_payload_for_polling(mut payload: Value, remote_session_id: Option<String>) -> Value {
+    let Some(remote_session_id) = remote_session_id else {
+        return payload;
+    };
+    let Some(payload_object) = payload.as_object_mut() else {
+        return payload;
+    };
+
+    payload_object.remove("id");
+    payload_object.insert("sessionId".to_string(), json!(remote_session_id));
+    payload
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pty_output_payload_for_polling_uses_remote_session_id() {
+        let payload = json!({
+            "id": "local-ssh-session-1",
+            "data": "uptime\r\n",
+        });
+
+        let rewritten = pty_output_payload_for_polling(payload, Some("server-ssh-srv-1-remote".to_string()));
+
+        assert_eq!(rewritten["sessionId"], json!("server-ssh-srv-1-remote"));
+        assert_eq!(rewritten["data"], json!("uptime\r\n"));
+        assert!(rewritten.get("id").is_none());
+    }
+
+    #[test]
+    fn pty_output_payload_for_polling_leaves_unmapped_local_payloads_unchanged() {
+        let payload = json!({
+            "id": "local-openvpn-session-1",
+            "data": "openvpn output",
+        });
+
+        let rewritten = pty_output_payload_for_polling(payload.clone(), None);
+
+        assert_eq!(rewritten, payload);
+    }
 }

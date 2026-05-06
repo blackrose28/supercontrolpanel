@@ -281,10 +281,7 @@ pub async fn enroll_device(
         return Err("Bootstrap token cannot be empty".to_string());
     }
 
-    let enroll_url = format!(
-        "{}/v1/enroll",
-        server_url.trim_end_matches('/')
-    );
+    let enroll_url = format!("{}/v1/enroll", server_url.trim_end_matches('/'));
 
     let body = serde_json::json!({
         "bootstrapToken": bootstrap_token,
@@ -325,12 +322,10 @@ pub async fn enroll_device(
         ));
     }
 
-    let enroll_response: EnrollResponse =
-        serde_json::from_str(&response_body)
-            .map_err(|e| format!("Invalid enrollment response: {e}"))?;
+    let enroll_response: EnrollResponse = serde_json::from_str(&response_body)
+        .map_err(|e| format!("Invalid enrollment response: {e}"))?;
 
-    let mut merged =
-        load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+    let mut merged = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     merged.cc_enabled = true;
     merged.cc_server_url = server_url.to_string();
     merged.cc_device_id = enroll_response.device_id.clone();
@@ -339,12 +334,7 @@ pub async fn enroll_device(
     merged.first_run_completed = true;
     save_sync_settings_to_disk(&app, &merged, SYNC_SETTINGS_FILE_NAME)?;
 
-    let _ = sync_mcp_runtime_from_settings(
-        &app,
-        &mcp_state,
-        &merged,
-        crate::services::now_ms,
-    );
+    let _ = sync_mcp_runtime_from_settings(&app, &mcp_state, &merged, crate::services::now_ms);
     let _ = sync_cc_status_from_settings(&app);
 
     let app_handle = app.clone();
@@ -381,8 +371,7 @@ pub struct EnrollResult {
 
 #[tauri::command]
 pub async fn revoke_my_device(app: AppHandle) -> Result<String, String> {
-    let settings =
-        load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+    let settings = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
 
     if !settings.cc_enabled
         || settings.cc_agent_token.trim().is_empty()
@@ -418,8 +407,7 @@ pub async fn revoke_my_device(app: AppHandle) -> Result<String, String> {
     .await
     .map_err(|e| format!("Revoke task panicked: {e}"))??;
 
-    let mut merged =
-        load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
+    let mut merged = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     merged.cc_enabled = false;
     merged.cc_server_url = String::new();
     merged.cc_agent_token = String::new();

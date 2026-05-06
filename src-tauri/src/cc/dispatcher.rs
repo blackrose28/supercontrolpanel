@@ -1782,7 +1782,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::{local_transfer_status_payload, parse_inbound_server_message, InboundServerMessage};
+    use super::{
+        local_transfer_status_payload, parse_inbound_server_message, InboundServerMessage,
+    };
     use crate::cc::protocol::Envelope;
     use crate::stores::TransferRuntimeDirection;
     use serde_json::json;
@@ -1946,7 +1948,6 @@ mod tests {
         assert_eq!(payload["remotePath"], json!("/var/source.txt"));
         assert_eq!(payload["message"], json!("start_scp_upload"));
     }
-
 }
 
 async fn run_blocking_command_action<W, F>(
@@ -3216,7 +3217,9 @@ pub async fn send_status_snapshot(
         *s += 1;
         *s
     };
-    let snapshot = Envelope::status_snapshot(device_id.to_string(), seq, function_states);
+    let agent_run_id = app.state::<CcRuntimeState>().agent_run_id().to_string();
+    let snapshot =
+        Envelope::status_snapshot(device_id.to_string(), seq, agent_run_id, function_states);
     let msg = serde_json::to_string(&snapshot)?;
     write.send(Message::Text(msg)).await?;
     Ok(())
