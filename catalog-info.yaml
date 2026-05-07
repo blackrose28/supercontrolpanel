@@ -1,0 +1,16 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: super-control-panel
+  description: Super Control Panel
+  tags:
+    - tauri
+    - cross-platform
+    - rust
+  annotations:
+    gitlab.com/project-slug: chuonglv/supercontrolpanel
+
+spec:
+  type: application
+  lifecycle: experimental
+  owner: chuonglv
