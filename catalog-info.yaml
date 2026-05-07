@@ -14,3 +14,6 @@ spec:
   type: application
   lifecycle: experimental
   owner: chuonglv
+  system: controlpanel
+  dependsOn:
+    - component:super-control-panel-server
