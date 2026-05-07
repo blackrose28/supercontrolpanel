@@ -15,5 +15,7 @@ spec:
   lifecycle: experimental
   owner: chuonglv
   system: controlpanel
+  consumesApis:
+    - api:control-panel-api
   dependsOn:
     - component:super-control-panel-server
