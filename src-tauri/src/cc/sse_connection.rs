@@ -230,7 +230,7 @@ impl SseConnection {
                             if !commands_array.is_empty() {
                                 println!("Polling: Received {} commands", commands_array.len());
                                 for command in commands_array {
-                                    println!("Polling: Command: {:?}", command.get("commandType"));
+                                    println!("{}", polling_command_log_line(command));
                                 }
                             }
                         }
@@ -466,9 +466,42 @@ fn pty_output_payload_for_polling(mut payload: Value, remote_session_id: Option<
     payload
 }
 
+fn polling_command_log_line(command: &Value) -> String {
+    let command_type = command
+        .get("commandType")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let command_id = command
+        .get("commandId")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing>");
+    let payload = command.get("payload").cloned().unwrap_or(Value::Null);
+    let payload_json = serde_json::to_string(&payload).unwrap_or_else(|_| "null".to_string());
+    format!(
+        "Polling: Command received commandType={command_type} commandId={command_id} payload={payload_json}"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn polling_command_log_line_includes_command_type_id_and_payload() {
+        let command = json!({
+            "commandId": "cmd-1",
+            "commandType": "request_start_server_tunnel",
+            "payload": {
+                "serverId": "srv-1"
+            }
+        });
+
+        let line = polling_command_log_line(&command);
+
+        assert!(line.contains("commandType=request_start_server_tunnel"));
+        assert!(line.contains("commandId=cmd-1"));
+        assert!(line.contains("\"serverId\":\"srv-1\""));
+    }
 
     #[test]
     fn pty_output_payload_for_polling_uses_remote_session_id() {

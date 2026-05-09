@@ -2,6 +2,8 @@ use std::{collections::HashMap, sync::Mutex};
 
 const MAX_PENDING_OUTPUT_BYTES_PER_SESSION: usize = 64 * 1024;
 const MAX_OUTPUT_FLUSH_BYTES: usize = 16 * 1024;
+/// Ring buffer of recent PTY bytes for admin UI replay (source of truth on device).
+const MAX_SCROLLBACK_BYTES_PER_SESSION: usize = 32 * 1024;
 const SLOW_CONSUMER_NOTICE: &str =
     "\r\n[cc] PTY output truncated because the remote consumer is slow.\r\n";
 
@@ -27,6 +29,8 @@ struct RemotePtySessionState {
     pending_output: String,
     output_flush_in_progress: bool,
     output_truncated: bool,
+    scrollback: String,
+    scrollback_truncated: bool,
     detached_at_ms: Option<u64>,
     detach_generation: u64,
 }
@@ -140,6 +144,8 @@ impl RemotePtyStore {
             return Ok(false);
         };
 
+        append_scrollback_ring(&mut session.scrollback, &mut session.scrollback_truncated, data);
+
         let available =
             MAX_PENDING_OUTPUT_BYTES_PER_SESSION.saturating_sub(session.pending_output.len());
         if available > 0 {
@@ -188,6 +194,24 @@ impl RemotePtyStore {
 
         session.output_flush_in_progress = false;
         Ok(None)
+    }
+
+    /// Snapshot of scrollback for the CC remote session id (admin replay). `None` if unbound.
+    pub fn scrollback_for_remote_session(
+        &self,
+        remote_session_id: &str,
+    ) -> Result<Option<(String, bool)>, String> {
+        let sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "remote pty sessions lock poisoned".to_string())?;
+        let Some(session) = sessions.get(remote_session_id) else {
+            return Ok(None);
+        };
+        Ok(Some((
+            session.scrollback.clone(),
+            session.scrollback_truncated,
+        )))
     }
 
     pub fn abort_output_flush(&self, remote_session_id: &str) -> Result<(), String> {
@@ -262,6 +286,20 @@ impl RemotePtyStore {
     }
 }
 
+fn append_scrollback_ring(target: &mut String, truncated: &mut bool, data: &str) {
+    if data.is_empty() {
+        return;
+    }
+    target.push_str(data);
+    if target.len() <= MAX_SCROLLBACK_BYTES_PER_SESSION {
+        return;
+    }
+    let excess = target.len() - MAX_SCROLLBACK_BYTES_PER_SESSION;
+    let slice_from = floor_char_boundary(target, excess).max(1);
+    *target = target[slice_from..].to_string();
+    *truncated = true;
+}
+
 fn truncate_to_char_boundary(input: &str, max_bytes: usize) -> &str {
     if input.len() <= max_bytes {
         return input;
@@ -275,4 +313,31 @@ fn floor_char_boundary(input: &str, max_bytes: usize) -> usize {
         boundary -= 1;
     }
     boundary
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrollback_ring_keeps_tail_and_sets_truncated() {
+        let store = RemotePtyStore::default();
+        store
+            .bind_session("remote-1", "local-1")
+            .expect("bind");
+        let chunk = "a".repeat(20_000);
+        store
+            .enqueue_output("remote-1", &chunk)
+            .expect("enqueue");
+        store
+            .enqueue_output("remote-1", &chunk)
+            .expect("enqueue");
+        let snap = store
+            .scrollback_for_remote_session("remote-1")
+            .expect("snap")
+            .expect("some");
+        assert!(snap.1);
+        assert!(snap.0.len() <= MAX_SCROLLBACK_BYTES_PER_SESSION);
+        assert!(snap.0.ends_with('a'));
+    }
 }

@@ -125,6 +125,10 @@ pub enum InboundServerMessage {
         cols: u16,
         rows: u16,
     },
+    RequestPtyScrollback {
+        req_seq: u64,
+        session_id: String,
+    },
     OpenPty {
         command_id: Option<String>,
         req_seq: u64,
@@ -245,6 +249,7 @@ pub enum InboundServerMessage {
 impl InboundServerMessage {
     pub fn command_id(&self) -> Option<&str> {
         match self {
+            Self::RequestPtyScrollback { .. } => None,
             Self::RequestStatusSnapshot { command_id }
             | Self::RequestInventory { command_id }
             | Self::RequestRecentLogs { command_id }
@@ -270,6 +275,54 @@ impl InboundServerMessage {
             | Self::ScpDownload { command_id, .. }
             | Self::StartScpUpload { command_id, .. }
             | Self::StartScpDownload { command_id, .. } => command_id.as_deref(),
+        }
+    }
+
+    fn action_name(&self) -> &'static str {
+        match self {
+            Self::RequestStatusSnapshot { .. } => "request_status_snapshot",
+            Self::RequestInventory { .. } => "request_inventory",
+            Self::RequestRecentLogs { .. } => "request_recent_logs",
+            Self::RequestRestartOpenvpn { .. } => "request_restart_openvpn",
+            Self::RequestRestartBoundaryAuth { .. } => "request_restart_boundary_auth",
+            Self::RequestStartServerTunnel { .. } => "request_start_server_tunnel",
+            Self::RequestStopServerTunnel { .. } => "request_stop_server_tunnel",
+            Self::RequestRestartServerTunnel { .. } => "request_restart_server_tunnel",
+            Self::RequestRestartServerSsh { .. } => "request_restart_server_ssh",
+            Self::RequestStartServerSsh { .. } => "request_start_server_ssh",
+            Self::RequestAttachServerSsh { .. } => "request_attach_server_ssh",
+            Self::RequestPtyScrollback { .. } => "request_pty_scrollback",
+            Self::OpenPty { .. } => "open_pty",
+            Self::WritePty { .. } => "write_pty",
+            Self::ResizePty { .. } => "resize_pty",
+            Self::ClosePty { .. } => "close_pty",
+            Self::OpenRemoteBrowser { .. } => "open_remote_browser",
+            Self::CloseRemoteBrowser { .. } => "close_remote_browser",
+            Self::ListRemoteBrowserChildren { .. } => "list_remote_browser_children",
+            Self::StatRemoteBrowserPath { .. } => "stat_remote_browser_path",
+            Self::CreateRemoteBrowserDirectory { .. } => "create_remote_browser_directory",
+            Self::DeleteRemoteBrowserPath { .. } => "delete_remote_browser_path",
+            Self::ScpUpload { .. } => "scp_upload",
+            Self::ScpDownload { .. } => "scp_download",
+            Self::StartScpUpload { .. } => "start_scp_upload",
+            Self::StartScpDownload { .. } => "start_scp_download",
+        }
+    }
+
+    fn target_id(&self) -> Option<&str> {
+        match self {
+            Self::RequestStartServerTunnel { server_id, .. }
+            | Self::RequestStopServerTunnel { server_id, .. }
+            | Self::RequestRestartServerTunnel { server_id, .. }
+            | Self::RequestRestartServerSsh { server_id, .. }
+            | Self::RequestStartServerSsh { server_id, .. }
+            | Self::RequestAttachServerSsh { server_id, .. }
+            | Self::OpenRemoteBrowser { server_id, .. }
+            | Self::ScpUpload { server_id, .. }
+            | Self::ScpDownload { server_id, .. }
+            | Self::StartScpUpload { server_id, .. }
+            | Self::StartScpDownload { server_id, .. } => Some(server_id),
+            _ => None,
         }
     }
 }
@@ -489,6 +542,14 @@ pub fn parse_inbound_server_message(
                 rows: payload.rows,
             })
         }
+        MessageType::RequestPtyScrollback => {
+            let req_seq = envelope.seq;
+            let payload = parse_pty_scrollback_payload(envelope)?;
+            Ok(InboundServerMessage::RequestPtyScrollback {
+                req_seq,
+                session_id: payload.session_id,
+            })
+        }
         MessageType::OpenPty => {
             let req_seq = envelope.seq;
             let payload = parse_open_pty_payload(envelope)?;
@@ -684,6 +745,18 @@ fn parse_attach_server_ssh_payload(
     parse_payload(envelope, "request_attach_server_ssh")
 }
 
+#[derive(Debug, Deserialize)]
+struct PtyScrollbackPayload {
+    #[serde(rename = "sessionId")]
+    session_id: String,
+}
+
+fn parse_pty_scrollback_payload(
+    envelope: Envelope,
+) -> Result<PtyScrollbackPayload, InboundServerMessageError> {
+    parse_payload(envelope, "request_pty_scrollback")
+}
+
 fn parse_write_pty_payload(
     envelope: Envelope,
 ) -> Result<WritePtyPayload, InboundServerMessageError> {
@@ -804,6 +877,21 @@ where
         + Send
         + 'static,
 {
+    let inbound_action = message.action_name();
+    let inbound_command_id = message.command_id();
+    let inbound_target = message.target_id();
+    println!(
+        "{}",
+        command_lifecycle_log_line(
+            "dispatch.received",
+            inbound_command_id,
+            "received",
+            Some(inbound_action),
+            None,
+            inbound_target,
+        )
+    );
+
     match message {
         InboundServerMessage::RequestStatusSnapshot { command_id } => {
             if let Some(command_id) = command_id {
@@ -1158,6 +1246,40 @@ where
                 .await
                 .map_err(|err| err.to_string())?;
             }
+            Ok(())
+        }
+        InboundServerMessage::RequestPtyScrollback {
+            req_seq,
+            session_id,
+        } => {
+            let snapshot = app
+                .state::<RemotePtyStore>()
+                .scrollback_for_remote_session(&session_id)
+                .map_err(|e| e.to_string())?;
+            let (data, truncated) = snapshot.unwrap_or((String::new(), false));
+            let mut w = write.lock().await;
+            send_ws_event(
+                &mut *w,
+                "pty-scrollback",
+                &device_id,
+                &seq_counter,
+                json!({
+                    "sessionId": session_id,
+                    "data": data,
+                    "truncated": truncated,
+                }),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            send_ack(
+                &mut *w,
+                &device_id,
+                &seq_counter,
+                req_seq,
+                Some(json!({ "status": "ok" })),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(())
         }
         InboundServerMessage::OpenPty {
@@ -1783,7 +1905,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::{
-        local_transfer_status_payload, parse_inbound_server_message, InboundServerMessage,
+        command_lifecycle_log_line, local_transfer_status_payload, parse_inbound_server_message,
+        InboundServerMessage,
     };
     use crate::cc::protocol::Envelope;
     use crate::stores::TransferRuntimeDirection;
@@ -1884,6 +2007,32 @@ mod tests {
     }
 
     #[test]
+    fn parses_request_pty_scrollback_message() {
+        let envelope = Envelope {
+            msg_type: "request_pty_scrollback".to_string(),
+            device_id: "device-1".to_string(),
+            seq: 9,
+            ts: "2026-04-23T00:00:00.000Z".to_string(),
+            payload: Some(json!({ "sessionId": "remote-pty-1" })),
+            command_id: Some("cmd-scroll".to_string()),
+            req_seq: None,
+        };
+
+        let parsed = parse_inbound_server_message(envelope).expect("expected parser success");
+
+        match parsed {
+            InboundServerMessage::RequestPtyScrollback {
+                req_seq,
+                session_id,
+            } => {
+                assert_eq!(req_seq, 9);
+                assert_eq!(session_id, "remote-pty-1");
+            }
+            other => panic!("unexpected parsed message: {other:?}"),
+        }
+    }
+
+    #[test]
     fn parses_request_start_server_ssh_message() {
         let envelope = Envelope {
             msg_type: "request_start_server_ssh".to_string(),
@@ -1947,6 +2096,25 @@ mod tests {
         assert_eq!(payload["localPath"], json!("/tmp/source.txt"));
         assert_eq!(payload["remotePath"], json!("/var/source.txt"));
         assert_eq!(payload["message"], json!("start_scp_upload"));
+    }
+
+    #[test]
+    fn command_lifecycle_log_line_includes_state_outcome_and_reason() {
+        let line = command_lifecycle_log_line(
+            "status",
+            Some("cmd-1"),
+            "executing",
+            Some("start_server_tunnel:srv-1"),
+            Some("ACTION_FAILED"),
+            Some("tunnel launch error"),
+        );
+
+        assert!(line.contains("stage=status"));
+        assert!(line.contains("commandId=cmd-1"));
+        assert!(line.contains("state=executing"));
+        assert!(line.contains("outcome=start_server_tunnel:srv-1"));
+        assert!(line.contains("reasonCode=ACTION_FAILED"));
+        assert!(line.contains("reasonDetail=tunnel launch error"));
     }
 }
 
@@ -3095,6 +3263,17 @@ fn spawn_restart_task<W, F>(
         + 'static,
     F: FnOnce() -> Result<(), String> + Send + 'static,
 {
+    println!(
+        "{}",
+        command_lifecycle_log_line(
+            "dispatch.spawn",
+            command_id.as_deref(),
+            "queued",
+            Some(action_name),
+            None,
+            target_id.as_deref(),
+        )
+    );
     tokio::spawn(async move {
         if let Some(command_id) = command_id.clone() {
             let mut w = write.lock().await;
@@ -3320,6 +3499,17 @@ pub async fn send_command_status(
     reason_code: Option<String>,
     reason_detail: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    println!(
+        "{}",
+        command_lifecycle_log_line(
+            "status",
+            Some(command_id),
+            state,
+            outcome.as_deref(),
+            reason_code.as_deref(),
+            reason_detail.as_deref(),
+        )
+    );
     let payload = json!({
         "state": state,
         "outcome": outcome,
@@ -3336,4 +3526,21 @@ pub async fn send_command_status(
     let msg = serde_json::to_string(&status)?;
     write.send(Message::Text(msg)).await?;
     Ok(())
+}
+
+fn command_lifecycle_log_line(
+    stage: &str,
+    command_id: Option<&str>,
+    state: &str,
+    outcome: Option<&str>,
+    reason_code: Option<&str>,
+    reason_detail: Option<&str>,
+) -> String {
+    let command_id = command_id.unwrap_or("<missing>");
+    let outcome = outcome.unwrap_or("<none>");
+    let reason_code = reason_code.unwrap_or("<none>");
+    let reason_detail = reason_detail.unwrap_or("<none>");
+    format!(
+        "CommandLifecycle: stage={stage} commandId={command_id} state={state} outcome={outcome} reasonCode={reason_code} reasonDetail={reason_detail}"
+    )
 }
