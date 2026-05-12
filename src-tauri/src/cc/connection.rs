@@ -22,7 +22,8 @@ use super::protocol::{Envelope, MessageType};
 use super::protocol_detector::{detect_protocol, ConnectionProtocol};
 use crate::server_mgmt::ConnectionMethod;
 use crate::services::{
-    add_common_ssh_options, close_pty_internal, load_server_by_id, open_remote_sftp_session,
+    add_common_ssh_options, close_pty_internal, keyring_get_optional,
+    keyring_server_ssh_password_account, load_server_by_id, open_remote_sftp_session,
     resolve_server_ssh_endpoint, ssh_target,
 };
 use crate::stores::{
@@ -1022,9 +1023,13 @@ fn derive_remote_resume_offset(app: &AppHandle, context: &TransferRuntimeContext
     let temp_path = context.temp_path_hint.as_deref()?;
     let server = load_server_by_id(app, &context.server_id).ok()?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP").ok()?;
+    let pw = keyring_get_optional(&keyring_server_ssh_password_account(&context.server_id))
+        .ok()
+        .flatten();
     if let Some(size) = open_remote_sftp_session(
         &endpoint,
         server.connection_method == ConnectionMethod::Boundary,
+        pw.as_deref(),
     )
     .ok()
     .and_then(|session| session.sftp().ok())

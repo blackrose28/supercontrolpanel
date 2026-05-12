@@ -21,6 +21,11 @@ pub const KEYRING_BOUNDARY_OIDC_PASSWORD: &str = "boundary_oidc_password";
 pub const KEYRING_BOUNDARY_OIDC_OTP_SECRET: &str = "boundary_oidc_otp_secret";
 pub const KEYRING_BOUNDARY_APP_TOKEN: &str = "boundary_app_token";
 
+/// OS keyring account for optional per-server SSH password (SFTP / remote browser / SCP agent paths).
+pub fn keyring_server_ssh_password_account(server_id: &str) -> String {
+    format!("server_ssh_password:{server_id}")
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncSettings {

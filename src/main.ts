@@ -15,6 +15,8 @@ import {
   type ScpTransferState,
   type ScpTransferStatusPayload,
 } from "./scpTransferState";
+import { uniqueDirectoryChildPathsForTree } from "./scpPickerTreeHelpers";
+import { withTimeout } from "./scpPickerAsync";
 
 type PtyOutputPayload = {
   id: string;
@@ -416,6 +418,10 @@ const seOs = mustElement<HTMLSelectElement>("#se-os");
 const seMethod = mustElement<HTMLSelectElement>("#se-method");
 const sePort = mustElement<HTMLInputElement>("#se-port");
 const seUser = mustElement<HTMLInputElement>("#se-user");
+const seSshPassword = mustElement<HTMLInputElement>("#se-ssh-password");
+const seClearSshPasswordBtn = mustElement<HTMLButtonElement>(
+  "#se-clear-ssh-password",
+);
 const seBtarget = mustElement<HTMLInputElement>("#se-btarget");
 const seListenPort = mustElement<HTMLInputElement>("#se-listen-port");
 const seBoundaryOnly = () =>
@@ -523,6 +529,9 @@ let scpTransferSessionIds: Record<string, string> = {};
 let scpTransferSessionOutput: Record<string, string> = {};
 let confirmResolver: ((accepted: boolean) => void) | null = null;
 let scpPickerGlobalKeyHandlerAttached = false;
+let scpPickerOpenSeq = 0;
+const SCP_PICKER_RPC_TIMEOUT_MS = 15000;
+const SCP_PICKER_BROWSER_OPEN_TIMEOUT_MS = 35000;
 let unlistenOutput: UnlistenFn | null = null;
 let unlistenExit: UnlistenFn | null = null;
 let unlistenFunctionStatus: UnlistenFn | null = null;
@@ -1976,7 +1985,15 @@ function focusScpPickerPrimaryTarget() {
 }
 
 function handleScpPickerGlobalKeydown(event: KeyboardEvent) {
-  if (!isScpPickerOpen() || scpPickerBusy) {
+  if (!isScpPickerOpen()) {
+    return;
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeScpPicker(null);
+    return;
+  }
+  if (scpPickerBusy) {
     return;
   }
   const target = event.target as HTMLElement | null;
@@ -1986,11 +2003,6 @@ function handleScpPickerGlobalKeydown(event: KeyboardEvent) {
       target instanceof HTMLTextAreaElement ||
       target.isContentEditable);
   if (inTextInput) {
-    return;
-  }
-  if (event.key === "Escape") {
-    event.preventDefault();
-    closeScpPicker(null);
     return;
   }
   if (event.key === "ArrowDown") {
@@ -2218,14 +2230,15 @@ function syncScpTreeDirectory(path: string, entries: RemoteBrowseEntry[]) {
   node.loaded = true;
   node.loading = false;
   node.error = null;
-  node.children = entries
-    .filter((entry) => entry.kind === "directory")
-    .map((entry) => {
-      const childPath = normalizeRemotePath(entry.path);
-      ensureScpTreeNode(childPath, normalized);
-      return childPath;
-    })
-    .sort((a, b) => remotePathName(a).localeCompare(remotePathName(b)));
+  const childPaths = uniqueDirectoryChildPathsForTree(
+    normalized,
+    entries,
+    normalizeRemotePath,
+  );
+  node.children = childPaths.map((childPath) => {
+    ensureScpTreeNode(childPath, normalized);
+    return childPath;
+  });
 }
 
 function scpBreadcrumbs(path: string) {
@@ -2243,7 +2256,12 @@ function scpBreadcrumbs(path: string) {
   return crumbs;
 }
 
+const SCP_PICKER_TREE_MAX_DEPTH = 80;
+
 function renderScpTreeNode(path: string, depth: number): string {
+  if (depth > SCP_PICKER_TREE_MAX_DEPTH) {
+    return "";
+  }
   const node = scpPickerTreeNodes.get(path);
   if (!node) {
     return "";
@@ -2389,7 +2407,7 @@ function renderScpPicker() {
     scpPickerBusy ||
     !scpPickerSelectedPath ||
     scpPickerSelectedPath === treeRootPath;
-  scpPickerCancelBtn.disabled = scpPickerBusy;
+  scpPickerCancelBtn.disabled = false;
   scpPickerManualPath.disabled = scpPickerBusy;
   scpPickerSelectBtn.disabled = scpPickerBusy || !scpPickerManualPath.value.trim();
 
@@ -2552,6 +2570,7 @@ function renderScpPicker() {
 }
 
 function closeScpPicker(selection: ScpPickerSelection | null) {
+  scpPickerOpenSeq += 1;
   const browserId = scpPickerBrowserId;
   scpPickerOverlay.classList.add("hidden");
   scpPickerOverlay.setAttribute("aria-hidden", "true");
@@ -2617,12 +2636,13 @@ async function loadScpPickerPath(path?: string | null) {
   node.error = null;
   renderScpPicker();
   try {
-    const entries = await invoke<RemoteBrowseEntry[]>(
-      "list_remote_browser_children",
-      {
+    const entries = await withTimeout(
+      invoke<RemoteBrowseEntry[]>("list_remote_browser_children", {
         browserId: scpPickerBrowserId,
         path: rawPath,
-      },
+      }),
+      SCP_PICKER_RPC_TIMEOUT_MS,
+      "Loading remote folder listing",
     );
     scpPickerCurrentListingPath = rawPath;
     ensureScpTreePath(rawPath);
@@ -2672,10 +2692,14 @@ async function resolveScpPickerSelection() {
   scpPickerStatus.textContent = "Checking path…";
   renderScpPicker();
   try {
-    const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
-      browserId: scpPickerBrowserId,
-      path: candidate,
-    });
+    const info = await withTimeout(
+      invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
+        browserId: scpPickerBrowserId,
+        path: candidate,
+      }),
+      SCP_PICKER_RPC_TIMEOUT_MS,
+      "Checking remote path",
+    );
     if (!info.exists) {
       scpPickerStatus.textContent = "Remote path does not exist.";
       return;
@@ -2717,10 +2741,14 @@ async function createRemoteBrowserFolder() {
   scpPickerStatus.textContent = "Creating remote folder…";
   renderScpPicker();
   try {
-    await invoke("create_remote_browser_directory", {
-      browserId: scpPickerBrowserId,
-      path: targetPath,
-    });
+    await withTimeout(
+      invoke("create_remote_browser_directory", {
+        browserId: scpPickerBrowserId,
+        path: targetPath,
+      }),
+      SCP_PICKER_RPC_TIMEOUT_MS,
+      "Creating remote folder",
+    );
     await loadScpPickerPath(scpPickerCurrentListingPath);
     scpPickerSelectedPath = targetPath;
     scpPickerSelectedKind = "directory";
@@ -2760,21 +2788,29 @@ async function deleteRemoteBrowserSelection() {
   renderScpPicker();
   try {
     if (!infoKind) {
-      const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
-        browserId: scpPickerBrowserId,
-        path: scpPickerSelectedPath,
-      });
+      const info = await withTimeout(
+        invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
+          browserId: scpPickerBrowserId,
+          path: scpPickerSelectedPath,
+        }),
+        SCP_PICKER_RPC_TIMEOUT_MS,
+        "Checking remote path",
+      );
       if (!info.exists) {
         scpPickerStatus.textContent = "Selected remote path no longer exists.";
         return;
       }
       infoKind = info.kind;
     }
-    await invoke("delete_remote_browser_path", {
-      browserId: scpPickerBrowserId,
-      path: scpPickerSelectedPath,
-      recursive: infoKind === "directory",
-    });
+    await withTimeout(
+      invoke("delete_remote_browser_path", {
+        browserId: scpPickerBrowserId,
+        path: scpPickerSelectedPath,
+        recursive: infoKind === "directory",
+      }),
+      SCP_PICKER_RPC_TIMEOUT_MS,
+      "Deleting remote path",
+    );
     scpPickerSelectedPath = "";
     scpPickerSelectedKind = null;
     scpPickerManualPath.value = "";
@@ -2798,6 +2834,7 @@ async function openScpPicker(
   if (scpPickerResolver) {
     closeScpPicker(null);
   }
+  const openSeq = ++scpPickerOpenSeq;
   scpPickerMode = mode;
   scpPickerServerId = serverId;
   scpPickerBrowserId = null;
@@ -2821,9 +2858,19 @@ async function openScpPicker(
     scpPickerResolver = resolve;
   });
   try {
-    const session = await invoke<RemoteBrowseSession>("open_remote_browser", {
-      serverId,
-    });
+    const session = await withTimeout(
+      invoke<RemoteBrowseSession>("open_remote_browser", {
+        serverId,
+      }),
+      SCP_PICKER_BROWSER_OPEN_TIMEOUT_MS,
+      "Opening remote browser session",
+    );
+    if (!scpPickerResolver || openSeq !== scpPickerOpenSeq) {
+      void invoke("close_remote_browser", { browserId: session.browserId }).catch(
+        () => {},
+      );
+      return promise;
+    }
     scpPickerBrowserId = session.browserId;
     scpPickerRootPath = normalizeRemotePath(session.rootPath) || "/";
     await loadScpPickerPath(session.rootPath);
@@ -2868,13 +2915,21 @@ async function confirmRemoteOverwrite(
 ) {
   let session: RemoteBrowseSession | null = null;
   try {
-    session = await invoke<RemoteBrowseSession>("open_remote_browser", {
-      serverId,
-    });
-    const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
-      browserId: session.browserId,
-      path: remotePath,
-    });
+    session = await withTimeout(
+      invoke<RemoteBrowseSession>("open_remote_browser", {
+        serverId,
+      }),
+      SCP_PICKER_BROWSER_OPEN_TIMEOUT_MS,
+      "Opening remote browser session",
+    );
+    const info = await withTimeout(
+      invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
+        browserId: session.browserId,
+        path: remotePath,
+      }),
+      SCP_PICKER_RPC_TIMEOUT_MS,
+      "Checking remote path",
+    );
     void invoke("close_remote_browser", { browserId: session.browserId }).catch(
       () => {},
     );
@@ -3028,6 +3083,7 @@ function openServerEditor(id: string | null) {
     seBtarget.value = s.boundaryTargetId;
     seListenPort.value = String(s.boundaryListenPort || 6222);
     seServices.value = formatServicesLines(s.services);
+    seSshPassword.value = "";
   } else {
     seName.value = "";
     seHost.value = "";
@@ -3038,6 +3094,7 @@ function openServerEditor(id: string | null) {
     seBtarget.value = "";
     seListenPort.value = "6222";
     seServices.value = "";
+    seSshPassword.value = "";
   }
   syncServerEditorBoundaryFields();
   serverEditorOverlay.classList.remove("hidden");
@@ -3231,7 +3288,7 @@ scpClearHistoryBtn.addEventListener("click", () => {
 });
 scpPickerCancelBtn.addEventListener("click", () => closeScpPicker(null));
 scpPickerOverlay.addEventListener("click", (event) => {
-  if (event.target === scpPickerOverlay && !scpPickerBusy) {
+  if (event.target === scpPickerOverlay) {
     closeScpPicker(null);
   }
 });
@@ -3255,10 +3312,14 @@ scpPickerGoBtn.addEventListener("click", async () => {
   scpPickerStatus.textContent = "Checking path…";
   renderScpPicker();
   try {
-    const info = await invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
-      browserId: scpPickerBrowserId,
-      path: raw,
-    });
+    const info = await withTimeout(
+      invoke<RemoteBrowseNodeInfo>("stat_remote_browser_path", {
+        browserId: scpPickerBrowserId,
+        path: raw,
+      }),
+      SCP_PICKER_RPC_TIMEOUT_MS,
+      "Checking remote path",
+    );
     if (!info.exists) {
       scpPickerStatus.textContent = "Remote path does not exist.";
       return;
@@ -3357,14 +3418,48 @@ seSave.addEventListener("click", async () => {
     }
   }
   try {
+    const sentId = server.id.trim();
     serversList = await invoke<Server[]>("upsert_server", { server });
-    if (scpPickerResolver && scpPickerServerId === server.id) {
+    const savedId =
+      sentId !== ""
+        ? sentId
+        : (serversList[serversList.length - 1]?.id ?? "");
+    const sshPw = seSshPassword.value.trim();
+    if (savedId && sshPw) {
+      await invoke("set_server_ssh_password", {
+        serverId: savedId,
+        password: sshPw,
+      });
+      seSshPassword.value = "";
+    }
+    if (scpPickerResolver && scpPickerServerId === savedId) {
       closeScpPicker(null);
     }
     closeServerEditor();
     renderServersTable();
     updateServersStatus("Saved.");
     syncServerActions();
+  } catch (e) {
+    serversStatus.textContent = String(e);
+  }
+});
+
+seClearSshPasswordBtn.addEventListener("click", async () => {
+  if (!editingServerId) {
+    serversStatus.textContent = "Open a server for editing to clear its stored SSH password.";
+    return;
+  }
+  if (
+    !(await openConfirmOverlay(
+      "Remove the stored SSH password for this server from the OS keyring?",
+    ))
+  ) {
+    return;
+  }
+  try {
+    await invoke("clear_server_ssh_password", { serverId: editingServerId });
+    seSshPassword.value = "";
+    serversStatus.textContent = "Stored SSH password cleared.";
   } catch (e) {
     serversStatus.textContent = String(e);
   }

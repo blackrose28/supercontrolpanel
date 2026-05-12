@@ -53,14 +53,14 @@ macro_rules! scp_debug {
 
 mod commands;
 use commands::{
-    close_pty, close_remote_browser, config_git_pull, config_git_push,
+    clear_server_ssh_password, close_pty, close_remote_browser, config_git_pull, config_git_push,
     create_remote_browser_directory, delete_remote_browser_path, delete_server,
     detect_openvpn_executable, enroll_device, get_app_config, get_config_paths, get_sync_settings,
     is_first_run, list_function_statuses, list_remote_browser_children, list_servers,
     mcp_call_tool_command, mcp_get_runtime_status, mcp_list_resources_command,
     mcp_list_tools_command, mcp_read_resource_command, mcp_stop_runtime, mcp_sync_runtime,
     open_pty, open_remote_browser, resize_pty, revoke_my_device, save_app_config,
-    save_sync_settings, scp_download, scp_upload, search_boundary_targets, start_boundary_auth,
+    save_sync_settings, scp_download, scp_upload, search_boundary_targets, set_server_ssh_password, start_boundary_auth,
     start_caddy_run, start_openvpn_function, start_scp_download, start_scp_upload,
     start_server_rdp, start_server_ssh, start_server_tunnel, stat_remote_browser_path,
     stop_boundary_auth, stop_caddy_run, stop_openvpn_function, stop_server_ssh, stop_server_tunnel,
@@ -137,6 +137,8 @@ fn main() {
             list_servers,
             upsert_server,
             delete_server,
+            set_server_ssh_password,
+            clear_server_ssh_password,
             search_boundary_targets,
             start_server_tunnel,
             stop_server_tunnel,

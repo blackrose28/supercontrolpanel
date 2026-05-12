@@ -30,7 +30,8 @@ use crate::server_mgmt::{load_servers, ConnectionMethod, ServerOs};
 use crate::services::{
     add_common_ssh_options, cc_scp_download_service, cc_scp_upload_service,
     cc_start_scp_download_service, cc_start_scp_upload_service, close_pty_internal, emit_pty_exit,
-    load_server_by_id, lock_err, open_pty_with_command_builder, open_remote_browser_with_id,
+    keyring_get_optional, keyring_server_ssh_password_account, load_server_by_id, lock_err,
+    open_pty_with_command_builder, open_remote_browser_with_id, open_remote_sftp_session,
     resolve_server_ssh_endpoint, ssh_target, write_pty_internal, StartScpResult,
 };
 use crate::stores::{
@@ -1541,17 +1542,6 @@ where
                 move || {
                     let browser_store = app_handle.state::<RemoteBrowserStore>();
                     let function_store = app_handle.state::<FunctionStore>();
-                    #[cfg(target_os = "windows")]
-                    let session = open_remote_browser_with_id(
-                        &app_handle,
-                        server_id,
-                        browser_session_id,
-                        &browser_store,
-                        &function_store,
-                        crate::server_tunnel_function_id,
-                        crate::CREATE_NO_WINDOW,
-                    )?;
-                    #[cfg(not(target_os = "windows"))]
                     let session = open_remote_browser_with_id(
                         &app_handle,
                         server_id,
@@ -3087,9 +3077,13 @@ fn percent_from_bytes(bytes_transferred: u64, bytes_total: u64) -> Option<f64> {
 fn sample_remote_file_size(app: &AppHandle, server_id: &str, remote_path: &str) -> Option<u64> {
     let server = load_server_by_id(app, server_id).ok()?;
     let endpoint = resolve_server_ssh_endpoint(&server, "SCP").ok()?;
-    if let Some(size) = crate::services::open_remote_sftp_session(
+    let pw = keyring_get_optional(&keyring_server_ssh_password_account(server_id))
+        .ok()
+        .flatten();
+    if let Some(size) = open_remote_sftp_session(
         &endpoint,
         server.connection_method == ConnectionMethod::Boundary,
+        pw.as_deref(),
     )
     .ok()
     .and_then(|session| session.sftp().ok())

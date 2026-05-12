@@ -1,34 +1,11 @@
-use std::{
-    collections::HashMap,
-    io::BufReader,
-    process::{Child, ChildStderr, ChildStdin, ChildStdout},
-    sync::{Arc, Mutex},
-};
+use std::{collections::HashMap, sync::Arc, sync::Mutex};
 
 use ssh2::Session as SshSession;
-
-pub enum RemoteBrowserTransport {
-    Sftp(SshSession),
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    Cli(CliRemoteBrowserSession),
-}
-
-pub struct CliRemoteBrowserSession {
-    pub io: Mutex<CliRemoteBrowserIo>,
-}
-
-pub struct CliRemoteBrowserIo {
-    pub child: Child,
-    pub stdin: ChildStdin,
-    pub stdout: BufReader<ChildStdout>,
-    pub stderr: ChildStderr,
-    pub next_marker_id: u64,
-}
 
 pub struct RemoteBrowserSessionState {
     pub server_id: String,
     pub root_path: String,
-    pub transport: RemoteBrowserTransport,
+    pub ssh: SshSession,
 }
 
 pub struct RemoteBrowserStore {

@@ -7,7 +7,8 @@ use crate::models::StartFunctionResult;
 use crate::server_mgmt::{load_servers, new_server_id, save_servers, Server};
 use crate::services::{
     apply_boundary_env_builder, apply_boundary_token_arg_if_present_builder, boundary_cli_path,
-    close_pty_internal, emit_pty_exit, open_pty_with_command_builder,
+    close_pty_internal, emit_pty_exit, keyring_server_ssh_password_account, keyring_set_or_delete,
+    load_server_by_id, open_pty_with_command_builder,
     start_server_rdp as start_server_rdp_service, start_server_ssh as start_server_ssh_service,
     start_server_tunnel as start_server_tunnel_service, stop_server_ssh as stop_server_ssh_service,
     stop_server_tunnel as stop_server_tunnel_service,
@@ -56,6 +57,7 @@ pub(crate) fn delete_server_action(
     browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<Vec<Server>, String> {
     close_remote_browser_sessions_for_server(&id, &browser_store)?;
+    let _ = keyring_set_or_delete(&keyring_server_ssh_password_account(&id), "");
     let mut list = load_servers(&app)?;
     list.retain(|s| s.id != id);
     save_servers(&app, &list)?;
@@ -69,6 +71,22 @@ pub fn delete_server(
     browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<Vec<Server>, String> {
     delete_server_action(app, id, browser_store)
+}
+
+#[tauri::command]
+pub fn set_server_ssh_password(
+    app: AppHandle,
+    server_id: String,
+    password: String,
+) -> Result<(), String> {
+    let _ = load_server_by_id(&app, &server_id)?;
+    keyring_set_or_delete(&keyring_server_ssh_password_account(&server_id), &password)
+}
+
+#[tauri::command]
+pub fn clear_server_ssh_password(app: AppHandle, server_id: String) -> Result<(), String> {
+    let _ = load_server_by_id(&app, &server_id)?;
+    keyring_set_or_delete(&keyring_server_ssh_password_account(&server_id), "")
 }
 
 pub(crate) fn start_server_tunnel_action(

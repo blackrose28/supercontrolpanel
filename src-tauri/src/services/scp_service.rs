@@ -16,9 +16,10 @@ use crate::{
     server_tunnel_function_id,
     services::{
         add_common_ssh_options, build_scp_command, ensure_boundary_tunnel_running,
-        load_server_by_id, normalize_remote_transfer_path, open_remote_sftp_session,
-        remote_kind_from_file_stat, resolve_server_ssh_endpoint, ssh_target,
-        validate_local_download_target, validate_local_upload_source,
+        keyring_get_optional, keyring_server_ssh_password_account, load_server_by_id,
+        normalize_remote_transfer_path, open_remote_sftp_session, remote_kind_from_file_stat,
+        resolve_server_ssh_endpoint, ssh_target, validate_local_download_target,
+        validate_local_upload_source,
     },
     stores::{FunctionStore, SessionStore},
 };
@@ -554,18 +555,24 @@ fn build_atomic_remote_temp_path(remote_path: &str) -> String {
     format!("{remote_path}.scp_tmp.{unique}")
 }
 
+fn open_sftp_for_server(
+    server: &crate::server_mgmt::Server,
+) -> Result<ssh2::Session, String> {
+    let endpoint = resolve_server_ssh_endpoint(server, "SCP")?;
+    let pw = keyring_get_optional(&keyring_server_ssh_password_account(&server.id))?;
+    open_remote_sftp_session(
+        &endpoint,
+        server.connection_method == ConnectionMethod::Boundary,
+        pw.as_deref(),
+    )
+}
+
 fn resolve_remote_upload_target_path(
     server: &crate::server_mgmt::Server,
     local_path: &str,
     remote_path: &str,
 ) -> Result<String, String> {
-    let endpoint =
-        resolve_server_ssh_endpoint(server, "SCP").map_err(|err| format!("agent_error: {err}"))?;
-    let session = open_remote_sftp_session(
-        &endpoint,
-        server.connection_method == ConnectionMethod::Boundary,
-    )
-    .map_err(|err| format!("agent_error: {err}"))?;
+    let session = open_sftp_for_server(server).map_err(|err| format!("agent_error: {err}"))?;
     let sftp = session
         .sftp()
         .map_err(|err| format!("agent_error: failed to open sftp session: {err}"))?;
@@ -1170,13 +1177,7 @@ fn check_remote_target_overwrite(
     if overwrite_policy == OverwritePolicy::Force {
         return Ok(OverwriteDecision::Proceed);
     }
-    let endpoint =
-        resolve_server_ssh_endpoint(server, "SCP").map_err(|err| format!("agent_error: {err}"))?;
-    let session = open_remote_sftp_session(
-        &endpoint,
-        server.connection_method == ConnectionMethod::Boundary,
-    )
-    .map_err(|err| format!("agent_error: {err}"))?;
+    let session = open_sftp_for_server(server).map_err(|err| format!("agent_error: {err}"))?;
     let sftp = session
         .sftp()
         .map_err(|err| format!("agent_error: failed to open sftp session: {err}"))?;
