@@ -268,6 +268,7 @@ pub(crate) fn start_server_ssh_action(
     server_id: String,
     cols: u16,
     rows: u16,
+    forced_local_session_id: Option<String>,
     app: AppHandle,
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
@@ -276,6 +277,7 @@ pub(crate) fn start_server_ssh_action(
         server_id,
         cols,
         rows,
+        forced_local_session_id.as_deref(),
         &app,
         &session_store,
         &function_store,
@@ -297,7 +299,15 @@ pub fn start_server_ssh(
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
 ) -> Result<StartFunctionResult, String> {
-    start_server_ssh_action(server_id, cols, rows, app, session_store, function_store)
+    start_server_ssh_action(
+        server_id,
+        cols,
+        rows,
+        None,
+        app,
+        session_store,
+        function_store,
+    )
 }
 
 pub(crate) fn stop_server_ssh_action(
@@ -348,6 +358,7 @@ pub(crate) fn restart_server_ssh_action(server_id: String, app: AppHandle) -> Re
             server_id,
             cols,
             rows,
+            None,
             app.clone(),
             session_store,
             function_store,
@@ -364,6 +375,7 @@ pub(crate) fn restart_server_ssh_action(server_id: String, app: AppHandle) -> Re
             server_id.clone(),
             cols,
             rows,
+            None,
             restart_app.clone(),
             session_store,
             function_store,

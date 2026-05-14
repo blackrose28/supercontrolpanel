@@ -231,6 +231,7 @@ pub(crate) fn start_boundary_auth_action(
             &app,
             &session_store,
             update_functions_for_session_exit,
+            None,
         )?,
         BoundaryAuthLaunch::Cli(cmd) => open_pty_with_command_builder(
             cols,
@@ -239,6 +240,7 @@ pub(crate) fn start_boundary_auth_action(
             &app,
             &session_store,
             update_functions_for_session_exit,
+            None,
         )?,
     };
     upsert_function_status(

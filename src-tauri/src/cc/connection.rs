@@ -299,10 +299,12 @@ impl CcConnection {
         let pty_output_listener = self.app.listen("pty-output", move |event| {
             let payload = event.payload();
             let Ok(payload_value) = serde_json::from_str::<serde_json::Value>(payload) else {
+                eprintln!("[PTY-TRACE] cc-listener: dropped event — payload not valid JSON");
                 return;
             };
             let Some(local_session_id) = payload_value.get("id").and_then(serde_json::Value::as_str)
             else {
+                eprintln!("[PTY-TRACE] cc-listener: dropped event — payload missing 'id'");
                 return;
             };
             let transfer_context = pty_output_app
@@ -316,6 +318,10 @@ impl CcConnection {
             let Some(remote_session_id) =
                 remote_pty_session_for_local(&pty_output_app, local_session_id)
             else {
+                eprintln!(
+                    "[PTY-TRACE] cc-listener: no remote (canonical) binding for local_session_id={} — output will NOT be forwarded to cc-server",
+                    local_session_id
+                );
                 if let Some(transfer_id) = transfer_id {
                     let Some(output_data) = payload_value
                         .get("data")
@@ -475,6 +481,11 @@ impl CcConnection {
                     };
 
                     let mut w = write.lock().await;
+                    eprintln!(
+                        "[PTY-TRACE] cc-flush: sending pty-output to cc-server remote_session_id={} bytes={}",
+                        remote_session_id_for_flush,
+                        next_chunk.len()
+                    );
                     if let Err(err) = send_ws_event(
                         &mut *w,
                         "pty-output",
@@ -487,7 +498,7 @@ impl CcConnection {
                     )
                     .await
                     {
-                        eprintln!("CC PTY output send failed: {err}");
+                        eprintln!("[PTY-TRACE] cc-flush: send failed remote_session_id={} err={}", remote_session_id_for_flush, err);
                         let _ = app
                             .state::<RemotePtyStore>()
                             .abort_output_flush(&remote_session_id_for_flush);
@@ -861,13 +872,7 @@ fn clear_remote_pty_session_mapping(
     remote_session_id: &str,
 ) -> Result<(), String> {
     let store = app.state::<RemotePtyStore>();
-    if let Some(found_remote_session_id) = store.clear_session_for_local(local_session_id)? {
-        if found_remote_session_id != remote_session_id {
-            return Err(format!(
-                "remote pty session mismatch while clearing local session {local_session_id}: expected {remote_session_id}, found {found_remote_session_id}"
-            ));
-        }
-    }
+    let _ = store.clear_session_binding(remote_session_id, local_session_id)?;
     Ok(())
 }
 

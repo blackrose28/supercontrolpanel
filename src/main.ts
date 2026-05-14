@@ -17,6 +17,7 @@ import {
 } from "./scpTransferState";
 import { uniqueDirectoryChildPathsForTree } from "./scpPickerTreeHelpers";
 import { withTimeout } from "./scpPickerAsync";
+import { buildEnrollmentFormDefaultsFromCcConfig } from "./ccEnrollmentFormDefaults";
 
 type PtyOutputPayload = {
   id: string;
@@ -331,6 +332,7 @@ const cfgCcAgentToken = mustElement<HTMLInputElement>("#cfg-cc-agent-token");
 const cfgCcDeviceId = mustElement<HTMLInputElement>("#cfg-cc-device-id");
 const cfgCcSaveBtn = mustElement<HTMLButtonElement>("#cfg-cc-save");
 const cfgCcReinitBtn = mustElement<HTMLButtonElement>("#cfg-cc-reinit");
+const cfgCcEnrollBtn = mustElement<HTMLButtonElement>("#cfg-cc-enroll");
 const cfgCcRevokeBtn = mustElement<HTMLButtonElement>("#cfg-cc-revoke");
 const cfgCcDeviceNameHint = mustElement<HTMLElement>("#cfg-cc-device-name-hint");
 
@@ -564,6 +566,17 @@ function showEnrollOverlay() {
   enrollOverlay.setAttribute("aria-hidden", "false");
   enrollStatus.textContent = "";
   enrollStatus.className = "hint";
+}
+
+function openEnrollmentModalFromConfig() {
+  const defaults = buildEnrollmentFormDefaultsFromCcConfig({
+    ccServerUrl: cfgCcServerUrl.value,
+    ccDeviceName: syncSettings?.ccDeviceName,
+  });
+  enrollServerUrl.value = defaults.serverUrl;
+  enrollBootstrapToken.value = "";
+  enrollDeviceName.value = defaults.deviceName;
+  showEnrollOverlay();
 }
 
 function hideEnrollOverlay() {
@@ -4026,6 +4039,10 @@ cfgCcSaveBtn.addEventListener("click", () => {
 
 cfgCcReinitBtn.addEventListener("click", () => {
   void reinitCcConnection();
+});
+
+cfgCcEnrollBtn.addEventListener("click", () => {
+  openEnrollmentModalFromConfig();
 });
 
 enrollSubmitBtn.addEventListener("click", () => {

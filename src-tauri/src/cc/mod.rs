@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod connection;
 pub mod dispatcher;
+pub mod pty_session_id;
 pub mod protocol;
 pub mod protocol_detector;
 pub mod sse_connection;

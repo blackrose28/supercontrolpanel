@@ -11,6 +11,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use super::protocol::{Envelope, MessageType};
 use super::telemetry::recent_log_events;
+use crate::cc::pty_session_id::parse_cc_pty_session_id;
 use crate::commands::{
     boundary::restart_boundary_auth_action,
     openvpn::restart_openvpn_action,
@@ -1131,12 +1132,32 @@ where
             rows,
         } => {
             let mut w = write.lock().await;
+            let forced_local_session_id = match forced_local_session_for_admin_ssh_start(
+                &device_id,
+                &session_id,
+            ) {
+                Ok(v) => v,
+                Err(detail) => {
+                    send_nack(
+                        &mut *w,
+                        &device_id,
+                        &seq_counter,
+                        req_seq,
+                        "PTY_INVALID_SESSION",
+                        &detail,
+                    )
+                    .await
+                    .map_err(|send_err| send_err.to_string())?;
+                    return Ok(());
+                }
+            };
             let session_store = app.state::<SessionStore>();
             let function_store = app.state::<FunctionStore>();
             let result = match start_server_ssh_action(
                 server_id.clone(),
                 cols,
                 rows,
+                forced_local_session_id,
                 app.clone(),
                 session_store,
                 function_store,
@@ -2059,6 +2080,32 @@ mod tests {
             }
             other => panic!("unexpected parsed message: {other:?}"),
         }
+    }
+
+    #[test]
+    fn forced_local_for_admin_ssh_start_ccpty_matching_device() {
+        let sid = crate::cc::pty_session_id::cc_pty_session_id("d1", "loc1").unwrap();
+        assert_eq!(
+            super::forced_local_session_for_admin_ssh_start("d1", &sid).unwrap(),
+            Some("loc1".to_string())
+        );
+    }
+
+    #[test]
+    fn forced_local_for_admin_ssh_start_rejects_device_mismatch() {
+        let sid = crate::cc::pty_session_id::cc_pty_session_id("other", "loc1").unwrap();
+        let err = super::forced_local_session_for_admin_ssh_start("d1", &sid).unwrap_err();
+        assert!(err.contains("expected d1"), "{err}");
+        assert!(err.contains("found other"), "{err}");
+    }
+
+    #[test]
+    fn forced_local_for_admin_ssh_start_non_ccpty_is_none() {
+        assert_eq!(
+            super::forced_local_session_for_admin_ssh_start("d1", "ssh-legacy")
+                .unwrap(),
+            None
+        );
     }
     #[test]
     fn local_transfer_status_payload_includes_visible_trace_fields() {
@@ -3114,6 +3161,23 @@ fn sample_remote_file_size(app: &AppHandle, server_id: &str, remote_path: &str) 
 
 fn shell_quote(input: &str) -> String {
     format!("'{}'", input.replace('\'', "'\"'\"'"))
+}
+
+fn forced_local_session_for_admin_ssh_start(
+    device_id: &str,
+    session_id: &str,
+) -> Result<Option<String>, String> {
+    match parse_cc_pty_session_id(session_id) {
+        Some((parsed_device, local)) => {
+            if parsed_device != device_id {
+                return Err(format!(
+                    "canonical session id must be for this device (expected {device_id}, found {parsed_device})",
+                ));
+            }
+            Ok(Some(local))
+        }
+        None => Ok(None),
+    }
 }
 
 fn bind_remote_pty_session(

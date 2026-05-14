@@ -1,8 +1,26 @@
 use std::{collections::HashMap, sync::Mutex};
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
-use crate::{cc::telemetry::forward_log_event, models::FunctionStatus, stores::FunctionStore};
+use crate::{
+    cc::telemetry::forward_log_event,
+    models::FunctionStatus,
+    stores::{FunctionStore, RemotePtyStore},
+};
+
+/// Top-level `sessionId` for CC log ingest: canonical `ccpty:…` when this local PTY is admin-bound,
+/// otherwise the same local id callers store on `FunctionStatus` (OpenVPN, Boundary, etc.).
+fn telemetry_session_id_for_cc_ingest(
+    local_session_id: Option<&str>,
+    remote_pty_store: &RemotePtyStore,
+) -> Option<String> {
+    let local = local_session_id?;
+    Some(
+        remote_pty_store
+            .remote_session_for_local(local)
+            .unwrap_or_else(|| local.to_string()),
+    )
+}
 
 pub fn now_ms() -> u64 {
     std::time::SystemTime::now()
@@ -64,10 +82,14 @@ pub fn upsert_function_status(
     }
 
     let _ = app.emit("function-status", status.clone());
+    let telemetry_session_id = telemetry_session_id_for_cc_ingest(
+        status.session_id.as_deref(),
+        &*app.state::<RemotePtyStore>(),
+    );
     forward_log_event(
         app,
         "function-status",
-        status.session_id.as_deref(),
+        telemetry_session_id.as_deref(),
         Some(&status.function_id),
         &status,
     );
@@ -98,12 +120,49 @@ pub fn upsert_boundary_status(
     }
 
     let _ = app.emit("function-status", status.clone());
+    let telemetry_session_id = telemetry_session_id_for_cc_ingest(
+        status.session_id.as_deref(),
+        &*app.state::<RemotePtyStore>(),
+    );
     forward_log_event(
         app,
         "function-status",
-        status.session_id.as_deref(),
+        telemetry_session_id.as_deref(),
         Some(&status.function_id),
         &status,
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stores::RemotePtyStore;
+
+    #[test]
+    fn telemetry_session_uses_cc_id_when_bound() {
+        let store = RemotePtyStore::default();
+        store
+            .bind_session("ccpty:dev-1:pty-2", "pty-2")
+            .expect("bind");
+        assert_eq!(
+            telemetry_session_id_for_cc_ingest(Some("pty-2"), &store).as_deref(),
+            Some("ccpty:dev-1:pty-2")
+        );
+    }
+
+    #[test]
+    fn telemetry_session_falls_back_to_local_when_unbound() {
+        let store = RemotePtyStore::default();
+        assert_eq!(
+            telemetry_session_id_for_cc_ingest(Some("pty-9"), &store).as_deref(),
+            Some("pty-9")
+        );
+    }
+
+    #[test]
+    fn telemetry_session_none_when_status_has_no_session() {
+        let store = RemotePtyStore::default();
+        assert_eq!(telemetry_session_id_for_cc_ingest(None, &store), None);
+    }
 }

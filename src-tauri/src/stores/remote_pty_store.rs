@@ -37,8 +37,8 @@ struct RemotePtySessionState {
 
 #[derive(Default)]
 pub struct RemotePtyStore {
+    /// CC-plane session id (typically `ccpty:{deviceId}:{localSegment}`) → device `SessionStore` id.
     sessions: Mutex<HashMap<String, RemotePtySessionState>>,
-    local_to_remote: Mutex<HashMap<String, String>>,
 }
 
 impl RemotePtyStore {
@@ -47,26 +47,28 @@ impl RemotePtyStore {
         remote_session_id: &str,
         local_session_id: &str,
     ) -> Result<(), String> {
-        {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .map_err(|_| "remote pty sessions lock poisoned".to_string())?;
-            sessions.insert(
-                remote_session_id.to_string(),
-                RemotePtySessionState {
-                    local_session_id: local_session_id.to_string(),
-                    detached_at_ms: None,
-                    ..RemotePtySessionState::default()
-                },
-            );
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "remote pty sessions lock poisoned".to_string())?;
+
+        let stale_keys: Vec<String> = sessions
+            .iter()
+            .filter(|(_, v)| v.local_session_id == local_session_id)
+            .map(|(k, _)| k.clone())
+            .collect();
+        for k in stale_keys {
+            sessions.remove(&k);
         }
 
-        let mut local_to_remote = self
-            .local_to_remote
-            .lock()
-            .map_err(|_| "remote pty local_to_remote lock poisoned".to_string())?;
-        local_to_remote.insert(local_session_id.to_string(), remote_session_id.to_string());
+        sessions.insert(
+            remote_session_id.to_string(),
+            RemotePtySessionState {
+                local_session_id: local_session_id.to_string(),
+                detached_at_ms: None,
+                ..RemotePtySessionState::default()
+            },
+        );
         Ok(())
     }
 
@@ -84,10 +86,13 @@ impl RemotePtyStore {
     }
 
     pub fn remote_session_for_local(&self, local_session_id: &str) -> Option<String> {
-        let Ok(local_to_remote) = self.local_to_remote.lock() else {
+        let Ok(sessions) = self.sessions.lock() else {
             return None;
         };
-        local_to_remote.get(local_session_id).cloned()
+        sessions
+            .iter()
+            .find(|(_, v)| v.local_session_id == local_session_id)
+            .map(|(remote_id, _)| remote_id.clone())
     }
 
     pub fn unbind_session(
@@ -95,43 +100,43 @@ impl RemotePtyStore {
         remote_session_id: &str,
         local_session_id: &str,
     ) -> Result<(), String> {
-        {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .map_err(|_| "remote pty sessions lock poisoned".to_string())?;
-            sessions.remove(remote_session_id);
-        }
-
-        let mut local_to_remote = self
-            .local_to_remote
+        let mut sessions = self
+            .sessions
             .lock()
-            .map_err(|_| "remote pty local_to_remote lock poisoned".to_string())?;
-        local_to_remote.remove(local_session_id);
+            .map_err(|_| "remote pty sessions lock poisoned".to_string())?;
+        match sessions.get(remote_session_id) {
+            None => {}
+            Some(entry) if entry.local_session_id != local_session_id => {
+                return Err(format!(
+                    "remote PTY binding mismatch for {remote_session_id}: expected local {local_session_id}, found {}",
+                    entry.local_session_id
+                ));
+            }
+            Some(_) => {
+                sessions.remove(remote_session_id);
+            }
+        }
         Ok(())
     }
 
-    pub fn clear_session_for_local(
+    /// Removes the session row when `remote_session_id` maps to `local_session_id`.
+    /// Returns `Some(remote_session_id)` when a row was removed, `None` if no matching binding existed.
+    pub fn clear_session_binding(
         &self,
+        remote_session_id: &str,
         local_session_id: &str,
     ) -> Result<Option<String>, String> {
-        let remote_session_id = {
-            let mut local_to_remote = self
-                .local_to_remote
-                .lock()
-                .map_err(|_| "remote pty local_to_remote lock poisoned".to_string())?;
-            local_to_remote.remove(local_session_id)
-        };
-
-        if let Some(remote_session_id) = remote_session_id {
-            let mut sessions = self
-                .sessions
-                .lock()
-                .map_err(|_| "remote pty sessions lock poisoned".to_string())?;
-            sessions.remove(&remote_session_id);
-            Ok(Some(remote_session_id))
-        } else {
-            Ok(None)
+        let mut sessions = self
+            .sessions
+            .lock()
+            .map_err(|_| "remote pty sessions lock poisoned".to_string())?;
+        match sessions.get(remote_session_id) {
+            None => Ok(None),
+            Some(entry) if entry.local_session_id != local_session_id => Ok(None),
+            Some(_) => {
+                sessions.remove(remote_session_id);
+                Ok(Some(remote_session_id.to_string()))
+            }
         }
     }
 
@@ -318,6 +323,55 @@ fn floor_char_boundary(input: &str, max_bytes: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remote_session_for_local_resolves_after_bind() {
+        let store = RemotePtyStore::default();
+        let remote = "ccpty:dev-1:pty-7";
+        store.bind_session(remote, "pty-7").expect("bind");
+        assert_eq!(store.remote_session_for_local("pty-7").as_deref(), Some(remote));
+        assert_eq!(store.resolve_local_session(remote).unwrap(), "pty-7");
+    }
+
+    #[test]
+    fn bind_session_evicts_prior_remote_for_same_local() {
+        let store = RemotePtyStore::default();
+        store.bind_session("ccpty:dev:a", "pty-1").expect("bind a");
+        store.bind_session("ccpty:dev:b", "pty-1").expect("bind b");
+        assert_eq!(
+            store.remote_session_for_local("pty-1").as_deref(),
+            Some("ccpty:dev:b")
+        );
+        assert!(store.resolve_local_session("ccpty:dev:a").is_err());
+    }
+
+    #[test]
+    fn clear_session_binding_requires_matching_local() {
+        let store = RemotePtyStore::default();
+        store.bind_session("ccpty:d:1", "local-1").expect("bind");
+        assert_eq!(
+            store
+                .clear_session_binding("ccpty:d:1", "wrong-local")
+                .expect("clear"),
+            None
+        );
+        assert!(store.resolve_local_session("ccpty:d:1").is_ok());
+        assert_eq!(
+            store
+                .clear_session_binding("ccpty:d:1", "local-1")
+                .expect("clear"),
+            Some("ccpty:d:1".to_string())
+        );
+        assert!(store.resolve_local_session("ccpty:d:1").is_err());
+    }
+
+    #[test]
+    fn unbind_session_errors_on_local_mismatch() {
+        let store = RemotePtyStore::default();
+        store.bind_session("ccpty:d:1", "local-1").expect("bind");
+        assert!(store.unbind_session("ccpty:d:1", "other-local").is_err());
+        assert!(store.resolve_local_session("ccpty:d:1").is_ok());
+    }
 
     #[test]
     fn scrollback_ring_keeps_tail_and_sets_truncated() {

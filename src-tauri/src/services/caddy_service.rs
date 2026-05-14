@@ -39,6 +39,7 @@ pub fn start_caddy_run(
         &AppHandle,
         &SessionStore,
         fn(&AppHandle, &FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+        Option<&str>,
     ) -> Result<String, String>,
     upsert_function_status: fn(
         &AppHandle,
@@ -91,6 +92,7 @@ pub fn start_caddy_run(
         app,
         session_store,
         update_functions_for_session_exit,
+        None,
     )?;
     upsert_function_status(
         app,

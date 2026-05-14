@@ -163,6 +163,7 @@ pub fn start_server_tunnel(
         &AppHandle,
         &SessionStore,
         fn(&AppHandle, &FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+        Option<&str>,
     ) -> Result<String, String>,
     upsert_function_status: fn(
         &AppHandle,
@@ -211,6 +212,7 @@ pub fn start_server_tunnel(
         app,
         session_store,
         update_functions_for_session_exit,
+        None,
     )?;
     upsert_function_status(
         app,
@@ -420,6 +422,7 @@ pub fn start_server_ssh(
     server_id: String,
     cols: u16,
     rows: u16,
+    forced_local_session_id: Option<&str>,
     app: &AppHandle,
     session_store: &SessionStore,
     function_store: &FunctionStore,
@@ -442,6 +445,7 @@ pub fn start_server_ssh(
         &AppHandle,
         &SessionStore,
         fn(&AppHandle, &FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+        Option<&str>,
     ) -> Result<String, String>,
     upsert_function_status: fn(
         &AppHandle,
@@ -505,6 +509,7 @@ pub fn start_server_ssh(
         app,
         session_store,
         update_functions_for_session_exit,
+        forced_local_session_id,
     )?;
     upsert_function_status(
         app,

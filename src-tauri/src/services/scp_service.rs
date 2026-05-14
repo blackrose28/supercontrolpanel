@@ -107,6 +107,7 @@ pub fn start_scp_upload_service(
         &AppHandle,
         &SessionStore,
         fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+        Option<&str>,
     ) -> Result<String, String>,
     update_functions_for_session_exit: fn(
         &AppHandle,
@@ -141,6 +142,7 @@ pub fn start_scp_upload_service(
         app,
         session_store,
         update_functions_for_session_exit,
+        None,
     )
 }
 
@@ -250,6 +252,7 @@ pub fn start_scp_download_service(
         &AppHandle,
         &SessionStore,
         fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+        Option<&str>,
     ) -> Result<String, String>,
     update_functions_for_session_exit: fn(
         &AppHandle,
@@ -285,6 +288,7 @@ pub fn start_scp_download_service(
         app,
         session_store,
         update_functions_for_session_exit,
+        None,
     )
 }
 
@@ -308,6 +312,7 @@ pub fn cc_start_scp_upload_service(
         &AppHandle,
         &SessionStore,
         fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+        Option<&str>,
     ) -> Result<String, String>,
     update_functions_for_session_exit: fn(
         &AppHandle,
@@ -368,6 +373,7 @@ pub fn cc_start_scp_upload_service(
         app,
         session_store,
         update_functions_for_session_exit,
+        None,
     )?;
     Ok(StartScpResult::Started {
         session_id,
@@ -449,6 +455,7 @@ pub fn cc_start_scp_download_service(
         &AppHandle,
         &SessionStore,
         fn(&AppHandle, &crate::stores::FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
+        Option<&str>,
     ) -> Result<String, String>,
     update_functions_for_session_exit: fn(
         &AppHandle,
@@ -509,6 +516,7 @@ pub fn cc_start_scp_download_service(
         app,
         session_store,
         update_functions_for_session_exit,
+        None,
     )?;
     Ok(StartScpResult::Started {
         session_id,

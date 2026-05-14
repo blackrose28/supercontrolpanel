@@ -554,6 +554,7 @@ pub fn call_mcp_tool(
                 server_id,
                 cols,
                 rows,
+                None,
                 app.clone(),
                 app.state::<SessionStore>(),
                 app.state::<FunctionStore>(),

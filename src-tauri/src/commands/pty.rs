@@ -22,6 +22,7 @@ pub(crate) fn open_pty_internal(
         app,
         store,
         update_functions_for_session_exit,
+        None,
     )
 }
 

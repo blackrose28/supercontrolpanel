@@ -331,6 +331,27 @@ impl SseConnection {
                     return;
                 }
 
+                let local_session_id = payload_value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string);
+                let remote_session_id = local_session_id
+                    .as_deref()
+                    .and_then(|local| {
+                        app.state::<RemotePtyStore>()
+                            .remote_session_for_local(local)
+                    });
+                let payload_value =
+                    pty_exit_payload_for_polling(payload_value, remote_session_id.clone());
+
+                if let (Some(local), Some(remote)) =
+                    (local_session_id.as_deref(), remote_session_id.as_deref())
+                {
+                    let _ = app
+                        .state::<RemotePtyStore>()
+                        .clear_session_binding(remote, local);
+                }
+
                 let seq = {
                     let mut s = seq_counter.lock().await;
                     *s += 1;
@@ -341,7 +362,7 @@ impl SseConnection {
                     "pty-exit",
                     device_id.clone(),
                     seq,
-                    Some(payload_value.clone()),
+                    Some(payload_value),
                 );
 
                 if let Err(e) = post_to_server(&server_url, &agent_token, json!(envelope)).await {
@@ -466,6 +487,19 @@ fn pty_output_payload_for_polling(mut payload: Value, remote_session_id: Option<
     payload
 }
 
+fn pty_exit_payload_for_polling(mut payload: Value, remote_session_id: Option<String>) -> Value {
+    let Some(remote_session_id) = remote_session_id else {
+        return payload;
+    };
+    let Some(payload_object) = payload.as_object_mut() else {
+        return payload;
+    };
+
+    payload_object.remove("id");
+    payload_object.insert("sessionId".to_string(), json!(remote_session_id));
+    payload
+}
+
 fn polling_command_log_line(command: &Value) -> String {
     let command_type = command
         .get("commandType")
@@ -525,6 +559,35 @@ mod tests {
         });
 
         let rewritten = pty_output_payload_for_polling(payload.clone(), None);
+
+        assert_eq!(rewritten, payload);
+    }
+
+    #[test]
+    fn pty_exit_payload_for_polling_uses_remote_session_id() {
+        let payload = json!({
+            "id": "local-ssh-session-1",
+            "exitCode": 0,
+            "reason": "exit_status: 0",
+        });
+
+        let rewritten = pty_exit_payload_for_polling(payload, Some("ccpty:dev-1:local-ssh-session-1".to_string()));
+
+        assert_eq!(rewritten["sessionId"], json!("ccpty:dev-1:local-ssh-session-1"));
+        assert_eq!(rewritten["exitCode"], json!(0));
+        assert_eq!(rewritten["reason"], json!("exit_status: 0"));
+        assert!(rewritten.get("id").is_none());
+    }
+
+    #[test]
+    fn pty_exit_payload_for_polling_leaves_unmapped_local_payloads_unchanged() {
+        let payload = json!({
+            "id": "local-openvpn-session-1",
+            "exitCode": 1,
+            "reason": "killed",
+        });
+
+        let rewritten = pty_exit_payload_for_polling(payload.clone(), None);
 
         assert_eq!(rewritten, payload);
     }
