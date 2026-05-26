@@ -81,6 +81,8 @@ impl Default for FunctionStore {
 }
 
 fn main() {
+    init_environment();
+
     tauri::Builder::default()
         .manage(SessionStore::default())
         .manage(FunctionStore::default())
@@ -167,3 +169,22 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+fn init_environment() {
+    #[cfg(target_os = "linux")]
+    std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_init_environment_sets_var_on_linux() {
+        std::env::remove_var("WEBKIT_DISABLE_DMABUF_RENDERER");
+        init_environment();
+        assert_eq!(std::env::var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap(), "1");
+    }
+}
+
