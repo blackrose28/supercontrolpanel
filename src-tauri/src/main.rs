@@ -13,7 +13,7 @@ mod server_mgmt;
 mod services;
 mod stores;
 use mcp::{sync_mcp_runtime_from_settings, McpRuntimeState};
-use services::{load_sync_settings_from_disk, now_ms};
+use services::{initialize_keyring_cache, load_sync_settings_from_disk, now_ms};
 use stores::{
     BoundaryAutomationStore, CcRuntimeState, FunctionStore, OpenVpnAdminStore,
     OpenVpnReconnectStore, RemoteBrowserStore, RemotePtyStore, ScpTransferStore, SessionStore,
@@ -95,6 +95,15 @@ fn main() {
         .manage(McpRuntimeState::default())
         .manage(CcRuntimeState::default())
         .setup(|app| {
+            // Populate the in-memory keyring cache from the OS credential
+            // store ONCE so Linux users get at most one unlock prompt.
+            let server_ids: Vec<String> = server_mgmt::load_servers(app.handle())
+                .unwrap_or_default()
+                .iter()
+                .map(|s| s.id.clone())
+                .collect();
+            initialize_keyring_cache(&server_ids);
+
             let state = app.state::<McpRuntimeState>();
             let settings = load_sync_settings_from_disk(app.handle(), SYNC_SETTINGS_FILE_NAME)?;
             let _ = sync_mcp_runtime_from_settings(app.handle(), &state, &settings, now_ms);

@@ -307,7 +307,9 @@ pub fn keyring_entry(account: &str) -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, account).map_err(|e| format!("keyring: {e}"))
 }
 
-pub fn keyring_get_optional(account: &str) -> Result<Option<String>, String> {
+/// Read a secret directly from the OS keyring (bypasses in-memory cache).
+/// Used only during cache initialisation at startup.
+pub fn keyring_load_from_os(account: &str) -> Result<Option<String>, String> {
     let e = keyring_entry(account)?;
     match e.get_password() {
         Ok(s) => Ok(Some(s)),
@@ -316,18 +318,32 @@ pub fn keyring_get_optional(account: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// Read a secret.  Always served from the in-memory cache (populated at
+/// startup by `initialize_keyring_cache`), so this never triggers an OS
+/// keyring unlock prompt.
+pub fn keyring_get_optional(account: &str) -> Result<Option<String>, String> {
+    Ok(crate::stores::keyring_cache_get(account))
+}
+
+/// Write or delete a secret.  Writes through to both the OS keyring (for
+/// persistence across app restarts) and the in-memory cache (so subsequent
+/// reads see the new value immediately without hitting the OS keyring).
 pub fn keyring_set_or_delete(account: &str, value: &str) -> Result<(), String> {
+    // 1. Write to OS keyring for persistence.
     let e = keyring_entry(account)?;
     if value.is_empty() {
         match e.delete_credential() {
-            Ok(()) => Ok(()),
-            Err(KeyringError::NoEntry) => Ok(()),
-            Err(err) => Err(format!("keyring delete ({account}): {err}")),
+            Ok(()) => {}
+            Err(KeyringError::NoEntry) => {}
+            Err(err) => return Err(format!("keyring delete ({account}): {err}")),
         }
     } else {
         e.set_password(value)
-            .map_err(|err| format!("keyring write ({account}): {err}"))
+            .map_err(|err| format!("keyring write ({account}): {err}"))?;
     }
+    // 2. Update in-memory cache.
+    crate::stores::keyring_cache_set(account, value);
+    Ok(())
 }
 
 pub fn boundary_addr_base(addr: &str) -> String {
@@ -390,6 +406,56 @@ pub fn apply_boundary_token_arg_if_present_builder(cmd: &mut CommandBuilder) -> 
         }
     }
     Ok(())
+}
+
+/// Keyring account for CC telemetry queue encryption key (mirrors the private
+/// constant in `cc::telemetry_queue_crypto`).
+pub const KEYRING_CC_TELEMETRY_QUEUE_KEY: &str = "cc-telemetry-queue-key";
+
+/// All *static* (non-dynamic) keyring accounts our app may store.
+const STATIC_KEYRING_ACCOUNTS: &[&str] = &[
+    KEYRING_OPENVPN_PASSWORD,
+    KEYRING_OPENVPN_OTP_SECRET,
+    KEYRING_BOUNDARY_PASSWORD,
+    KEYRING_BOUNDARY_OIDC_PASSWORD,
+    KEYRING_BOUNDARY_OIDC_OTP_SECRET,
+    KEYRING_BOUNDARY_APP_TOKEN,
+    KEYRING_CC_TELEMETRY_QUEUE_KEY,
+];
+
+/// Populate the global keyring cache by bulk-reading every known secret from
+/// the OS credential store.  This is called **once** during app startup so
+/// that the OS only asks for the keyring unlock a single time.
+///
+/// `server_ids` is the list of server IDs from `servers.json` (each server
+/// may have an SSH password stored under `server_ssh_password:{id}`).
+pub fn initialize_keyring_cache(server_ids: &[String]) {
+    use std::collections::HashMap;
+
+    let mut entries = HashMap::new();
+
+    // Load static accounts.
+    for &account in STATIC_KEYRING_ACCOUNTS {
+        match keyring_load_from_os(account) {
+            Ok(Some(value)) if !value.is_empty() => {
+                entries.insert(account.to_string(), value);
+            }
+            _ => {} // missing or error — skip, the cache just won't have it
+        }
+    }
+
+    // Load dynamic per-server SSH passwords.
+    for id in server_ids {
+        let account = keyring_server_ssh_password_account(id);
+        match keyring_load_from_os(&account) {
+            Ok(Some(value)) if !value.is_empty() => {
+                entries.insert(account, value);
+            }
+            _ => {}
+        }
+    }
+
+    crate::stores::seed_keyring_cache(entries);
 }
 
 #[cfg(test)]

@@ -3,9 +3,7 @@ use aes_gcm::{
     Aes256Gcm, Nonce,
 };
 
-use crate::services::{keyring_get_optional, keyring_set_or_delete};
-
-const KEYRING_CC_TELEMETRY_QUEUE_KEY: &str = "cc-telemetry-queue-key";
+use crate::services::{keyring_get_optional, keyring_set_or_delete, KEYRING_CC_TELEMETRY_QUEUE_KEY};
 const TELEMETRY_QUEUE_KEY_LEN: usize = 32;
 const TELEMETRY_QUEUE_NONCE_LEN: usize = 12;
 
