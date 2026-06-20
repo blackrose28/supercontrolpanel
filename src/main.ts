@@ -1072,9 +1072,16 @@ async function navigateFromStatusCard(functionId: string) {
 
 function syncFunctionButtons() {
   const status = statusMap.get(OPENVPN_FUNCTION_ID);
-  const sessionActive = Boolean(openvpnSessionId) || Boolean(status?.sessionId);
-  const reconnectPending = status?.state === "reconnecting";
-  const busy = sessionActive || reconnectPending;
+  const activeStates = new Set([
+    "starting",
+    "connecting",
+    "authenticating",
+    "running",
+    "stopping",
+    "reconnecting",
+    "restarting",
+  ]);
+  const busy = Boolean(status && activeStates.has(status.state));
   vpnStartBtn.disabled = busy;
   vpnStopBtn.disabled = !busy;
 }
