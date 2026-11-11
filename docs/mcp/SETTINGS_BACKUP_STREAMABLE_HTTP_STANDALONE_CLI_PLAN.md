@@ -1558,6 +1558,70 @@ desktop Streamable HTTP remains independently actionable after checking current
 official SDK/protocol sources. Coordinated CLI import, other operation families,
 stdio MCP and packaging remain open. Do not retry the unchanged-host cgroup gate.
 
+### Shared remote-browser open/close MCP contracts (2026-11-11)
+
+`scp-core::remote_browser::RemoteBrowseSession` now owns the unchanged Serialize +
+Clone two-string wire model (`browserId`, `rootPath`), reexported through the old
+desktop model paths. This value owns no live connection. `SshEndpoint`,
+`RemoteBrowserSessionState`, stores and SFTP execution remain desktop-owned.
+`mcp_dto` adds `McpRemoteBrowserOpenArgs` as an alias of the identical borrowed,
+Serialize-only `McpServerGetArgs` contract, `McpRemoteBrowserOpenResult` as the
+session model alias, borrowed Serialize-only `McpRemoteBrowserCloseArgs`, and
+Serialize-only empty-object `McpRemoteBrowserCloseResult`. Desktop DTO/public
+paths reexport them; the two dispatcher arms adopt them.
+
+Open/close still accept any string ID unchanged, including empty, whitespace,
+Unicode and control text; non-object, absent/null/non-string IDs retain exactly
+`serverId is required` / `browserId is required`. Extras are ignored. Open still
+allocates its host ID before calling the replacement-session service, enters the
+settings gate, closes all previous browser sessions before server lookup, checks
+the Boundary tunnel, resolves credentials and opens SFTP, and resolves `.` with
+`/` fallback before publishing the host store entry. Close still removes the
+exact ID, releases the removed state outside the lock, and succeeds for absent
+IDs unless locking fails. Those behaviors and errors remain in unchanged host
+source. Policy still runs before parsing; custom envelopes, Tauri commands,
+CC's `browserSessionId` mapping and UI lifecycle are unchanged. No CLI browser
+execution is enabled.
+
+TDD: the session serialization fixture first passed against the original desktop
+model; core RED failed on missing shared imports and desktop RED on missing
+reexports/distinct model identity. GREEN fixtures run in both hosts and cover
+exact argument keys/errors, non-object/non-string input, permissive borrowed IDs,
+ignored extras, `{}` close output, and exact cloned session fields/text including
+Windows and Unix path strings. Identity tests pin shared model, DTO and public
+paths. Refactoring reuses the existing server parser and direct required-string
+mapping; session fixtures collect all combinations to check the complete result
+set. No quality acks were added. Tests do not execute SFTP, replacement or close
+cleanup, locks, policy dispatch, HTTP/Tauri/CC or native UI flows.
+
+Validation: locked all-feature workspace passes 122 tests plus the credential
+compile-fail doctest (seven existing ignored subprocess fixtures are exercised
+by existing acceptance tests); locked desktop suite passes 157 tests with 17
+existing warnings. Strict all-feature/all-target workspace Clippy, locked release
+CLI build, workspace formatting, changed desktop/shared-fixture rustfmt and diff
+whitespace checks pass. Existing picker helper/timeout tests pass 12 cases across
+three Playwright projects; these are helper checks, not native UI acceptance.
+
+Ripwire pre-edit session impact: 24 symbols across 13 files from combined Rust
+and TypeScript definitions, empty resolvable uses and no modeled affected tests.
+Dispatcher impact remains eleven downstream symbols with three direct callers
+(HTTP, resources, Tauri); edit-check reports unchanged signature. New close
+parser edit-check reports new-symbol. Quality-delta has zero gates, one minor
+ambient dispatcher churn finding and nine nongating new test/module reachability
+findings. Staged test-gate exits 4: seven Cargo-exercised test files with unknown
+runners and twelve untested downstream symbols, including an unrelated Markdown
+heading. Fourteen of seventeen hunks are unlocated, so model/module moves cause
+file-granular fallback. Green suites do not prove full downstream or transport
+coverage.
+
+Next focused increment: inspect remote-browser create-directory/delete-path
+argument and success-result contracts, preserving required-field error order,
+optional boolean handling, path semantics, policy and SFTP execution in the host.
+After this bounded browser contract family, prioritize a published-SDK/protocol
+spike for desktop Streamable HTTP using current official sources. Coordinated CLI
+import, other operation families, stdio MCP and packaging also remain actionable.
+Do not retry the unchanged-host cgroup qualification gate.
+
 Proposed Cargo workspace boundaries:
 
 ```text

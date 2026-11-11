@@ -129,6 +129,31 @@ pub type McpRemoteBrowserListChildrenResult = Vec<crate::remote_browser::RemoteB
 /// Bare node information; kind and existence are host-supplied values.
 pub type McpRemoteBrowserStatPathResult = crate::remote_browser::RemoteBrowseNodeInfo;
 
+/// Existing browser-open lookup; the host retains allocation and session replacement.
+/// Reuse the identical server-ID wire contract, including permissive parsing/errors.
+pub type McpRemoteBrowserOpenArgs<'a> = McpServerGetArgs<'a>;
+
+/// Bare host-allocated browser handle and resolved root path.
+pub type McpRemoteBrowserOpenResult = crate::remote_browser::RemoteBrowseSession;
+
+/// Existing close lookup; no validation or normalization of browser IDs.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRemoteBrowserCloseArgs<'a> {
+    pub browser_id: &'a str,
+}
+
+impl<'a> McpRemoteBrowserCloseArgs<'a> {
+    /// Preserve the required error; hosts retain lookup, cleanup and missing-ID behavior.
+    pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
+        required_string_arg(args, "browserId").map(|browser_id| Self { browser_id })
+    }
+}
+
+/// Successful custom MCP close returns `{}`, not null.
+#[derive(Serialize)]
+pub struct McpRemoteBrowserCloseResult {}
+
 fn required_string_arg<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(serde_json::Value::as_str)

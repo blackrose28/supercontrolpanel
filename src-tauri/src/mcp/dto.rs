@@ -20,10 +20,11 @@ pub use scp_core::mcp_resources::McpResourceDescriptor;
 pub use scp_core::mcp_dto::{
     McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
     McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-    McpOpenVpnGetStatusResult, McpRemoteBrowserListChildrenResult, McpRemoteBrowserReadArgs,
-    McpRemoteBrowserStatPathResult, McpScpTransferGetArgs, McpScpTransferGetResult,
-    McpScpTransferListResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
-    McpToolCallEnvelope,
+    McpOpenVpnGetStatusResult, McpRemoteBrowserCloseArgs, McpRemoteBrowserCloseResult,
+    McpRemoteBrowserListChildrenResult, McpRemoteBrowserOpenArgs, McpRemoteBrowserOpenResult,
+    McpRemoteBrowserReadArgs, McpRemoteBrowserStatPathResult, McpScpTransferGetArgs,
+    McpScpTransferGetResult, McpScpTransferListResult, McpServerGetArgs, McpServerGetResult,
+    McpServersListResult, McpToolCallEnvelope,
 };
 
 #[cfg(test)]
@@ -242,5 +243,41 @@ mod shared_browser_read_identity {
         let dto: super::McpRemoteBrowserReadArgs<'_> = shared;
         let public: crate::mcp::McpRemoteBrowserReadArgs<'_> = dto;
         assert_eq!(public.path, "");
+    }
+}
+
+#[cfg(test)]
+mod browser_lifecycle_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_browser_lifecycle.rs"
+    ));
+}
+
+#[cfg(test)]
+mod shared_browser_lifecycle_identity {
+    #[test]
+    fn desktop_session_and_mcp_paths_use_the_shared_lifecycle_contracts() {
+        let session: crate::models::RemoteBrowseSession =
+            scp_core::remote_browser::RemoteBrowseSession {
+                browser_id: "browser-9".into(),
+                root_path: "/root".into(),
+            };
+        let dto: super::McpRemoteBrowserOpenResult = session;
+        let public: crate::mcp::McpRemoteBrowserOpenResult = dto;
+        let shared: scp_core::mcp_dto::McpRemoteBrowserOpenResult = public;
+        assert_eq!(shared.root_path, "/root");
+        let input = serde_json::json!({"serverId":"server-1","browserId":"browser-9"});
+        let open: super::McpRemoteBrowserOpenArgs<'_> =
+            scp_core::mcp_dto::McpRemoteBrowserOpenArgs::from_args(&input).unwrap();
+        let public: crate::mcp::McpRemoteBrowserOpenArgs<'_> = open;
+        assert_eq!(public.server_id, "server-1");
+        let close: super::McpRemoteBrowserCloseArgs<'_> =
+            scp_core::mcp_dto::McpRemoteBrowserCloseArgs::from_args(&input).unwrap();
+        let public: crate::mcp::McpRemoteBrowserCloseArgs<'_> = close;
+        assert_eq!(public.browser_id, "browser-9");
+        let close: super::McpRemoteBrowserCloseResult =
+            scp_core::mcp_dto::McpRemoteBrowserCloseResult {};
+        let _: crate::mcp::McpRemoteBrowserCloseResult = close;
     }
 }

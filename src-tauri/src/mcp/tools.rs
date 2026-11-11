@@ -17,10 +17,11 @@ use crate::{
     mcp::{
         McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
         McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-        McpOpenVpnGetStatusResult, McpRemoteBrowserListChildrenResult, McpRemoteBrowserReadArgs,
-        McpRemoteBrowserStatPathResult, McpScpTransferGetArgs, McpScpTransferGetResult,
-        McpScpTransferListResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
-        McpToolCallEnvelope,
+        McpOpenVpnGetStatusResult, McpRemoteBrowserCloseArgs, McpRemoteBrowserCloseResult,
+        McpRemoteBrowserListChildrenResult, McpRemoteBrowserOpenArgs, McpRemoteBrowserOpenResult,
+        McpRemoteBrowserReadArgs, McpRemoteBrowserStatPathResult, McpScpTransferGetArgs,
+        McpScpTransferGetResult, McpScpTransferListResult, McpServerGetArgs, McpServerGetResult,
+        McpServersListResult, McpToolCallEnvelope,
     },
     server_mgmt::{load_servers, Server},
     services::{
@@ -425,27 +426,22 @@ pub fn call_mcp_tool(
             )
         })?,
         "remote_browser_open" => {
-            let server_id = args
-                .get("serverId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "serverId is required".to_string())?
-                .to_string();
-            let session = open_remote_browser_action(
+            let parsed = McpRemoteBrowserOpenArgs::from_args(&args)?;
+            let session: McpRemoteBrowserOpenResult = open_remote_browser_action(
                 app.clone(),
-                server_id,
+                parsed.server_id.to_string(),
                 app.state::<RemoteBrowserStore>(),
                 app.state::<FunctionStore>(),
             )?;
             json!(session)
         }
         "remote_browser_close" => {
-            let browser_id = args
-                .get("browserId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "browserId is required".to_string())?
-                .to_string();
-            close_remote_browser_action(browser_id, app.state::<RemoteBrowserStore>())?;
-            json!({})
+            let parsed = McpRemoteBrowserCloseArgs::from_args(&args)?;
+            close_remote_browser_action(
+                parsed.browser_id.to_string(),
+                app.state::<RemoteBrowserStore>(),
+            )?;
+            json!(McpRemoteBrowserCloseResult {})
         }
         "remote_browser_list_children" => {
             let parsed = McpRemoteBrowserReadArgs::from_args(&args)?;

@@ -444,6 +444,14 @@ Where the returned value is the full saved device-local sync settings object.
 
 ## `remote_browser_open`
 
+`McpRemoteBrowserOpenArgs` reuses the shared server-ID argument contract: any
+string `serverId` passes unchanged; missing, non-string or non-object arguments
+fail with `serverId is required`. Extra fields are ignored. The bare result is
+`McpRemoteBrowserOpenResult`, an alias of the shared `RemoteBrowseSession` wire
+value (Serialize + Clone). It owns no connection. Desktop allocation, replacement
+of prior browser sessions, credentials, SFTP/root resolution and errors remain
+unchanged; policy still runs first. No CLI browser operation is enabled.
+
 ### Input
 
 ```json
@@ -462,6 +470,12 @@ Where the returned value is the full saved device-local sync settings object.
 ```
 
 ## `remote_browser_close`
+
+Shared `McpRemoteBrowserCloseArgs` accepts any string `browserId` unchanged,
+including empty/whitespace/control text; other shapes fail with
+`browserId is required`. Extras are ignored. `McpRemoteBrowserCloseResult`
+serializes to exactly `{}` on success. Desktop exact-ID removal, absent-ID success,
+locking/cleanup errors, policy and envelopes retain their existing behavior.
 
 ### Input
 

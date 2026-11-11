@@ -386,6 +386,14 @@ missing or non-string `path` still becomes an empty string before desktop path
 handling. Results keep their existing bare array/object fields. Session ownership,
 SFTP execution, errors and policy remain in the desktop; no CLI browser is added.
 
+Remote-browser open/close MCP contracts also live in core. Open reuses the
+permissive server-ID argument contract and returns the unchanged `browserId` /
+`rootPath` wire value; close requires a string `browserId` and returns `{}` on
+success. The desktop model path reexports the shared session value, which owns
+no connection. ID allocation, replacement-session cleanup, live SFTP ownership
+and missing-session behavior remain in the desktop. No CLI open/close commands
+are added.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

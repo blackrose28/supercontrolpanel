@@ -2,6 +2,14 @@
 
 use serde::Serialize;
 
+/// Returned browser handle and root only; this value owns no live SSH/SFTP session.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteBrowseSession {
+    pub browser_id: String,
+    pub root_path: String,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum RemotePathKind {
