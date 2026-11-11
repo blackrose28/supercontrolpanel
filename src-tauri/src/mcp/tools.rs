@@ -84,6 +84,37 @@ fn merge_json_value(target: &mut Value, patch: &Value) {
     }
 }
 
+fn save_mcp_sync_settings(
+    args: &Value,
+    save: impl FnOnce(SyncSettingsPatch) -> Result<crate::services::SyncSettings, String>,
+) -> Result<Value, String> {
+    let patch_value = args
+        .get("patch")
+        .cloned()
+        .ok_or_else(|| "patch is required".to_string())?;
+    // Remote callers must never change their own authorization or CC identity.
+    // An explicit allowlist also keeps future local controls local by default.
+    let fields = patch_value
+        .as_object()
+        .ok_or_else(|| "invalid sync settings patch: expected object".to_string())?;
+    if fields.keys().any(|field| {
+        !matches!(
+            field.as_str(),
+            "repoRoot"
+                | "openvpnExecutablePath"
+                | "openvpnOvpnPath"
+                | "boundaryCliPath"
+                | "caddyFolder"
+        )
+    }) {
+        return Err("MCP settings patch permits only path/folder fields; use desktop settings for other controls".to_string());
+    }
+    let patch: SyncSettingsPatch = serde_json::from_value(patch_value)
+        .map_err(|_| "invalid sync settings patch".to_string())?;
+    let saved = save(patch)?;
+    Ok(redact_sync_settings_value(json!(saved)))
+}
+
 fn is_sensitive_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,
@@ -406,20 +437,13 @@ pub fn call_mcp_tool(
             let settings = load_sync_settings_from_disk(app, "sync-local.json")?;
             redact_sync_settings_value(json!(settings))
         }
-        "sync_settings_save_partial" => {
-            let patch_value = args
-                .get("patch")
-                .cloned()
-                .ok_or_else(|| "patch is required".to_string())?;
-            let patch: SyncSettingsPatch = serde_json::from_value(patch_value)
-                .map_err(|e| format!("invalid sync settings patch: {e}"))?;
-            let saved = save_sync_settings_action(
+        "sync_settings_save_partial" => save_mcp_sync_settings(&args, |patch| {
+            save_sync_settings_action(
                 app.clone(),
                 patch,
                 app.state::<crate::mcp::McpRuntimeState>(),
-            )?;
-            redact_sync_settings_value(json!(saved))
-        }
+            )
+        })?,
         "remote_browser_open" => {
             let server_id = args
                 .get("serverId")
@@ -719,5 +743,93 @@ mod shared_catalog_identity {
         let advertised: std::collections::BTreeSet<_> =
             tools.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(actual, advertised);
+    }
+}
+
+#[cfg(test)]
+mod remote_settings_guard {
+    use super::*;
+    use crate::services::SyncSettings;
+
+    #[test]
+    fn remote_control_settings_are_rejected_before_any_write() {
+        let controls = json!({
+            "mcpEnabled": false, "mcpBindAddress": "127.0.0.1", "mcpPort": 0,
+            "mcpAuthToken": "secret-marker", "mcpAllowedToolCategories": [],
+            "mcpSensitiveActionPolicy": "allow-with-token", "ccEnabled": true,
+            "ccServerUrl": "secret-marker", "ccAuthMode": "token",
+            "ccAgentToken": "secret-marker", "ccDeviceId": "device",
+            "ccDeviceName": "name", "firstRunCompleted": false,
+            "futureControl": "secret-marker"
+        });
+        for (field, value) in controls.as_object().unwrap() {
+            for value in [value.clone(), Value::Null] {
+                let mut patch = json!({"repoRoot": "allowed-but-must-not-be-written"});
+                patch[field] = value;
+                let mut writes = 0;
+                let result = save_mcp_sync_settings(&json!({"patch": patch}), |_| {
+                    writes += 1;
+                    Ok(SyncSettings::default())
+                });
+                assert!(result.is_err(), "accepted remote control field {field}");
+                assert_eq!(writes, 0, "partially saved patch containing {field}");
+                let error = result.unwrap_err();
+                assert!(error.contains("desktop settings"), "{error}");
+                assert!(!error.contains("secret-marker"));
+            }
+        }
+    }
+
+    #[test]
+    fn remote_path_patch_preserves_values_and_redacts_saved_token() {
+        let result = save_mcp_sync_settings(
+            &json!({"patch": {
+                "repoRoot": "", "openvpnExecutablePath": "vpn", "openvpnOvpnPath": "profile",
+                "boundaryCliPath": "boundary", "caddyFolder": "folder"
+            }}),
+            |patch| {
+                assert_eq!(patch.repo_root.as_deref(), Some(""));
+                assert_eq!(patch.openvpn_executable_path.as_deref(), Some("vpn"));
+                assert_eq!(patch.openvpn_ovpn_path.as_deref(), Some("profile"));
+                assert_eq!(patch.boundary_cli_path.as_deref(), Some("boundary"));
+                assert_eq!(patch.caddy_folder.as_deref(), Some("folder"));
+                assert!(patch.mcp_sensitive_action_policy.is_none());
+                Ok(SyncSettings {
+                    mcp_auth_token: "secret-marker".into(),
+                    ..Default::default()
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(result["mcpAuthToken"], "[redacted]");
+        assert!(!result.to_string().contains("secret-marker"));
+    }
+
+    #[test]
+    fn invalid_remote_patches_never_write_or_echo_input() {
+        for args in [
+            json!({}),
+            json!({"patch": null}),
+            json!({"patch": []}),
+            json!({"patch": "secret-marker"}),
+            json!({"patch": {"repoRoot": ["secret-marker"]}}),
+        ] {
+            let result = save_mcp_sync_settings(&args, |_| panic!("invalid patch reached writer"));
+            assert!(result.is_err());
+            assert!(!result.unwrap_err().contains("secret-marker"));
+        }
+    }
+
+    #[test]
+    fn empty_and_null_path_patches_preserve_omission_and_writer_errors() {
+        for patch in [json!({}), json!({"repoRoot": null, "caddyFolder": null})] {
+            let error = save_mcp_sync_settings(&json!({"patch": patch}), |patch| {
+                assert!(patch.repo_root.is_none());
+                assert!(patch.caddy_folder.is_none());
+                Err("writer unavailable".into())
+            })
+            .unwrap_err();
+            assert_eq!(error, "writer unavailable");
+        }
     }
 }

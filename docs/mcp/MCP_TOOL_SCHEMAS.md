@@ -355,13 +355,20 @@ Where the returned value is the full device-local sync settings object from `syn
 ```json
 {
   "patch": {
-    "mcpEnabled": true,
-    "mcpPort": 46739
+    "repoRoot": "/path/to/repository",
+    "caddyFolder": "/path/to/caddy"
   }
 }
 ```
 
-The patch follows the same partial-update semantics as the UI/backend `save_sync_settings` command.
+`patch` must be a JSON object. Only `repoRoot`, `openvpnExecutablePath`,
+`openvpnOvpnPath`, `boundaryCliPath` and `caddyFolder` are accepted; their existing
+partial-update semantics are preserved. Omitted/null allowed fields do not change
+stored values. Any other field rejects the entire patch before the save action,
+even if null or mixed with allowed fields. Use desktop settings for MCP/CC policy,
+tokens, listener, identity and enrollment controls. This restriction applies even
+under `allow-with-token` and also to the Tauri MCP command; the desktop-local
+`save_sync_settings` command retains the full persistence schema.
 
 ### Output `data`
 

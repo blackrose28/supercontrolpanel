@@ -918,6 +918,58 @@ operation families and independent packaging remain actionable. Native supervisi
 and actual Caddy/keyring/elevation qualification stay gated rather than blocking
 independent increments.
 
+### Remote settings self-escalation guard (2026-11-11)
+
+Before extracting execution policy, the desktop MCP dispatcher now routes
+`sync_settings_save_partial` through a tested, injected-writer boundary. The
+patch must be an object containing only `repoRoot`, `openvpnExecutablePath`,
+`openvpnOvpnPath`, `boundaryCliPath` and `caddyFolder`. Every other key, including
+unknown future controls or null-valued control keys, rejects the entire patch
+before the save action. Thus MCP callers cannot use this tool to change their own
+allowed categories, sensitive policy, token, listener, CC identity or enrollment.
+Mixed allowed/disallowed patches never partially write. Validation errors do not
+echo input values. Allowed path omission/null/value semantics, save errors and
+existing MCP-token response redaction remain. The allowlist is explicit and does
+not infer sensitivity from discovery flags or category.
+
+The guard covers HTTP and direct Tauri MCP calls through `call_mcp_tool`; resources
+also delegate into that dispatcher but expose no settings writer. The local desktop
+`save_sync_settings` command and permissive shared persistence schema are unchanged.
+No tool names, descriptors, command/event payloads, CLI commands, dependencies,
+transport or token generation changed. Config-mutation category policy still applies
+before dispatch. This is a boundary restriction, not protection against arbitrary
+code execution by callers already granted runtime/configuration tools.
+
+TDD: four tests first failed on the absent seam. Extracting the prior parser/writer
+then demonstrated behavioral RED: a CC control reached the writer, and an empty
+array was accepted by Serde's struct deserializer. After object/field validation,
+all four pass. Tests cover every current MCP/CC/enrollment field, unknown fields,
+null controls, mixed patches, no writer calls on rejection, malformed/missing data,
+all five allowed fields, omission/null, sanitized errors, save errors and token
+redaction. Tests inject the writer; no app, listener, settings file, keyring or
+external executable was used. They do not claim HTTP/UI end-to-end coverage.
+
+Linux checks pass: 117 desktop tests (17 existing warnings), 89 workspace all-feature
+tests plus credential compile-fail doctest (seven ignored subprocess fixtures),
+strict workspace all-feature/all-target Clippy, workspace and changed-file fmt,
+locked release CLI build and diff whitespace check. Native Windows/macOS remains
+unqualified; the boundary has no platform branches. Ripwire reports 11 downstream
+symbols for the dispatcher, unchanged signature/no incompatible callers, and a new
+private seam. Static affected selection does not recognize the inline tests, despite
+Cargo executing them. Quality delta has zero gating/preexisting regressions and six
+new non-gating rows (four test entries, their module and module verbosity), no acks.
+The staged static test gate exits 4 with 12 untested/unmodeled impacts (including
+a Markdown heading), zero selected test files; this is not clean static coverage.
+
+Next focused increment: extract/adopt a shared fail-closed execution validator,
+separate from the persistence schema and discovery catalog. Reject unknown operation
+names and policy values, preserve explicit sensitivity and known category behavior,
+and test the actual dispatcher boundary. Keep this remote settings guard under
+regression coverage. No shared policy implementation has been added yet. Standard
+Streamable HTTP, coordinated CLI import, other operation families, stdio MCP and
+packaging remain independent actionable work; unchanged native supervision gates
+must not trigger blocked successors.
+
 Proposed Cargo workspace boundaries:
 
 ```text

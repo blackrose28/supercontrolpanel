@@ -59,6 +59,19 @@ Recommended candidates:
 - `config_sync_push`
 - `config_git_push`
 
+## Local authorization controls
+
+`sync_settings_save_partial` cannot change MCP/CC controls or enrollment state.
+It accepts only the five path/folder fields documented in `MCP_TOOL_SCHEMAS.md`.
+Unknown and disallowed fields (including null) reject the whole patch before any
+save action. This guard applies to the shared desktop MCP dispatcher, including
+HTTP and direct Tauri MCP calls, under either configured sensitive-action policy.
+Desktop-local settings controls retain their full partial-update schema.
+
+The guard prevents self-escalation through this patch tool; it does not make
+arbitrary runtime/configuration tools safe for mutually untrusted callers. General
+shared execution validation that rejects unknown policy values remains pending.
+
 ## Auditability
 
 Log MCP activity with:

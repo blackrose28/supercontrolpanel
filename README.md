@@ -327,8 +327,16 @@ This is still a **repo-local minimal transport**, not a final spec-polished MCP 
 The desktop's existing 40-tool discovery catalog now lives in
 `scp-core::mcp_catalog`, with unchanged names, titles, categories and `readOnly`
 fields. This is discovery metadata only: it does not enable these operations in
-`scpctl` or supply execution authorization. Shared fail-closed policy validation
-and protection against remote policy changes remain planned.
+`scpctl` or supply execution authorization. Shared fail-closed execution policy
+validation remains planned.
+
+`sync_settings_save_partial` accepts a JSON object containing only `repoRoot`,
+`openvpnExecutablePath`, `openvpnOvpnPath`, `boundaryCliPath` and `caddyFolder`.
+MCP/CC authorization, tokens, listener, identity and enrollment controls must be
+changed through desktop settings. Any other field (including unknown fields or
+controls set to null) rejects the whole patch before saving. This applies to HTTP
+and the Tauri MCP command, including with `allow-with-token`; desktop-local partial
+settings updates retain their existing schema and behavior.
 
 Detailed design docs live under `docs/mcp/`:
 
