@@ -1,11 +1,11 @@
 use std::{
     io::Read,
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::{mpsc::Sender, Arc},
     thread,
     time::Duration,
 };
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
@@ -48,8 +48,7 @@ fn emit_pty_output(app: &AppHandle, session_id: &str, data: String) {
         id: session_id.to_string(),
         data,
     };
-    let cc_plane_session_id =
-        pty_telemetry_session_id(&*app.state::<RemotePtyStore>(), session_id);
+    let cc_plane_session_id = pty_telemetry_session_id(&*app.state::<RemotePtyStore>(), session_id);
     forward_log_event(
         app,
         "pty-output",
@@ -107,12 +106,7 @@ fn session_id_run_nonce() -> &'static str {
 }
 
 pub fn remove_session(store: &SessionStore, id: &str) -> Result<Option<Arc<PtySession>>, String> {
-    {
-        let mut watchers = lock_err(&store.watchers)?;
-        watchers.remove(id);
-    }
-    let mut sessions = lock_err(&store.sessions)?;
-    Ok(sessions.remove(id))
+    store.remove(id)
 }
 
 #[cfg_attr(target_os = "windows", allow(dead_code))]
@@ -162,52 +156,12 @@ pub fn open_pty_with_command_builder(
     forced_session_id: Option<&str>,
 ) -> Result<String, String> {
     let _settings_guard = crate::settings_backup::gate::enter()?;
-    let pty_system = native_pty_system();
-    let pair = pty_system
-        .openpty(PtySize {
-            rows,
-            cols,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| format!("failed to open pty: {e}"))?;
-
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("failed to spawn process in pty: {e}"))?;
-    drop(pair.slave);
-
-    let mut reader = pair
-        .master
-        .try_clone_reader()
-        .map_err(|e| format!("failed to clone pty reader: {e}"))?;
-    let writer = pair
-        .master
-        .take_writer()
-        .map_err(|e| format!("failed to get pty writer: {e}"))?;
-
     let session_id = match forced_session_id.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(forced) => {
-            let sessions = lock_err(&store.sessions)?;
-            if sessions.contains_key(forced) {
-                return Err(format!("session id already in use: {forced}"));
-            }
-            drop(sessions);
-            forced.to_string()
-        }
+        Some(forced) => forced.to_string(),
         None => next_session_id(store)?,
     };
-    let session = Arc::new(PtySession {
-        master: Mutex::new(pair.master),
-        writer: Mutex::new(writer),
-        child: Mutex::new(child),
-    });
-
-    {
-        let mut sessions = lock_err(&store.sessions)?;
-        sessions.insert(session_id.clone(), session);
-    }
+    let mut reader =
+        scp_core::sessions::spawn_pty(&*native_pty_system(), store, &session_id, cols, rows, cmd)?;
 
     let output_session_id = session_id.clone();
     let output_app = app.clone();
@@ -300,49 +254,25 @@ pub fn open_pty_with_command_builder(
 }
 
 pub fn write_pty_internal(id: &str, data: &str, store: &SessionStore) -> Result<(), String> {
-    let session = {
-        let sessions = lock_err(&store.sessions)?;
-        sessions
-            .get(id)
-            .cloned()
-            .ok_or_else(|| format!("session not found: {id}"))?
-    };
-
-    let mut writer = lock_err(&session.writer)?;
-    writer
-        .write_all(data.as_bytes())
-        .map_err(|e| format!("failed to write pty input: {e}"))?;
-    writer
-        .flush()
-        .map_err(|e| format!("failed to flush pty input: {e}"))?;
-
-    Ok(())
+    store.write(id, data)
 }
 
 pub fn close_pty_internal(
     id: &str,
     store: &SessionStore,
 ) -> Result<Option<PtyExitPayload>, String> {
-    let session = remove_session(store, id)?;
-    if let Some(session) = session {
-        let mut child = lock_err(&session.child)?;
-        let _ = child.kill();
-        let exit_status = child
-            .wait()
-            .map_err(|e| format!("failed to wait child: {e}"))?;
-        return Ok(Some(PtyExitPayload {
-            id: id.to_string(),
-            exit_code: i32::try_from(exit_status.exit_code()).ok(),
-            reason: "closed_by_command".to_string(),
-        }));
-    }
-    Ok(None)
+    store.close(id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::{next_session_id, pty_telemetry_session_id};
     use crate::stores::{RemotePtyStore, SessionStore};
+
+    #[test]
+    fn desktop_session_store_is_the_core_owner() {
+        let _: scp_core::sessions::SessionStore = SessionStore::default();
+    }
 
     #[test]
     fn pty_telemetry_session_id_falls_back_to_local_when_unbound() {
@@ -368,7 +298,11 @@ mod tests {
         let first = next_session_id(&store).expect("first id");
         let second = next_session_id(&store).expect("second id");
         let parts: Vec<&str> = first.splitn(3, '-').collect();
-        assert_eq!(parts.len(), 3, "expected `pty-{{nonce}}-{{n}}`, got {first}");
+        assert_eq!(
+            parts.len(),
+            3,
+            "expected `pty-{{nonce}}-{{n}}`, got {first}"
+        );
         assert_eq!(parts[0], "pty");
         assert_eq!(parts[1].len(), 8, "nonce should be 8 chars: {first}");
         assert!(parts[1].chars().all(|c| c.is_ascii_alphanumeric()));

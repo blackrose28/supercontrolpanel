@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions; PTY/runtime ownership and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close; host runtime supervision and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -28,7 +28,7 @@ The initial feasibility findings came from source inspection and protocol docume
 - `src-tauri/src/mcp/server.rs`: hand-written TCP/HTTP server, bearer token, localhost restriction, custom REST routes.
 - `src-tauri/src/mcp/tools.rs` and `resources.rs`: substantial existing operation coverage, but descriptors/results and dispatch depend on Tauri and custom envelopes.
 - `src-tauri/src/bin/supercontrolpanelhelper.rs`: existing CLI is an HTTP client requiring the desktop app.
-- `scp-core` now shares server inventory, CLI profile ownership/identity, profile-bound credential/cache adapters, function status state/transitions, and PTY event payload types. `src-tauri/src/main.rs`, `services/pty_service.rs`, and `services/boundary_service.rs` still host PTY sessions/child processes, event transport/telemetry, and automated OIDC through Tauri.
+- `scp-core` now shares server inventory, CLI profile ownership/identity, profile-bound credential/cache adapters, function status state/transitions, PTY event payload types, and session handles/launch/I/O/close. `src-tauri/src/main.rs`, `services/pty_service.rs`, and `services/boundary_service.rs` still host runtime monitoring/IDs, event transport/telemetry, and automated OIDC through Tauri.
 
 If adopted, this proposal replaces the helper-only direction in `MCP_HELPER_CLI_SPEC.md` and `MCP_TRANSPORT_AND_AUTH.md` for the new CLI. Those documents still describe the existing desktop-client helper. Keep that helper functional during migration; desktop control remains useful even after a standalone runtime exists.
 
@@ -197,11 +197,62 @@ a broad pre-existing desktop caller surface (113 symbols) that its graph does no
 covered, despite the executed core/desktop tests. This is not a clean coverage gate;
 native UI/PTY/CC interaction smoke tests and Windows/macOS qualification remain open.
 
-This is a status/event boundary, not the standalone process runtime. `SessionStore`,
-PTY spawning/monitoring, child supervision, cancellation/shutdown, host runtime IDs,
-and CLI runtime commands remain unimplemented in core. No GUI/keyring/native dependency
-was added by this slice. Next extract the session ownership/lifecycle boundary and one
-operation family with foreground cleanup before exposing runtime commands or stdio MCP.
+This increment established a status/event boundary, not a standalone process runtime.
+The next increment below adds session handles/launch/I/O/close. Monitoring, child
+supervision, cancellation/shutdown, host runtime IDs, and CLI runtime commands remain
+open. No GUI/keyring/native dependency was added by the status-store slice.
+
+### PTY session ownership and launch cleanup (2026-11-11)
+
+`scp-core::sessions` now owns the desktop-compatible `SessionStore` and `PtySession`,
+with injectable `portable_pty::PtySystem` launch, input/flush, removal, and close.
+Desktop re-exports the same types and delegates these operations; its settings gate,
+ID generation, watcher delivery, reader/monitor threads, Tauri events, SCP completion,
+function-exit callbacks, and CC telemetry/session mapping remain host adapters. Public
+store/handle mutexes remain temporarily available for existing desktop consumers; this
+is not yet an encapsulated CLI runtime API.
+
+Launch prepares the reader and writer before starting a child and checks duplicate IDs
+before platform work. Registration rechecks atomically without replacing an existing
+session. If registration loses a race or its mutex is poisoned, the unregistered owner
+attempts to kill and reap its child outside the registry lock. Last `PtySession` owner
+drop also attempts cleanup, recovering a poisoned child mutex; retained `Arc`s retain
+ownership. Explicit close keeps `closed_by_command`, exit-code conversion, missing-session
+idempotency, watcher removal, and existing I/O error strings. No command/event schema changed.
+
+A full workspace run exposed transient profile-lock retention when another test forks
+while a profile descriptor is open. A deterministic duplicated-descriptor regression
+failed before the fix. An internal lock guard now explicitly unlocks before closing,
+including metadata-initialization errors, so fork/exec inheritance cannot extend guard
+ownership. The persistent lock file is still never unlinked.
+
+TDD evidence: the initial six core session tests failed with the absent-module RED; the desktop
+migration test then failed on the old/new store type mismatch before re-export/delegation.
+The expanded eight-test suite covers open/reader/writer/spawn failures, early duplicate rejection, concurrent
+registration with loser cleanup, poisoned publication/child mutexes, host/platform work
+outside the registry mutex, write/flush/wait errors, watcher removal, repeated close,
+final-owner cleanup, and a real Linux PTY input/output/close round trip. The profile-lock
+regression separately demonstrated RED/GREEN. Linux validation passed all 43 workspace
+all-feature tests plus the compile-fail doctest (one ignored fixture is exercised by
+its subprocess test), all 103 desktop tests (17 existing warnings), strict workspace
+all-feature/all-target Clippy, formatting, and a locked standalone release build.
+
+Ripwire quality delta has zero unacknowledged gating regressions after one narrowly
+recorded acknowledgment: the unchanged relocated default constructor resembles unrelated
+desktop-store initialization. New tests and trait-dispatched helpers may appear as dead
+code. The static test gate still exits 4 with 135 unmapped impacted symbols, largely
+pre-existing desktop callers; do not treat it as a clean coverage gate. Cargo execution is the validation evidence.
+
+Cleanup here covers the portable-pty child only and may block in native kill/wait.
+It does not prove descendant-tree cleanup, elevated Windows helper supervision, bounded
+cancellation/shutdown, signal handling, or foreground CLI ownership. No Windows/macOS
+native PTY/keyring/elevation qualification was performed. The core adds the desktop's
+existing portable-pty dependency, with no Tauri/HTTP/frontend dependency. CLI commands
+remain inventory/profile preview only; no status/runtime or stdio MCP command is exposed.
+Next extract host runtime context/IDs and identity-safe monitoring/shutdown, then one
+operation family with foreground supervision and platform cleanup gates before exposing
+standalone runtime commands. Settings commands/import, full config extraction, standard
+Streamable HTTP, stdio MCP, and packaging remain pending.
 
 Proposed Cargo workspace boundaries:
 

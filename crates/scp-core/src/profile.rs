@@ -21,8 +21,18 @@ struct ProfileIdentity {
 /// The persistent lock file must never be deleted: ownership is the OS file lock,
 /// not the presence of the file. Closing the guard (including process exit) releases it.
 pub struct ProfileOwner {
-    _lock: File,
+    _lock: OwnerLock,
     identity: ProfileIdentity,
+}
+
+// Explicit unlock prevents a descriptor inherited by concurrent fork/exec from
+// extending ownership after this guard is dropped, including initialization errors.
+struct OwnerLock(File);
+
+impl Drop for OwnerLock {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
 }
 
 impl ProfileOwner {
@@ -55,6 +65,7 @@ impl ProfileOwner {
                 "CLI profile is already owned by another process; stop that owner or select another --config-dir".into()),
             Err(e) => return Err(format!("lock CLI profile: {e}")),
         }
+        let lock = OwnerLock(lock);
         let identity = load_or_create_identity(config_dir)?;
         Ok(Self {
             _lock: lock,
@@ -106,5 +117,26 @@ fn load_or_create_identity(config_dir: &Path) -> Result<ProfileIdentity, String>
             Ok(identity)
         }
         Err(e) => Err(format!("read CLI profile metadata: {e}")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ProfileOwner;
+
+    #[test]
+    fn dropping_owner_unlocks_even_while_a_duplicate_file_description_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let owner = ProfileOwner::acquire(temp.path()).unwrap();
+        // Models the descriptor briefly inherited by a concurrent fork before exec.
+        let inherited = owner._lock.0.try_clone().unwrap();
+        assert!(ProfileOwner::acquire(temp.path()).is_err());
+        drop(owner);
+        let replacement =
+            ProfileOwner::acquire(temp.path()).expect("owner explicitly releases lock");
+        drop(inherited);
+        assert!(ProfileOwner::acquire(temp.path()).is_err());
+        drop(replacement);
+        assert!(ProfileOwner::acquire(temp.path()).is_ok());
     }
 }

@@ -166,7 +166,8 @@ to clear ownership. OS locks release on process exit, including forced terminati
 Future runtime and config writers must retain the core ownership guard for their full
 lifetime. Inventory listing stays read-only and can run while a profile is owned.
 This lock coordinates this CLI profile only; it does not isolate host VPN routes or
-external Boundary state. Runtime/child cleanup remains planned.
+external Boundary state. Guard drop explicitly unlocks even if a concurrent subprocess
+briefly inherits the open file descriptor. CLI runtime shutdown remains planned.
 
 The core now provides a profile-bound credential store and a cache keyed by namespace
 and account. Its optional `os-keyring` feature uses the same persistent native stores as
@@ -188,8 +189,14 @@ Desktop and core now share the function-status store, PTY event payload types, a
 session-exit status transitions. Host event delivery and Boundary token lookup run
 outside the status mutex; late exits recheck the session before changing a replacement
 login's status. Long Boundary exit reasons are truncated safely for Unicode text.
-PTY spawning, process cleanup, and a CLI-owned runtime remain the next extraction work;
-the preview still provides inventory and profile initialization only.
+Desktop and core also share PTY session handles, launch registration, input, and close.
+Reader/writer setup completes before spawning a child; duplicate IDs are rejected without
+replacing an existing session, and a child that loses concurrent registration is killed
+and reaped. Closing a session or dropping its final owner attempts direct-child cleanup.
+Desktop retains output/exit monitoring, events, telemetry, and session-ID generation.
+This is not full process-tree or elevated-helper supervision: cancellation, bounded
+shutdown, runtime context, and a CLI-owned operation family remain pending. The CLI
+preview still provides inventory and profile initialization only.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.
