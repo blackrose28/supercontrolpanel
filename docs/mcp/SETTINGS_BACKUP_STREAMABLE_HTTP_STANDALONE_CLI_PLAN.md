@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config schema/read-only file projection, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config schema/read-only file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -771,15 +771,58 @@ are the five executed new tests. No quality acknowledgments were added. Native
 Windows/macOS execution remains unqualified; their existing schema/cfg code is
 preserved exactly.
 
-Next focused slice: expose an explicitly scoped `scpctl config show` command over
-this projection with JSON/human output, missing-file policy, safe diagnostics and
-subprocess tests (including read-only behavior while another process owns the
-profile). Document its free-text sensitivity and single-file semantics. It must
-not read `sync-local.json`, activate MCP/CC, or initialize credentials. Device-local
-settings/policy extraction and coordinated import require separate contracts.
-Standard desktop Streamable HTTP, stdio MCP, other operation families and independent
-packaging remain actionable; native supervision and actual Caddy/keyring/elevation
-qualification stay gated rather than blocking those increments.
+### Read-only CLI shared configuration command (2026-11-11)
+
+`scpctl config show [--json] [--config-dir DIR]` now calls `read_shared_config`
+directly. The global profile-selection/default isolated root behavior is unchanged.
+JSON success emits the disk-projection object, or `null` for a missing file/directory;
+human output labels pretty-printed JSON or reports absence. Missing input succeeds
+without creating a profile or synthesizing defaults. Existing optional fields use
+the desktop schema defaults. Errors produce stderr only and exit 1; usage errors
+exit 2. Parse errors retain sanitized context/line/column diagnostics.
+
+The command does not acquire an owner lock, initialize metadata, read local settings
+or credentials, migrate/write, connect to desktop/CC, or activate MCP/services.
+A concurrent profile owner does not block it. Known credential/device-path fields
+are excluded and the legacy OpenVPN command is cleared. Free-text settings remain
+potentially sensitive; help, human output and README say so. Human output uses JSON
+escaping for control characters. Single-file synchronous/unbounded I/O, ordinary
+symlinks/concurrent-writer semantics and ignored unknown fields are unchanged. This
+is not settings export/import, a consistent snapshot, or a generally safe MCP resource.
+
+Strict RED: five actual CLI subprocess tests all failed with unknown `config`
+subcommand/exit 2 before implementation. GREEN: all five pass for exact projection
+and defaults, legacy secret/path exclusion, unchanged files, malformed local/profile
+files ignored, JSON/human missing-file behavior without initialization, value-bearing
+schema/JSON errors without echoes, I/O errors, usage/help, global flags and isolated
+default root, control-character escaping, free-text preservation and a live profile
+lock held by the test process while the CLI subprocess reads. No native keyring,
+installed Caddy, user configuration or listener is used.
+
+Validation: `cargo test --locked --workspace --all-features` passes 82 tests plus
+the credential compile-fail doctest; seven ignored fixture entries are exercised
+through subprocesses. Strict all-feature/all-target workspace Clippy, workspace fmt,
+diff whitespace checks and a locked standalone release build pass. Only CLI code
+changed; core and desktop production sources/dependencies remain untouched. Ripwire
+confirms `run` has its unchanged signature and one CLI-entry-point caller; its
+subprocess coverage is not modeled, so executed CLI tests supply that evidence.
+Quality delta has gating 0, two minor ambient-churn rows for the dispatcher/command
+enum, five new-test reachability rows and one new-test verbosity row. The integration
+test retains its full legacy fixture, exact output and file-preservation assertions;
+no quality acknowledgments were added. Native Windows/macOS execution remains
+unqualified; this command has no platform-specific production branches.
+
+Next focused slice: characterize and extract the non-platform device-local settings
+schema into core, preserving the desktop import path and exact defaults/serialization.
+Inspect `SyncSettings`, `SyncSettingsPatch` and their default helpers in
+`src-tauri/src/services/config_service.rs` first. Preserve exact token-generation
+and missing-field/default semantics; keep loaders, initialization, migration,
+keyring and writers host-local. Do not expose local tokens/identity or enable new CLI/MCP settings commands
+as part of schema extraction. Shared policy parsing/validation and coordinated import
+require their own contracts. Standard desktop Streamable HTTP, stdio MCP, other
+operation families and independent packaging remain actionable; native supervision
+and actual Caddy/keyring/elevation qualification stay gated rather than blocking
+independent increments.
 
 Proposed Cargo workspace boundaries:
 

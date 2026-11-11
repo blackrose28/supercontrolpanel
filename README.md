@@ -118,13 +118,14 @@ npm run helper:run -- openvpn status
 ## Standalone CLI preview
 
 The separate `scpctl` binary runs with the desktop closed and HTTP disabled. This preview
-supports read-only server inventory, local profile initialization, and a Linux-only Caddy
-foreground command. Other runtime commands and stdio MCP are still planned. The helper above continues to control desktop-owned sessions.
+supports read-only server inventory and shared configuration, local profile initialization,
+and a Linux-only Caddy foreground command. Other runtime commands and stdio MCP are still planned. The helper above continues to control desktop-owned sessions.
 
 ```bash
 cargo run -p scp-cli -- server list
 cargo run -p scp-cli -- --config-dir /path/to/cli-profile server list --json
 cargo run -p scp-cli -- --config-dir /path/to/cli-profile profile init --json
+cargo run -p scp-cli -- config show --json --config-dir /path/to/cli-profile
 # Linux preview; requires Caddy on PATH and a new output filename:
 cargo run -p scp-cli -- caddy run --foreground --folder /path/to/caddy --output /path/to/new-caddy.log --json
 cargo build --locked --release -p scp-cli
@@ -264,13 +265,24 @@ still alive. Direct-child reaping and profile release therefore do not prove pro
 cleanup. The test explicitly releases and reaps the descendant. Actual Caddy behavior
 remains unqualified; test watchdogs do not establish a production shutdown bound.
 
-Core now also shares the desktop config schema and provides a read-only
-`read_shared_config` API for a selected directory's `config.json`. It returns the
-existing disk projection, without profile initialization, keyring/local-settings
-reads, migrations or writes. Known credential/device-path fields are excluded;
-free-text settings may still be sensitive. This is one file's projection, not a
-lossless settings backup or an import validator. No CLI config command is exposed
-in this increment. Desktop loading and saving keep their existing behavior.
+`scpctl config show [--json] [--config-dir DIR]` reads only the selected CLI
+profile's `config.json` using core's shared disk projection. JSON output is the
+projected object, or `null` when the file or directory is missing; human output
+is a labeled, pretty-printed projection or an explicit absence message. Missing
+files succeed without synthesizing defaults or creating directories. Defaults
+for omitted optional fields in an existing file follow the desktop schema.
+Malformed/schema-invalid or unreadable files return exit 1 with stderr diagnostics
+and no stdout; invalid arguments return 2. Parse errors do not echo file values.
+
+This read does not initialize or lock a profile, read `sync-local.json` or the
+keyring, migrate, write, or start MCP/CC/services. It can run while another process
+owns the profile. Known credential/device-path fields are excluded and the legacy
+OpenVPN command is cleared. **Free-text arguments, names and URLs may still contain
+sensitive values** and are preserved; review output before sharing. Human output
+escapes control characters using JSON encoding. Unknown fields are ignored. This
+is a synchronous, unbounded single-file read with ordinary symlink/concurrent-writer
+semantics, not a lossless settings backup, coordinated snapshot, import validator,
+or unrestricted MCP resource. Desktop loading and saving keep their behavior.
 
 The proposed Linux containment upgrade cannot be qualified on this devbox: creating
 a dedicated cgroup fails with permission denied. The

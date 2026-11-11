@@ -345,3 +345,244 @@ fn unqualified_caddy_platform_fails_before_creating_profile_or_log() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("Linux preview"));
     assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
 }
+
+#[test]
+fn config_show_projects_legacy_fields_without_touching_other_settings() {
+    let temp = tempfile::tempdir().unwrap();
+    let raw = json!({
+        "app": {"defaultTerminalCols": 91, "defaultTerminalRows": 27},
+        "openvpn": {
+            "password": "vpn-secret", "otpSecret": "vpn-otp", "command": "legacy-command",
+            "executablePath": "local-vpn", "ovpnPath": "local-ovpn", "username": "alice",
+            "extraArgs": "sensitive-free-text\n\u{1b}[31m"
+        },
+        "boundary": {
+            "cliPath": "local-boundary", "password": "boundary-secret",
+            "oidcPassword": "oidc-secret", "oidcOtpSecret": "oidc-otp",
+            "addr": "https://controller.test", "authKind": "password"
+        }
+    })
+    .to_string();
+    let path = temp.path().join("config.json");
+    fs::write(&path, &raw).unwrap();
+    fs::write(
+        temp.path().join("sync-local.json"),
+        "invalid private local settings",
+    )
+    .unwrap();
+    fs::write(temp.path().join("profile.json"), "invalid identity").unwrap();
+    let output = cli(&[
+        "config",
+        "show",
+        "--json",
+        "--config-dir",
+        temp.path().to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    let projected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(projected["app"]["defaultTerminalCols"], 91);
+    assert_eq!(
+        projected["openvpn"],
+        json!({
+            "command": "", "extraArgs": "sensitive-free-text\n\u{1b}[31m", "username": "alice",
+            "terminateOpenVpnWhenHelperExits": false, "autoReconnectEnabled": false,
+            "autoReconnectBaseSeconds": 5, "autoReconnectMaxSeconds": 3600
+        })
+    );
+    assert_eq!(
+        projected["boundary"],
+        json!({
+            "addr": "https://controller.test", "authMethodId": "", "loginName": "",
+            "authKind": "password", "oidcLoginMode": "browser", "oidcUsername": "",
+            "connectSshOptions": ""
+        })
+    );
+    let human = cli(&[
+        "--config-dir",
+        temp.path().to_str().unwrap(),
+        "config",
+        "show",
+    ]);
+    assert!(human.status.success(), "{human:?}");
+    assert!(human.stderr.is_empty());
+    let text = String::from_utf8(human.stdout).unwrap();
+    assert!(text
+        .starts_with("Shared configuration (config.json; free-text values may be sensitive):\n"));
+    assert!(!text.contains('\u{1b}'));
+    let (_, body) = text.split_once('\n').unwrap();
+    assert_eq!(serde_json::from_str::<Value>(body).unwrap(), projected);
+    for excluded in [
+        "vpn-secret",
+        "vpn-otp",
+        "legacy-command",
+        "local-vpn",
+        "local-ovpn",
+        "local-boundary",
+        "boundary-secret",
+        "oidc-secret",
+        "oidc-otp",
+        "invalid private",
+        "invalid identity",
+    ] {
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(excluded));
+        assert!(!text.contains(excluded));
+    }
+    assert_eq!(fs::read_to_string(&path).unwrap(), raw);
+    assert_eq!(
+        fs::read_to_string(temp.path().join("sync-local.json")).unwrap(),
+        "invalid private local settings"
+    );
+    assert_eq!(
+        fs::read_to_string(temp.path().join("profile.json")).unwrap(),
+        "invalid identity"
+    );
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 3);
+}
+
+#[test]
+fn config_show_missing_file_returns_null_without_initializing_or_synthesizing_defaults() {
+    let temp = tempfile::tempdir().unwrap();
+    let missing = temp.path().join("missing");
+    for root in [&missing, temp.path()] {
+        let output = cli(&[
+            "--json",
+            "--config-dir",
+            root.to_str().unwrap(),
+            "config",
+            "show",
+        ]);
+        assert!(output.status.success(), "{output:?}");
+        assert!(output.stderr.is_empty());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+            Value::Null
+        );
+        let human = cli(&["config", "show", "--config-dir", root.to_str().unwrap()]);
+        assert!(human.status.success(), "{human:?}");
+        assert_eq!(
+            human.stdout,
+            b"No shared configuration (config.json) in this CLI profile.\n"
+        );
+        assert!(human.stderr.is_empty());
+    }
+    assert!(!missing.exists());
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn config_show_errors_are_sanitized_and_usage_is_distinct() {
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("config.json");
+    for raw in [
+        r#"{"app":"private-config-value"}"#,
+        r#"{"app":{"defaultTerminalCols":80,"defaultTerminalRows":24},"boundary":{"authKind":"private-config-value"}}"#,
+        r#"{"private-config-value":"#,
+    ] {
+        fs::write(&path, raw).unwrap();
+        for flags in [vec!["--json"], vec![]] {
+            let mut args = vec![
+                "config",
+                "show",
+                "--config-dir",
+                temp.path().to_str().unwrap(),
+            ];
+            args.extend(flags);
+            let output = cli(&args);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(output.stdout.is_empty());
+            let error = String::from_utf8_lossy(&output.stderr);
+            assert!(error.contains("parse config"), "{error}");
+            assert!(!error.contains("private-config-value"), "{error}");
+        }
+        assert_eq!(fs::read_to_string(&path).unwrap(), raw);
+    }
+    fs::remove_file(&path).unwrap();
+    fs::create_dir(&path).unwrap();
+    let output = cli(&[
+        "config",
+        "show",
+        "--json",
+        "--config-dir",
+        temp.path().to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("read config"));
+    for args in [
+        vec!["config"],
+        vec!["config", "export"],
+        vec!["config", "show", "--unknown"],
+    ] {
+        let output = cli(&args);
+        assert_eq!(output.status.code(), Some(2));
+        assert!(output.stdout.is_empty());
+        assert!(!output.stderr.is_empty());
+    }
+    let help = cli(&["config", "show", "--help"]);
+    assert!(help.status.success());
+    assert!(String::from_utf8_lossy(&help.stdout).contains("sensitive"));
+}
+
+#[test]
+fn config_show_reads_while_another_process_owns_profile() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = scp_core::profile::ProfileOwner::acquire(temp.path()).unwrap();
+    let before = fs::read(temp.path().join("profile.json")).unwrap();
+    fs::write(
+        temp.path().join("config.json"),
+        r#"{"app":{"defaultTerminalCols":100,"defaultTerminalRows":40}}"#,
+    )
+    .unwrap();
+    let output = cli(&[
+        "config",
+        "show",
+        "--json",
+        "--config-dir",
+        temp.path().to_str().unwrap(),
+    ]);
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["app"]["defaultTerminalCols"],
+        100
+    );
+    assert_eq!(fs::read(temp.path().join("profile.json")).unwrap(), before);
+    assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 3);
+    assert!(scp_core::profile::ProfileOwner::acquire(temp.path()).is_err());
+    drop(owner);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn config_show_default_profile_uses_isolated_cli_directory() {
+    let temp = tempfile::tempdir().unwrap();
+    let config_root = temp.path().join("config");
+    for (directory, cols) in [("supercontrolpanel-cli", 123), ("supercontrolpanel", 99)] {
+        let profile = config_root.join(directory);
+        fs::create_dir_all(&profile).unwrap();
+        fs::write(
+            profile.join("config.json"),
+            json!({"app":{"defaultTerminalCols":cols,"defaultTerminalRows":24}}).to_string(),
+        )
+        .unwrap();
+    }
+    let output = Command::new(env!("CARGO_BIN_EXE_scpctl"))
+        .env("HOME", temp.path())
+        .env("XDG_CONFIG_HOME", &config_root)
+        .args(["config", "show", "--json"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()["app"]["defaultTerminalCols"],
+        123
+    );
+    assert_eq!(
+        fs::read_dir(config_root.join("supercontrolpanel-cli"))
+            .unwrap()
+            .count(),
+        1
+    );
+}

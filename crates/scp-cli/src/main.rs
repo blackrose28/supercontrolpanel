@@ -27,6 +27,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Inspect shared configuration in the selected CLI profile
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommand,
+    },
     /// Run Caddy in the foreground (Linux preview; direct-child cleanup only)
     Caddy {
         #[command(subcommand)]
@@ -67,6 +72,15 @@ enum ProfileCommand {
 }
 
 #[derive(Subcommand)]
+enum ConfigCommand {
+    /// Show config.json's disk projection; free-text values may be sensitive
+    #[command(
+        long_about = "Show only config.json's shared disk projection. Known credential/device-path fields are excluded; free-text values may still be sensitive. Missing files produce JSON null or a human absence message. Does not initialize a profile, read local settings/keyring, migrate, write, or start services. This is not a settings backup or import validator."
+    )]
+    Show,
+}
+
+#[derive(Subcommand)]
 enum ServerCommand {
     /// List configured servers without connecting to them
     List,
@@ -88,6 +102,9 @@ fn run(cli: Cli) -> Result<(), String> {
         .or_else(|| dirs::config_dir().map(|root| root.join("supercontrolpanel-cli")))
         .ok_or("cannot locate the OS config directory; pass --config-dir")?;
     match cli.command {
+        Command::Config {
+            command: ConfigCommand::Show,
+        } => show_config(&config_dir, cli.json),
         Command::Caddy {
             command: CaddyCommand::Run { folder, output, .. },
         } => caddy_host::run(&config_dir, &folder, &output, cli.json),
@@ -120,6 +137,20 @@ fn run(cli: Cli) -> Result<(), String> {
                 .map_err(|error| format!("write output: {error}"))
         }
     }
+}
+
+fn show_config(config_dir: &std::path::Path, json: bool) -> Result<(), String> {
+    let config = scp_core::config::read_shared_config(config_dir)?;
+    let encoded =
+        serde_json::to_string_pretty(&config).map_err(|error| format!("encode config: {error}"))?;
+    let output = if json {
+        encoded
+    } else if config.is_none() {
+        "No shared configuration (config.json) in this CLI profile.".to_string()
+    } else {
+        format!("Shared configuration (config.json; free-text values may be sensitive):\n{encoded}")
+    };
+    writeln!(io::stdout().lock(), "{output}").map_err(|error| format!("write output: {error}"))
 }
 
 fn initialize_profile(config_dir: &std::path::Path, json: bool) -> Result<(), String> {
