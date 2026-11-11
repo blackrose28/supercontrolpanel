@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config schema/read-only file projection, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -713,12 +713,73 @@ Linux operation supervisor with these reviewable requirements:
    Windows/macOS stay gated until their own containment/ownership implementations
    pass equivalent native tests; native keyring/elevation remain unexposed meanwhile.
 
-Next focused slice: inspect/spike the containment and helper/output boundary above
-and record its exact failure/ownership contract before implementation. If this devbox
-cannot qualify the native capability, proceed with an independent plan item (for
-example read-only settings extraction) and retain the explicit supervision gate.
-Actual Linux Caddy, native Windows/macOS, desktop Streamable HTTP, stdio MCP, settings
-commands, other operation families and independent packaging remain open.
+The next slice checked the candidate on this devbox: cgroup v2 is mounted, but
+uid 1002 has no writable scope control files and creating a dedicated child cgroup
+fails with EACCES (13). Nothing was migrated or signalled; no privileges were sought.
+The exact evidence and proposed helper/guardian, bounded control/log policy,
+acknowledgments, escalation deadlines, failure precedence and crash/recovery gates
+are recorded in [Linux operation supervision](LINUX_OPERATION_SUPERVISION.md).
+That design is unimplemented. In particular, guardian death releases an ordinary
+profile lock; safe crash retention needs an external owner or a recovery interlock
+in every acquisition path. Do not retry unchanged native gates or claim bounded
+release. Windows/macOS foreground hosts remain explicitly unsupported.
+
+### Shared configuration schema and read-only projection (2026-11-11)
+
+With native containment unavailable here, this increment advances independent
+settings extraction. `scp-core::config` now owns the existing `AppConfig`, runtime
+and disk-projection types, auth enums, defaults and `AppConfigForDisk::from`.
+The desktop model module re-exports them at its original import path. Their bodies
+are unchanged; Windows helper launch/status structs remain desktop-local. Desktop
+loading/migration, keyring access, backup, writers and command/event contracts retain
+their behavior. Core/CLI gain no Tauri/HTTP/build dependencies.
+
+`read_shared_config(explicit_directory)` reads only `config.json`, returning
+`Option<AppConfigForDisk>`. Missing files return `None`, not synthesized defaults.
+It neither creates/acquires a profile nor reads local settings/keyring, migrates,
+writes, starts services or acquires an owner lock. Legacy credential/device-path
+fields and the legacy OpenVPN command are discarded using the existing disk
+projection. Runtime models themselves remain secret-bearing. Free-text arguments,
+names and URLs are not content-redacted, so this API is not an unrestricted MCP
+resource or a guarantee that output is safe to publish. It ignores unknown fields
+and provides one file's projection, not a lossless backup or consistent multi-file
+snapshot. File I/O is synchronous/unbounded; symlinks and concurrent-writer behavior
+are unchanged from ordinary file reads. Do not use this API as a restore validator.
+
+A private JSON reader shares missing/read/parse handling with server inventory;
+existing inventory diagnostic wording and behavior are preserved. Parse errors use
+only context and line/column, never Serde value-bearing details.
+
+TDD: the new core contract target first failed to compile because `scp_core::config`
+did not exist. Five tests then passed for exact desktop disk shape/defaults/legacy
+alias, absent profile/file, legacy secret/path exclusion without rewriting files or
+touching an owner sentinel, malformed schema/JSON and I/O failures without value
+echoes, and preservation of arbitrary free-text settings. Refactoring consolidates
+actual duplicate read/error handling; the existing inventory/CLI tests cover that
+shared path. No installed Caddy, keyring, listener or user settings are used.
+
+Validation after refactoring: `cargo test --locked --workspace --all-features`
+passes 77 tests plus the credential compile-fail doctest (seven subprocess fixtures
+are ignored for direct harness execution). The desktop `cargo test --locked` suite
+passes 103 tests with its 17 existing warnings. Strict workspace all-feature/all-target
+Clippy, workspace formatting, the changed desktop file's formatting, and diff checks
+pass. A desktop-wide formatting check still reports existing issues in unrelated
+files; they are untouched. Ripwire selects the core config/inventory tests, confirms
+the inventory signature unchanged and the moved conversion/new reader at their new
+locations, and reports quality-delta gating 0. Its five non-gating reachability rows
+are the five executed new tests. No quality acknowledgments were added. Native
+Windows/macOS execution remains unqualified; their existing schema/cfg code is
+preserved exactly.
+
+Next focused slice: expose an explicitly scoped `scpctl config show` command over
+this projection with JSON/human output, missing-file policy, safe diagnostics and
+subprocess tests (including read-only behavior while another process owns the
+profile). Document its free-text sensitivity and single-file semantics. It must
+not read `sync-local.json`, activate MCP/CC, or initialize credentials. Device-local
+settings/policy extraction and coordinated import require separate contracts.
+Standard desktop Streamable HTTP, stdio MCP, other operation families and independent
+packaging remain actionable; native supervision and actual Caddy/keyring/elevation
+qualification stay gated rather than blocking those increments.
 
 Proposed Cargo workspace boundaries:
 

@@ -1,6 +1,8 @@
 //! Host-independent SuperControlPanel operations.
 
 pub mod caddy;
+pub mod config;
+mod config_file;
 pub mod credentials;
 pub mod host;
 pub mod profile;

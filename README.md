@@ -264,6 +264,20 @@ still alive. Direct-child reaping and profile release therefore do not prove pro
 cleanup. The test explicitly releases and reaps the descendant. Actual Caddy behavior
 remains unqualified; test watchdogs do not establish a production shutdown bound.
 
+Core now also shares the desktop config schema and provides a read-only
+`read_shared_config` API for a selected directory's `config.json`. It returns the
+existing disk projection, without profile initialization, keyring/local-settings
+reads, migrations or writes. Known credential/device-path fields are excluded;
+free-text settings may still be sensitive. This is one file's projection, not a
+lossless settings backup or an import validator. No CLI config command is exposed
+in this increment. Desktop loading and saving keep their existing behavior.
+
+The proposed Linux containment upgrade cannot be qualified on this devbox: creating
+a dedicated cgroup fails with permission denied. The
+[supervision design and release gates](docs/mcp/LINUX_OPERATION_SUPERVISION.md)
+record the evidence and remaining ownership/crash requirements. The current Caddy
+preview's cleanup guarantees are unchanged.
+
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.
 

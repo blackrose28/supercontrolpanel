@@ -1,7 +1,7 @@
 //! Server inventory schema shared with the desktop; reads never create or migrate files.
 
 use serde::{Deserialize, Serialize};
-use std::{fs, io::ErrorKind, path::Path};
+use std::path::Path;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -53,18 +53,7 @@ struct ServersFile {
 
 /// Read only the selected profile's inventory, without keyring or host initialization.
 pub fn read_servers(config_dir: &Path) -> Result<Vec<Server>, String> {
-    let raw = match fs::read_to_string(config_dir.join("servers.json")) {
-        Ok(raw) => raw,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(format!("read servers: {error}")),
-    };
-    let file: ServersFile = serde_json::from_str(&raw).map_err(|error| {
-        // Serde's detail can include field values. Keep diagnostics free of file contents.
-        format!(
-            "parse servers: invalid inventory at line {}, column {}",
-            error.line(),
-            error.column()
-        )
-    })?;
-    Ok(file.servers)
+    let file: Option<ServersFile> =
+        crate::config_file::read_json(&config_dir.join("servers.json"), "servers", "inventory")?;
+    Ok(file.unwrap_or_default().servers)
 }
