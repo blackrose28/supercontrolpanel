@@ -1,0 +1,14 @@
+[package]
+name = "scp-cli"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "scpctl"
+path = "src/main.rs"
+
+[dependencies]
+scp-core = { path = "../scp-core" }
+scp-mcp = { path = "../scp-mcp" }
+serde_json = "1"

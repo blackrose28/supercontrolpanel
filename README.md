@@ -115,6 +115,19 @@ npm run helper:run -- status
 npm run helper:run -- openvpn status
 ```
 
+## Standalone CLI discovery preview
+
+The independent Rust workspace starts the standalone CLI work. It currently supports metadata discovery only:
+
+```sh
+cargo run --locked -p scp-cli -- schema --json
+cargo build --locked --release -p scp-cli
+```
+
+`target/release/scpctl` supports `--help` and `--version`. Discovery emits one versioned JSON envelope without opening a profile, reading credentials, contacting the desktop or starting HTTP. All 45 catalog operations and six resources are marked unavailable until their runtime families pass extraction gates. Profile-backed commands and stdio serving are not implemented yet. The existing helper remains the client for desktop-owned sessions.
+
+The shared `scp-mcp` package supplies the desktop's unchanged operation registry, schemas, policy and safe DTOs; `scp-core` starts the host-independent shell result contract. The desktop retains its existing package/build paths. See the [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md) and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run independent tests with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`; desktop tests still use `cargo test --manifest-path src-tauri/Cargo.toml`.
+
 ## MCP support
 
 SuperControlPanel exposes **localhost Streamable HTTP MCP at `/mcp`** for the existing operation catalog, alongside the existing REST helper routes.

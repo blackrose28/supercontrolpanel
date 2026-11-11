@@ -1,6 +1,6 @@
 # Standalone CLI and stdio MCP plan
 
-Status: Proposed; documentation only. Runtime extraction, standalone commands, stdio hosting, and headless/platform qualification remain unimplemented.
+Status: Slice 0 in progress. Independent core/MCP/CLI packages, shared registry extraction and profile-free `scpctl schema --json` discovery are implemented. Profile-backed commands, runtime extraction, stdio hosting and platform qualification remain unimplemented. See the [operation ledger](STANDALONE_CLI_OPERATION_LEDGER.md) and [first increment evidence](STANDALONE_CLI_SLICE0.md).
 Extracted on 2026-11-11 from Work 3 in [the combined roadmap](SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md).
 Refined against repository baseline `1fa4669` on 2026-11-11; recheck the source before each implementation slice.
 

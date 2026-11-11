@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 Slices 1–6 are implemented; release qualification limits are recorded in its dedicated plan. Work 3 remains proposed in its dedicated plan.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 Slices 1–6 are implemented; release qualification limits are recorded in its dedicated plan. Work 3 Slice 0 is in progress (shared registry and independent CLI discovery); runtime and stdio gates remain open in its dedicated plan.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
