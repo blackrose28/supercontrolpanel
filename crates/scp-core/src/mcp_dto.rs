@@ -154,6 +154,48 @@ impl<'a> McpRemoteBrowserCloseArgs<'a> {
 #[derive(Serialize)]
 pub struct McpRemoteBrowserCloseResult {}
 
+/// Required browser and path strings for `remote_browser_create_directory`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRemoteBrowserCreateDirectoryArgs<'a> {
+    pub browser_id: &'a str,
+    pub path: &'a str,
+}
+
+impl<'a> McpRemoteBrowserCreateDirectoryArgs<'a> {
+    /// Preserve browser-before-path errors; hosts retain path validation and SFTP.
+    pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
+        Ok(Self {
+            browser_id: required_string_arg(args, "browserId")?,
+            path: required_string_arg(args, "path")?,
+        })
+    }
+}
+
+/// Existing delete arguments; non-boolean recursion values remain absent.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRemoteBrowserDeletePathArgs<'a> {
+    pub browser_id: &'a str,
+    pub path: &'a str,
+    pub recursive: Option<bool>,
+}
+
+impl<'a> McpRemoteBrowserDeletePathArgs<'a> {
+    pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
+        let parsed = McpRemoteBrowserCreateDirectoryArgs::from_args(args)?;
+        Ok(Self {
+            browser_id: parsed.browser_id,
+            path: parsed.path,
+            recursive: args.get("recursive").and_then(serde_json::Value::as_bool),
+        })
+    }
+}
+
+/// Successful create/delete use the same empty-object wire contract as close.
+pub type McpRemoteBrowserCreateDirectoryResult = McpRemoteBrowserCloseResult;
+pub type McpRemoteBrowserDeletePathResult = McpRemoteBrowserCloseResult;
+
 fn required_string_arg<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(serde_json::Value::as_str)

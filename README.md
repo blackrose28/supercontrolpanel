@@ -394,6 +394,13 @@ no connection. ID allocation, replacement-session cleanup, live SFTP ownership
 and missing-session behavior remain in the desktop. No CLI open/close commands
 are added.
 
+Remote-browser create-directory/delete-path MCP contracts now share required
+browser/path parsers and the existing `{}` success result in core. Both require a
+string `browserId` before a string `path`, with unchanged required-field errors;
+strings pass through unchanged. Delete preserves optional `recursive` booleans,
+with missing or non-boolean values treated as absent. Desktop path handling,
+SFTP execution and policy are unchanged; no CLI browser mutation is added.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

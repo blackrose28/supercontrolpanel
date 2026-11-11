@@ -18,6 +18,8 @@ use crate::{
         McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
         McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
         McpOpenVpnGetStatusResult, McpRemoteBrowserCloseArgs, McpRemoteBrowserCloseResult,
+        McpRemoteBrowserCreateDirectoryArgs, McpRemoteBrowserCreateDirectoryResult,
+        McpRemoteBrowserDeletePathArgs, McpRemoteBrowserDeletePathResult,
         McpRemoteBrowserListChildrenResult, McpRemoteBrowserOpenArgs, McpRemoteBrowserOpenResult,
         McpRemoteBrowserReadArgs, McpRemoteBrowserStatPathResult, McpScpTransferGetArgs,
         McpScpTransferGetResult, McpScpTransferListResult, McpServerGetArgs, McpServerGetResult,
@@ -462,42 +464,23 @@ pub fn call_mcp_tool(
             json!(info)
         }
         "remote_browser_create_directory" => {
-            let browser_id = args
-                .get("browserId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "browserId is required".to_string())?
-                .to_string();
-            let path = args
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "path is required".to_string())?
-                .to_string();
+            let parsed = McpRemoteBrowserCreateDirectoryArgs::from_args(&args)?;
             create_remote_browser_directory_action(
-                browser_id,
-                path,
+                parsed.browser_id.to_string(),
+                parsed.path.to_string(),
                 app.state::<RemoteBrowserStore>(),
             )?;
-            json!({})
+            json!(McpRemoteBrowserCreateDirectoryResult {})
         }
         "remote_browser_delete_path" => {
-            let browser_id = args
-                .get("browserId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "browserId is required".to_string())?
-                .to_string();
-            let path = args
-                .get("path")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "path is required".to_string())?
-                .to_string();
-            let recursive = args.get("recursive").and_then(Value::as_bool);
+            let parsed = McpRemoteBrowserDeletePathArgs::from_args(&args)?;
             delete_remote_browser_path_action(
-                browser_id,
-                path,
-                recursive,
+                parsed.browser_id.to_string(),
+                parsed.path.to_string(),
+                parsed.recursive,
                 app.state::<RemoteBrowserStore>(),
             )?;
-            json!({})
+            json!(McpRemoteBrowserDeletePathResult {})
         }
         "scp_upload" => {
             let server_id = args

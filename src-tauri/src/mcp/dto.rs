@@ -21,6 +21,8 @@ pub use scp_core::mcp_dto::{
     McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
     McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
     McpOpenVpnGetStatusResult, McpRemoteBrowserCloseArgs, McpRemoteBrowserCloseResult,
+    McpRemoteBrowserCreateDirectoryArgs, McpRemoteBrowserCreateDirectoryResult,
+    McpRemoteBrowserDeletePathArgs, McpRemoteBrowserDeletePathResult,
     McpRemoteBrowserListChildrenResult, McpRemoteBrowserOpenArgs, McpRemoteBrowserOpenResult,
     McpRemoteBrowserReadArgs, McpRemoteBrowserStatPathResult, McpScpTransferGetArgs,
     McpScpTransferGetResult, McpScpTransferListResult, McpServerGetArgs, McpServerGetResult,
@@ -279,5 +281,35 @@ mod shared_browser_lifecycle_identity {
         let close: super::McpRemoteBrowserCloseResult =
             scp_core::mcp_dto::McpRemoteBrowserCloseResult {};
         let _: crate::mcp::McpRemoteBrowserCloseResult = close;
+    }
+}
+
+#[cfg(test)]
+mod browser_mutation_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_browser_mutation.rs"
+    ));
+}
+
+#[cfg(test)]
+mod shared_browser_mutation_identity {
+    #[test]
+    fn desktop_public_paths_accept_shared_browser_mutations() {
+        let input = serde_json::json!({"browserId":"b","path":"p","recursive":false});
+        let create: super::McpRemoteBrowserCreateDirectoryArgs<'_> =
+            scp_core::mcp_dto::McpRemoteBrowserCreateDirectoryArgs::from_args(&input).unwrap();
+        let public: crate::mcp::McpRemoteBrowserCreateDirectoryArgs<'_> = create;
+        assert_eq!(public.path, "p");
+        let delete: super::McpRemoteBrowserDeletePathArgs<'_> =
+            scp_core::mcp_dto::McpRemoteBrowserDeletePathArgs::from_args(&input).unwrap();
+        let public: crate::mcp::McpRemoteBrowserDeletePathArgs<'_> = delete;
+        assert_eq!(public.recursive, Some(false));
+        let create: super::McpRemoteBrowserCreateDirectoryResult =
+            scp_core::mcp_dto::McpRemoteBrowserCloseResult {};
+        let _: crate::mcp::McpRemoteBrowserCreateDirectoryResult = create;
+        let delete: super::McpRemoteBrowserDeletePathResult =
+            scp_core::mcp_dto::McpRemoteBrowserCloseResult {};
+        let _: crate::mcp::McpRemoteBrowserDeletePathResult = delete;
     }
 }

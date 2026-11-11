@@ -564,6 +564,14 @@ are unchanged. These types do not enable standalone browser execution.
 {}
 ```
 
+`McpRemoteBrowserCreateDirectoryArgs` requires a string `browserId` first,
+then a string `path`. Missing, null or non-string values produce exactly
+`browserId is required` or `path is required`, in that order; non-object inputs
+fail on `browserId`. Empty, whitespace, Unicode and control text are accepted
+unchanged and borrowed; extra fields are ignored. The desktop still performs
+session lookup, root-relative path validation and SFTP mkdir with mode 0755.
+`McpRemoteBrowserCreateDirectoryResult` aliases the existing close `{}` result.
+
 ## `remote_browser_delete_path`
 
 ### Input
@@ -581,6 +589,16 @@ are unchanged. These types do not enable standalone browser execution.
 ```json
 {}
 ```
+
+`McpRemoteBrowserDeletePathArgs` reuses the create-directory required-string
+parser and error order. `recursive` preserves true/false; missing, null and all
+non-boolean values become `None` without coercion. Its serialized argument value
+includes `recursive: null` when absent; request parsing does not require the key.
+`McpRemoteBrowserDeletePathResult` also aliases the close `{}` result. Desktop
+execution still defaults absent recursion to false, looks up the exact browser
+session before normalizing the path against its root, and opens SFTP. Recursive
+removal and nonrecursive lstat/directory-versus-file deletion, errors, policy-first
+dispatch and custom envelopes remain unchanged. These DTOs enable no CLI actions.
 
 ## `scp_upload`
 

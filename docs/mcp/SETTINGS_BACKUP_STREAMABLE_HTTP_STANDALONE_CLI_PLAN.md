@@ -1622,6 +1622,64 @@ spike for desktop Streamable HTTP using current official sources. Coordinated CL
 import, other operation families, stdio MCP and packaging also remain actionable.
 Do not retry the unchanged-host cgroup qualification gate.
 
+### Shared remote-browser mutation MCP contracts (2026-11-11)
+
+`scp-core::mcp_dto` now owns borrowed Serialize-only
+`McpRemoteBrowserCreateDirectoryArgs` and `McpRemoteBrowserDeletePathArgs`.
+Create uses the existing required-string helper for `browserId` then `path`;
+delete reuses that complete parser before reading optional `recursive`.
+`McpRemoteBrowserCreateDirectoryResult` and `McpRemoteBrowserDeletePathResult`
+alias the existing empty-object close result. Desktop DTO/public paths reexport
+these contracts and only the corresponding MCP dispatcher arms adopt them.
+
+Both parsers retain exactly `browserId is required` before `path is required`
+for absent, null or non-string values; non-object arguments fail on browser ID.
+Any string, including empty, whitespace, Unicode/control characters and raw Unix
+or Windows paths, passes through unchanged. Extras are ignored. Delete preserves
+true/false and maps missing or any non-boolean recursion value to `None`; its
+argument serialization includes null for None. Both success results remain `{}`.
+
+Unchanged desktop host source still looks up the exact browser session before
+normalizing the target against its root (`invalid_target_path`, false), opens
+SFTP, and creates directories with mode 0755. Delete defaults absent recursion
+to false, retaining recursive traversal or lstat/directory-versus-file removal
+and every host error. Policy still precedes parsing; envelopes, session stores,
+locks, CC's separate payloads, Tauri commands and UI behavior are unchanged. No
+SFTP execution or ownership moves to core and no CLI operation is enabled.
+
+TDD: core RED failed on missing shared types; desktop RED failed on missing
+DTO/public reexports. GREEN fixtures run in both hosts, pinning required-field
+precedence and exact errors, malformed argument shapes, permissive borrowed text,
+ignored extras, explicit optional-boolean cases, exact serialization and shared
+empty-object identity. Desktop identity tests cover DTO/public paths. The first
+quality pass identified test duplication with lifecycle fixtures; refactoring
+new tests to combined result tables removed both gates without acks or lost
+cases. Fixtures do not execute live SFTP, host path validation/deletion, locks,
+policy dispatch, HTTP/Tauri/CC or native UI flows.
+
+Validation: final locked all-feature workspace passes 126 tests plus the
+credential compile-fail doctest (seven existing ignored subprocess fixtures
+remain exercised through acceptance tests); locked desktop passes 162 tests
+with 17 existing warnings. Strict all-feature/all-target workspace Clippy, locked
+release CLI build, workspace formatting, changed desktop/shared-fixture rustfmt
+and diff whitespace checks pass. Ripwire dispatcher impact reports eleven
+downstream symbols and three direct HTTP/resource/Tauri callers, with no modeled
+affected tests. Edit-check reports unchanged dispatcher signature. Quality-delta
+has zero gates, one minor ambient dispatcher churn finding and seven nongating
+new test/module reachability findings. Staged test-gate exits 4, selecting seven
+Cargo-exercised test files with unknown runners and reporting untested downstream
+symbols and file-granular fallbacks. Green suites do not prove full transport or
+native UI coverage.
+
+Next focused increment: prioritize the official published Rust SDK/protocol
+spike for desktop Streamable HTTP. Check CURRENT official specification and SDK
+release sources before selecting versions/capabilities, verify a published pinned
+release against real client behavior and the existing desktop dependency/build
+boundary, and record evidence and compatibility limits. This is independent of
+operation-supervision gates; do not retry unchanged-host cgroup qualification.
+Coordinated CLI import, other operation contracts, stdio MCP and packaging remain
+actionable. Continue in a new thread on this same devbox after each increment.
+
 Proposed Cargo workspace boundaries:
 
 ```text
