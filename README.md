@@ -152,6 +152,15 @@ Detailed design docs live under `docs/mcp/`:
 - `docs/mcp/MCP_FIRST_REFACTOR_SLICE.md`
 - `docs/mcp/MCP_PR1_RUST_SCAFFOLDING.md`
 
+Proposed standards-based desktop transport work is detailed in
+[Desktop MCP over Streamable HTTP](docs/mcp/DESKTOP_STREAMABLE_HTTP_PLAN.md).
+The [combined roadmap](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
+tracks its relationship to settings backup and the standalone CLI.
+The [operation inventory](docs/mcp/DESKTOP_STREAMABLE_HTTP_INVENTORY.md) and
+[Slice 0 compatibility report](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE0.md)
+record the source audit and isolated SDK/client spike; the standard endpoint is
+not yet implemented in the desktop app.
+
 Helper CLI note:
 
 - first working helper binary lives at `src-tauri/src/bin/supercontrolpanelhelper.rs`

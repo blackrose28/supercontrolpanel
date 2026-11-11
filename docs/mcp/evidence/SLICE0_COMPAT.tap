@@ -1,0 +1,101 @@
+
+> test
+> node --test --test-concurrency=1 tests/*.test.mjs
+
+TAP version 13
+# Subtest: legacy official SDK: discovery, resource, success and denial (json preference)
+ok 1 - legacy official SDK: discovery, resource, success and denial (json preference)
+  ---
+  duration_ms: 251.487282
+  type: 'test'
+  ...
+# {"era":"legacy","mode":"json","revision":"2025-11-25","trace":[{"method":"initialize","version":null,"type":"text/event-stream","status":200},{"method":"notifications/initialized","version":"2025-11-25","type":null,"status":202},{"method":"GET","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"tools/list","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"tools/call","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"tools/call","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"resources/list","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"resources/read","version":"2025-11-25","type":"text/event-stream","status":200}]}
+# Subtest: legacy official SDK: discovery, resource, success and denial (sse preference)
+ok 2 - legacy official SDK: discovery, resource, success and denial (sse preference)
+  ---
+  duration_ms: 161.712863
+  type: 'test'
+  ...
+# {"era":"legacy","mode":"sse","revision":"2025-11-25","trace":[{"method":"initialize","version":null,"type":"text/event-stream","status":200},{"method":"notifications/initialized","version":"2025-11-25","type":null,"status":202},{"method":"GET","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"tools/list","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"tools/call","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"tools/call","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"resources/list","version":"2025-11-25","type":"text/event-stream","status":200},{"method":"resources/read","version":"2025-11-25","type":"text/event-stream","status":200}]}
+# Subtest: modern official SDK: discovery, resource, success and denial (json preference)
+ok 3 - modern official SDK: discovery, resource, success and denial (json preference)
+  ---
+  duration_ms: 103.579595
+  type: 'test'
+  ...
+# {"era":"modern","mode":"json","revision":"2026-07-28","trace":[{"method":"server/discover","version":"2026-07-28","type":"application/json","status":200},{"method":"tools/list","version":"2026-07-28","type":"application/json","status":200},{"method":"tools/call","version":"2026-07-28","type":"application/json","status":200},{"method":"tools/call","version":"2026-07-28","type":"application/json","status":200},{"method":"resources/list","version":"2026-07-28","type":"application/json","status":200},{"method":"resources/read","version":"2026-07-28","type":"application/json","status":200}]}
+# Subtest: modern official SDK: discovery, resource, success and denial (sse preference)
+ok 4 - modern official SDK: discovery, resource, success and denial (sse preference)
+  ---
+  duration_ms: 50.080697
+  type: 'test'
+  ...
+# {"era":"modern","mode":"sse","revision":"2026-07-28","trace":[{"method":"server/discover","version":"2026-07-28","type":"text/event-stream","status":200},{"method":"tools/list","version":"2026-07-28","type":"text/event-stream","status":200},{"method":"tools/call","version":"2026-07-28","type":"text/event-stream","status":200},{"method":"tools/call","version":"2026-07-28","type":"text/event-stream","status":200},{"method":"resources/list","version":"2026-07-28","type":"text/event-stream","status":200},{"method":"resources/read","version":"2026-07-28","type":"text/event-stream","status":200}]}
+# Subtest: HTTP rejects missing bearer and untrusted Origin/Host
+ok 5 - HTTP rejects missing bearer and untrusted Origin/Host
+  ---
+  duration_ms: 22.505561
+  type: 'test'
+  ...
+# Subtest: Inspector CLI real client: modern discovery, call and resource (json preference)
+ok 6 - Inspector CLI real client: modern discovery, call and resource (json preference)
+  ---
+  duration_ms: 1857.055488
+  type: 'test'
+  ...
+# {"era":"modern","mode":"json","tools":{"result":{"tools":[{"name":"fixture_echo","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"]},"outputSchema":{"additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"],"type":"object"}},{"name":"fixture_slow","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"]},"outputSchema":{"additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"],"type":"object"}}]}},"result":{"result":{"content":[{"type":"text","text":"{\\"value\\":\\"inspector\\"}"}],"structuredContent":{"value":"inspector"},"isError":false}},"resource":{"result":{"contents":[{"uri":"fixture://status","mimeType":"application/json","text":"{\\"fixture\\":true}"}],"ttlMs":0,"cacheScope":"private"}}}
+# Subtest: Inspector CLI real client: modern discovery, call and resource (sse preference)
+ok 7 - Inspector CLI real client: modern discovery, call and resource (sse preference)
+  ---
+  duration_ms: 1572.176602
+  type: 'test'
+  ...
+# {"era":"modern","mode":"sse","tools":{"result":{"tools":[{"name":"fixture_echo","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"]},"outputSchema":{"additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"],"type":"object"}},{"name":"fixture_slow","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"]},"outputSchema":{"additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"],"type":"object"}}]}},"result":{"result":{"content":[{"type":"text","text":"{\\"value\\":\\"inspector\\"}"}],"structuredContent":{"value":"inspector"},"isError":false}},"resource":{"result":{"contents":[{"uri":"fixture://status","mimeType":"application/json","text":"{\\"fixture\\":true}"}],"ttlMs":0,"cacheScope":"private"}}}
+# Subtest: Inspector CLI real client: legacy discovery, call and resource (json preference)
+ok 8 - Inspector CLI real client: legacy discovery, call and resource (json preference)
+  ---
+  duration_ms: 1736.008362
+  type: 'test'
+  ...
+# {"era":"legacy","mode":"json","tools":{"result":{"tools":[{"name":"fixture_echo","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}},{"name":"fixture_slow","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}}]}},"result":{"result":{"content":[{"type":"text","text":"{\\"value\\":\\"inspector\\"}"}],"structuredContent":{"value":"inspector"},"isError":false}},"resource":{"result":{"contents":[{"uri":"fixture://status","mimeType":"application/json","text":"{\\"fixture\\":true}"}]}}}
+# Subtest: Inspector CLI real client: legacy discovery, call and resource (sse preference)
+ok 9 - Inspector CLI real client: legacy discovery, call and resource (sse preference)
+  ---
+  duration_ms: 1709.781984
+  type: 'test'
+  ...
+# {"era":"legacy","mode":"sse","tools":{"result":{"tools":[{"name":"fixture_echo","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}},{"name":"fixture_slow","description":"Isolated compatibility fixture; no real side effects","inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}}]}},"result":{"result":{"content":[{"type":"text","text":"{\\"value\\":\\"inspector\\"}"}],"structuredContent":{"value":"inspector"},"isError":false}},"resource":{"result":{"contents":[{"uri":"fixture://status","mimeType":"application/json","text":"{\\"fixture\\":true}"}]}}}
+# Subtest: legacy: cancelling a slow request releases server work
+ok 10 - legacy: cancelling a slow request releases server work
+  ---
+  duration_ms: 115.509477
+  type: 'test'
+  ...
+# Subtest: modern: cancelling a slow request releases server work
+ok 11 - modern: cancelling a slow request releases server work
+  ---
+  duration_ms: 60.747272
+  type: 'test'
+  ...
+# Subtest: inventory accounts for every current tool, resource and registered desktop command
+ok 12 - inventory accounts for every current tool, resource and registered desktop command
+  ---
+  duration_ms: 5.816458
+  type: 'test'
+  ...
+# Subtest: modern version/header mismatch and invalid tool input fail before successful dispatch
+ok 13 - modern version/header mismatch and invalid tool input fail before successful dispatch
+  ---
+  duration_ms: 21.588635
+  type: 'test'
+  ...
+# {"unknown":{"status":400,"body":{"jsonrpc":"2.0","id":100,"error":{"code":-32022,"message":"Unsupported protocol version","data":{"requested":"2099-01-01","supported":["2026-07-28","2025-11-25"]}}}},"mismatch":{"status":400,"body":{"jsonrpc":"2.0","id":100,"error":{"code":-32020,"message":"Mcp-Name header `different` does not match body value `fixture_echo`"}}},"badInput":{"status":200,"body":{"jsonrpc":"2.0","id":100,"error":{"code":-32602,"message":"value must be a string"}}}}
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8072.912982

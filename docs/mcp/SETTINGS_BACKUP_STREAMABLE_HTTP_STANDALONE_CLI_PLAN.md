@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 and Work 3 are proposed.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 has Slice 0 inventory and isolated SDK/client feasibility evidence in its dedicated plan; implementation remains proposed. Work 3 remains proposed here.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -103,35 +103,11 @@ Keep secret-bearing backup operations out of MCP by default. If later exposed, r
 
 ## Work 2: standards-based desktop MCP over Streamable HTTP
 
-### Protocol and SDK decision
+The detailed scope, source baseline, protocol/SDK gate, operation matrix requirements, security and lifetime contracts, delivery slices, and acceptance checklist now live in [Desktop MCP over Streamable HTTP](DESKTOP_STREAMABLE_HTTP_PLAN.md). That file is the source of truth for Work 2 implementation details; this roadmap retains cross-work dependencies and delivery order.
 
-Use the official Rust `rmcp` SDK with a maintained HTTP framework rather than extending the hand-written HTTP parser. Pin a published SDK version only after verifying its supported protocol revisions, Rust toolchain, dependency compatibility, and cross-platform builds. Do not depend on an unpinned main branch.
+The desktop will expose standard MCP at `/mcp` using a pinned official Rust SDK and a maintained HTTP framework, while retaining the current REST routes for the helper. Target 2026-07-28 plus tested 2025-11-25 compatibility, gated on published SDK and real-client evidence; release only revisions actually verified. Preserve existing operation names/resource URIs, enforce shared policy and safe schemas, and complete explicitly reviewed operation gaps.
 
-The official specification checked for this review is revision **2026-07-28**, which differs materially from 2025-era MCP. Target that revision plus **2025-11-25 compatibility**, subject to the SDK/client spike. Do not mix their lifecycle rules:
-
-- Modern requests use per-request metadata and `server/discover`; legacy clients use `initialize` / `notifications/initialized`. Both HTTP and stdio need tests for each supported lifecycle.
-- Modern HTTP uses POST with JSON or request-scoped SSE, required metadata/routing headers validated against the body, and no protocol sessions or GET/DELETE stream lifecycle. Legacy HTTP uses its own initialization, optional sessions, GET streaming (or 405), and DELETE behavior.
-- Cancellation differs: modern HTTP closes the request SSE stream, legacy HTTP uses explicit cancellation rather than treating disconnect as cancellation, and stdio uses `notifications/cancelled`. Long-lived modern updates use `subscriptions/listen`. [Transport rules](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http), [legacy rules](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports).
-- Implement required version-specific semantics through the SDK, and advertise only verified capabilities. SSE alone does not constitute MCP compliance.
-
-If the published SDK or required clients cannot pass the chosen revision tests, release only the verified revision with an explicit compatibility matrix and defer the other; do not hand-build a second protocol engine. The app's custom REST routes are separate from the deprecated 2024 HTTP+SSE transport, which is outside v1 scope.
-
-Scope “complete MCP” as an interoperable tools/resources server with the app's supported operations, standard errors, lifecycle, and progress/events. Optional prompts, sampling, elicitation, and task extensions are only added when needed; do not advertise unsupported features.
-
-### Implementation requirements
-
-- Mount standard JSON-RPC MCP at `/mcp`; implement tools/list, tools/call, resources/list, resources/read and supported resource templates/subscriptions where useful.
-- Convert custom envelopes into standard MCP results; distinguish protocol errors from operational tool failures. Preserve tool names and resource URIs where practical.
-- Generate public input/output schemas from dedicated DTOs, not secret-bearing runtime models; use shared types only where safe. Validate structured results against output schemas and mark operational failures with standard tool error semantics. Tool annotations are client hints, not enforcement. Enforce arguments and authorization at execution time. Discovery must reflect allowed operations and host capabilities without leaking secrets.
-- Deliver status/transfer updates using the selected revision's notification/subscription mechanisms. Provide bounded status snapshots/polling when subscriptions are unavailable; keep progress scoped to an in-flight request, not a completed start call. Bound queues, apply backpressure, and avoid one slow subscriber blocking PTY reads.
-- Reuse localhost binding and bearer authorization. Validate Origin and Host/authority, handle IPv4/IPv6 correctly, and avoid permissive CORS. Test requests with and without Origin. Transport sessions are not authorization credentials.
-- Document the local bearer-token setup honestly. Any broader OAuth/discovery interoperability is a separately tested capability; a static token is not a general remote OAuth implementation.
-- Bound request/body sizes, timeouts, concurrency, connection queues, and event buffers. Move blocking PTY/SFTP/filesystem work off async executor threads. Support cancellation and orderly shutdown without automatically retrying side-effecting calls.
-- Preserve category allowlists and audit redaction across HTTP, stdio, resources, errors, and logs, including CC agent tokens as well as MCP tokens. Do not assume transport-level field-name redaction protects the core. Reject unknown policies/categories rather than accidentally treating them as permission to execute. MCP config mutation must not grant itself additional categories, change its approval policy, rotate its own access credentials, or activate CC identity without separate local authorization. Existing `require-ui-approval` currently blocks; initially keep that fail-closed behavior and label it accurately. A real desktop approval queue can follow with timeout, cancellation, and request binding.
-- Retain custom REST routes under a documented deprecation period for the existing helper, sharing operation handlers. Remove only after migration and compatibility tests; keep health/status diagnostics separate from the MCP protocol.
-- Update Config with endpoint/token handling and tested client setup examples.
-
-Build an operation matrix with existing desktop command, current HTTP tool, CLI command, capability, sensitivity, ownership, and acceptance test. Record deliberate exclusions instead of equating parity with exposing everything. Finish the known operation gaps from that matrix: Boundary target search, OpenVPN executable detection, RDP launch where supported, SSH credential management, and any newly discovered config/runtime gaps. Raw PTY control requires explicit policy and session ownership; decide its scope rather than exposing arbitrary terminal input by accident. Treat the existing single bearer token as one shared local principal: caller-provided client names and protocol session IDs cannot isolate mutually untrusted agents. Multi-principal access would require distinct credentials and ownership checks.
+Work 2 can ship once the operation registry/policy and desktop adapter seams exist. It does **not** require the full standalone core/CLI extraction. Desktop-owned operations survive HTTP disconnects and listener restarts. The reusable schemas/policy are intended for Work 3's stdio adapter, while CLI ownership and process lifetime remain Work 3 concerns.
 
 ## Work 3: standalone CLI and stdio MCP
 
