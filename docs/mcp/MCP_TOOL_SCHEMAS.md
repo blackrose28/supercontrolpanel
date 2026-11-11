@@ -840,6 +840,10 @@ Where `result` is a `StartFunctionResult`.
 
 ## `config_get_paths`
 
+Arguments are ignored, including extra fields and non-object values. Policy is
+checked before the host callback runs. The resource `scp://config/paths` delegates
+to this tool with `{}`; the helper sends `{}` and prints the result envelope.
+
 ### Input
 
 ```json
@@ -853,6 +857,14 @@ Where `result` is a `StartFunctionResult`.
   "appConfigPath": "/path/to/config.json"
 }
 ```
+
+The bare object uses `McpConfigGetPathsResult`, an alias of the Serialize-only
+`scp-core::config::ConfigPaths` model. Its sole field is a host-supplied string;
+the DTO does not trim, normalize, validate or resolve it. Desktop HTTP and Tauri
+hosts resolve the app config directory, create it if needed, append `config.json`
+and use the path's lossy string conversion. Resolution/directory-creation errors
+propagate unchanged; policy and the custom response envelope remain host-owned.
+This result does not describe CLI profile paths or initialize a CLI profile.
 
 ## `config_sync_pull`
 

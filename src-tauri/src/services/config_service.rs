@@ -2,7 +2,6 @@ use std::{fs, path::PathBuf, process::Command};
 
 use keyring::{Entry, Error as KeyringError};
 use portable_pty::CommandBuilder;
-use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
 use crate::models::{
@@ -30,11 +29,7 @@ pub use scp_core::local_settings::{
     default_mcp_sensitive_action_policy, generate_mcp_auth_token, SyncSettings, SyncSettingsPatch,
 };
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigPaths {
-    pub app_config_path: String,
-}
+pub use scp_core::config::ConfigPaths;
 
 pub fn default_app_config() -> AppConfig {
     AppConfig {

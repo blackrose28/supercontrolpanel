@@ -80,3 +80,6 @@ pub type McpServerGetResult = crate::servers::Server;
 
 /// Bare array in host loader order, with no filtering, sorting or deduplication.
 pub type McpServersListResult = Vec<McpServerGetResult>;
+
+/// Bare `config_get_paths` object; desktop hosts retain path resolution and errors.
+pub type McpConfigGetPathsResult = crate::config::ConfigPaths;

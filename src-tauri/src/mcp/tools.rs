@@ -15,9 +15,10 @@ use crate::commands::{
 };
 use crate::{
     mcp::{
-        McpAppOverviewResult, McpBoundaryGetStatusResult, McpFunctionStatusGetArgs,
-        McpFunctionStatusGetResult, McpFunctionStatusListResult, McpOpenVpnGetStatusResult,
-        McpServerGetArgs, McpServerGetResult, McpServersListResult, McpToolCallEnvelope,
+        McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
+        McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
+        McpOpenVpnGetStatusResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
+        McpToolCallEnvelope,
     },
     server_mgmt::{load_servers, Server},
     services::{
@@ -216,7 +217,10 @@ pub fn call_mcp_tool(
                 .ok_or_else(|| "server not found".to_string())?;
             json!(server)
         }
-        "config_get_paths" => json!(config_paths(app)?),
+        "config_get_paths" => {
+            let result: McpConfigGetPathsResult = config_paths(app)?;
+            json!(result)
+        }
         "openvpn_start" => {
             let username = args
                 .get("username")

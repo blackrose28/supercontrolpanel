@@ -18,9 +18,10 @@ pub use scp_core::mcp_catalog::McpToolDescriptor;
 pub use scp_core::mcp_resources::McpResourceDescriptor;
 
 pub use scp_core::mcp_dto::{
-    McpAppOverviewResult, McpBoundaryGetStatusResult, McpFunctionStatusGetArgs,
-    McpFunctionStatusGetResult, McpFunctionStatusListResult, McpOpenVpnGetStatusResult,
-    McpServerGetArgs, McpServerGetResult, McpServersListResult, McpToolCallEnvelope,
+    McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
+    McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
+    McpOpenVpnGetStatusResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
+    McpToolCallEnvelope,
 };
 
 #[cfg(test)]
@@ -141,5 +142,26 @@ mod shared_servers_identity {
             std::convert::identity::<super::McpServerGetResult>;
         let _: fn(Vec<crate::server_mgmt::Server>) -> crate::mcp::McpServersListResult =
             std::convert::identity::<super::McpServersListResult>;
+    }
+}
+
+#[cfg(test)]
+mod config_paths_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_config_paths.rs"
+    ));
+}
+
+#[cfg(test)]
+mod shared_config_paths_identity {
+    #[test]
+    fn desktop_public_paths_accept_the_shared_configuration_paths_without_conversion() {
+        let expose: fn(crate::services::ConfigPaths) -> super::McpConfigGetPathsResult =
+            |paths: scp_core::config::ConfigPaths| -> crate::mcp::McpConfigGetPathsResult { paths };
+        let result = expose(scp_core::config::ConfigPaths {
+            app_config_path: "config.json".to_owned(),
+        });
+        assert_eq!(result.app_config_path, "config.json");
     }
 }

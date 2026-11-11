@@ -364,6 +364,12 @@ order, with every inventory field and duplicate preserved. Get accepts any strin
 ignores all arguments. Desktop policy, loader and envelope behavior are unchanged.
 This extraction does not add standalone MCP or CLI commands.
 
+The configuration-path model now lives in `scp-core::config::ConfigPaths`, with
+`McpConfigGetPathsResult` as its MCP result alias. `config_get_paths` still returns
+only `appConfigPath`, ignores all arguments, and uses desktop path resolution and
+errors. The existing UI command and resource keep their contracts. This adds no
+CLI path command or path-resolution behavior to core.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

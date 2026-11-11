@@ -816,10 +816,11 @@ unqualified; this command has no platform-specific production branches.
 
 `scp-core::local_settings` now owns the unchanged `SyncSettings`, `SyncSettingsPatch`
 and five MCP default/token helpers formerly in desktop `services/config_service.rs`.
-Explicit re-exports preserve desktop service imports. `ConfigPaths`, file resolution,
-loaders, normalization, initialization, writers, migration, keyring and activation
-remain desktop-local. No dependency, command, event, CLI/MCP output or network behavior
-changed. The schema contains MCP/CC tokens, device identity and paths; it is not a
+Explicit re-exports preserve desktop service imports. At this increment, `ConfigPaths`,
+file resolution, loaders, normalization, initialization, writers, migration, keyring
+and activation remain desktop-local. The later configuration-path contract increment
+moves only the `ConfigPaths` data model. No dependency, command, event, CLI/MCP
+output or network behavior changed. The schema contains MCP/CC tokens, device identity and paths; it is not a
 public output DTO, redaction mechanism, restore validator or policy validator.
 
 Both `Default` and missing-field deserialization generate a fresh lowercase, simple
@@ -1381,13 +1382,62 @@ by Cargo), with unknown runners and twelve untested paths including eleven
 downstream dispatcher symbols and an unrelated SETTINGS_BACKUP Markdown heading.
 This is not a clean static coverage verdict or transport/UI E2E proof.
 
-Next focused increment: inspect `config_get_paths` and its consumers, and share
-its MCP result contract if the existing configuration-path model is appropriate;
-preserve host path resolution, errors and ignored arguments. No incidental CLI
-enablement. Standard desktop Streamable HTTP is independently actionable after
-checking current official SDK/protocol sources. Coordinated CLI import, other
-operation families, stdio MCP and packaging remain open. Do not retry the
-unchanged-host cgroup spike or claim stronger cleanup/keyring/elevation guarantees.
+### Shared configuration-path MCP result contract (2026-11-11)
+
+`scp-core::config::ConfigPaths` now owns the unchanged Serialize-only model with
+one camelCase field, `appConfigPath`. The desktop service re-exports it at its
+existing path; `mcp_dto::McpConfigGetPathsResult` aliases it and desktop DTO/public
+paths re-export the alias. The dispatcher annotates the callback result with that
+alias. No new derives, dependency, validation, command or CLI enablement is added.
+
+`config_get_paths` still ignores ALL arguments, including non-objects. Policy
+runs first, then the injected host callback exactly once. HTTP and Tauri callbacks
+still call `config_file_path`, retaining OS app-config resolution, directory
+creation, `config.json` selection, errors and lossy path-to-string conversion.
+There is no standalone path resolver in this DTO. Envelope construction is
+unchanged. The UI `get_config_paths` reads the same field; the resource delegates
+with `{}` and the helper sends `{}` and prints the envelope. Schema documentation
+now records these existing behaviors rather than inferring stricter input rules.
+
+TDD: the serialization contract first passed against the original desktop model.
+Core RED failed on the missing shared model/result alias; desktop RED failed on
+missing shared/re-exported paths. GREEN pins the exact one-field JSON for Linux,
+macOS and Windows path text, empty/relative paths, whitespace, Unicode, replacement
+and control characters. Core and desktop identity tests verify the aliases and
+existing service/public paths accept the model without conversion. These tests do
+not execute host path resolution/errors, ignored arguments, policy, resource/HTTP/
+Tauri/helper integration or UI flows; the unchanged source establishes those
+contracts. No new E2E or native Windows/macOS qualification is claimed.
+
+Validation: locked all-feature workspace tests pass 112 tests plus the credential
+compile-fail doctest, with seven ignored subprocess fixtures exercised by acceptance
+tests. The locked desktop suite passes 146 tests with 17 existing warnings. Strict
+workspace all-feature/all-target Clippy, locked release CLI build, workspace fmt,
+changed desktop/shared-contract rustfmt and diff whitespace checks pass. Final
+code changes after the first full checks were limited to the desktop identity
+test; the full desktop suite was rerun successfully.
+
+Ripwire dispatcher impact/uses identifies three direct HTTP/resource/Tauri callers
+and eleven downstream symbols; affected finds no modeled tests. The broader
+`ConfigPaths` impact includes UI/desktop command consumers (two Rust/TS definitions,
+19 reached symbols); its uses/affected results are empty and cannot prove safety.
+Dispatcher edit-check remains unchanged; the moved core model is a new symbol.
+Quality delta has zero gating regressions/acks, two minor dispatcher findings
+(ambient churn and three added lines) and five new test/module reachability rows.
+The initial identity-test clone finding was removed by using a typed callback and
+checking its returned path. Staged test gate exits 4 with five test files (new
+contracts plus existing config/status/server contracts, all exercised by Cargo),
+unknown runners and 175 untested symbols under its file-granular fallback. This
+broad static result is not a clean coverage verdict or transport/UI E2E proof.
+
+Next focused increment: inspect `scp_transfer_list` / `scp_transfer_get` and their
+models/consumers for a shared MCP argument/result seam, preserving the actual
+lookup, ordering, ignored arguments, errors, policy and envelope. Size the model
+move before editing; do not extract execution or add CLI commands incidentally.
+Standard desktop Streamable HTTP remains independently actionable after checking
+current official SDK/protocol sources. Coordinated CLI import, other operation
+families, stdio MCP and packaging remain open. Do not retry the unchanged-host
+cgroup spike or claim stronger cleanup/keyring/elevation guarantees.
 
 Proposed Cargo workspace boundaries:
 

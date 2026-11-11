@@ -5,6 +5,13 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Resolved configuration paths supplied by a host; no path resolution or validation.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigPaths {
+    pub app_config_path: String,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
