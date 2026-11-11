@@ -634,6 +634,92 @@ Actual installed Caddy behavior and Windows/macOS qualification remain open. Set
 extraction/import, desktop Streamable HTTP, other operation families, stdio MCP and
 independent packaging remain actionable under the same release gates above.
 
+### Controlled Linux descendant lifecycle evidence (2026-11-11)
+
+The real-CLI acceptance fixture now spawns a descendant that calls `setsid`, retains
+the inherited PTY descriptors and waits for a file-based release handshake. Readiness
+is published only after detachment. The test checks the descriptor through `/proc`,
+uses a test-process-only Linux subreaper to adopt the orphan, and explicitly releases
+and waits for the exact descendant PID. An RAII guard kills/reaps only confirmed child
+PIDs on failure; fixtures have finite watchdogs. The Linux-only dev dependency on
+`libc` uses the already locked version for these test syscalls; production dependencies
+and behavior are unchanged. No installed Caddy, user configuration or listener is used.
+
+The evidence distinguishes completion from cancellation:
+
+- **Completion:** after the direct child exits (confirmed as a zombie in `/proc`),
+  the CLI remains active with the profile locked and the descendant's PTY open.
+  Releasing the descendant allows EOF, direct-child reaping, completed JSON/exit 0,
+  and profile release. The test then reaps the adopted descendant.
+- **Cancellation:** SIGTERM to the CLI reaps the direct child and returns cancelled
+  JSON/exit 1 with the profile released **while the detached descendant is still
+  alive with an inherited, hung-up PTY descriptor**. Only the test's subsequent release
+  handshake ends that descendant. Profile release is not process-tree cleanup evidence.
+
+Source inspection: `portable-pty` 0.8.1 creates a controlling-terminal session for the
+direct child. Its Unix child killer sends SIGHUP to that PID, briefly polls, then falls
+back to direct-child kill; its reader maps PTY `EIO` to EOF. Core completion drains
+before exit polling, whereas cancellation removes/closes the direct-child session
+before joining the output worker. These paths explain why simply retaining a slave
+descriptor does not necessarily block cancellation in this setup. Other native calls,
+blocked sinks and PTY arrangements remain outside any shutdown bound.
+
+RED/GREEN evidence: the initial test failed at descendant readiness before the fixture
+existed. After adding it, an exploratory assertion that cancellation must stall failed:
+the CLI had already returned. A completion probe instead waited for the descendant's
+six-second watchdog, disproving the same return expectation for normal completion.
+The final assertions encode both observed paths, with explicit release rather than
+watchdog-driven success. This characterizes existing behavior; no production fix is
+claimed. All 72 workspace tests and the credential compile-fail doctest pass with
+all features; seven ignored fixtures are exercised through subprocesses. Strict
+all-feature/all-target Clippy, formatting and diff checks pass. Desktop production
+code is unchanged; the prior 103-test desktop validation was not repeated.
+Ripwire selects the acceptance test file, reports the existing fixture contract as
+unchanged and the new test as private/new. Quality delta has zero gating regressions;
+the three remaining new reachability findings are the executed test, subprocess
+fixture and RAII destructor. Extracting zombie observation and release/reap assertions
+removed the new test's initial verbosity/nesting findings without changing assertions.
+
+#### Proposed next supervision boundary (design only)
+
+Keep the current preview explicitly cooperative. Do not attempt to upgrade its
+guarantees by adding a timer around scoped Rust threads or killing one process group:
+this fixture deliberately leaves the original session, and a blocked sink still
+borrows the profile-owned runtime. The next implementation needs a separate private
+Linux operation supervisor with these reviewable requirements:
+
+1. Acquire the profile before launch and retain ownership until both execution and
+   output workers are confirmed stopped. No public daemon/status/stop contract is
+   introduced. If cleanup cannot be confirmed, report failure without advertising
+   successful cleanup or allowing a replacement runtime to acquire that profile.
+2. Contain the operation helper and all its descendants before allowing execution.
+   Spike a dedicated delegated cgroup v2 as the Linux containment candidate, with an
+   explicit capability check and fail-before-launch behavior when unavailable. Do
+   not silently fall back to a PID/process-group enumeration or acquire privileges.
+   This capability is proposed, not implemented or qualified on this devbox.
+3. Move PTY drainage and potentially blocking log I/O into that contained helper,
+   keeping the supervisor's control path independent of file writes and using a
+   bounded control channel without raw output. Preserve exclusive/private log
+   creation and JSON/stdout separation. Set an explicit log-size limit and failure
+   policy before exposing bounded output; do not silently truncate a successful log.
+4. Use explicit start/readiness/result/cleanup acknowledgments and monotonic
+   cancellation. Specify grace/drain/kill deadlines and failure precedence before
+   coding. A deadline may trigger containment teardown, but cannot by itself prove
+   that a blocked native operation stopped or that releasing ownership is safe.
+   A retained cleanup supervisor must remain observable to its launching host;
+   forced host death requires an external ownership/watchdog policy and qualification.
+5. Qualify session-escaping descendants, blocked output, launch failure, supervisor
+   loss, repeated signals and teardown failure before changing release claims.
+   Windows/macOS stay gated until their own containment/ownership implementations
+   pass equivalent native tests; native keyring/elevation remain unexposed meanwhile.
+
+Next focused slice: inspect/spike the containment and helper/output boundary above
+and record its exact failure/ownership contract before implementation. If this devbox
+cannot qualify the native capability, proceed with an independent plan item (for
+example read-only settings extraction) and retain the explicit supervision gate.
+Actual Linux Caddy, native Windows/macOS, desktop Streamable HTTP, stdio MCP, settings
+commands, other operation families and independent packaging remain open.
+
 Proposed Cargo workspace boundaries:
 
 ```text

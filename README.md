@@ -257,8 +257,12 @@ status, stop command, background daemon or MCP runtime is provided.
 Linux acceptance tests exercise the actual CLI with an exec-only PATH fixture for
 SIGINT/SIGTERM/SIGHUP, closed stdin, direct-child reaping and profile release, zero and
 nonzero exits, missing executable and profile conflicts. They verify JSON/log separation
-without running installed Caddy or user configuration. Actual Caddy behavior and descendant
-cleanup remain unqualified; test watchdogs do not establish a production shutdown bound.
+without running installed Caddy or user configuration. A controlled Linux descendant
+in a separate session demonstrates two limits: normal completion waits for its inherited
+PTY descriptors to close, while cancellation can release the profile with that descendant
+still alive. Direct-child reaping and profile release therefore do not prove process-tree
+cleanup. The test explicitly releases and reaps the descendant. Actual Caddy behavior
+remains unqualified; test watchdogs do not establish a production shutdown bound.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.

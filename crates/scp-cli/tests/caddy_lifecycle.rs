@@ -184,6 +184,30 @@ fn caddy_acceptance_child() {
     use std::io::Write;
     let root = PathBuf::from(std::env::var_os("SCP_ACCEPTANCE_ROOT").unwrap());
     fs::write(root.join("pid"), std::process::id().to_string()).unwrap();
+    if std::env::var("SCP_ACCEPTANCE_MODE")
+        .unwrap()
+        .starts_with("descendant")
+    {
+        let mut descendant = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "caddy_detached_descendant",
+                "--nocapture",
+            ])
+            .spawn()
+            .unwrap();
+        if std::env::var("SCP_ACCEPTANCE_MODE").unwrap() == "descendant-complete" {
+            wait_until(|| root.join("parent-release").exists());
+            std::process::exit(0);
+        }
+        // Retain Child for normal watchdog cleanup; cancellation kills this
+        // session leader first, whereupon the test subreaper adopts its child.
+        std::thread::sleep(Duration::from_secs(6));
+        let _ = descendant.kill();
+        let _ = descendant.wait();
+        std::process::exit(9);
+    }
     println!("ACCEPTANCE-FINAL-MARKER");
     std::io::stdout().flush().unwrap();
     if std::env::var("SCP_ACCEPTANCE_MODE").unwrap() == "success" {
@@ -193,4 +217,137 @@ fn caddy_acceptance_child() {
     // the fixture's main thread so even a failed parent assertion leaves no worker.
     std::thread::sleep(Duration::from_secs(6));
     std::process::exit(9);
+}
+
+#[test]
+#[ignore = "detached PTY holder exercised by the descendant acceptance test"]
+fn caddy_detached_descendant() {
+    let root = PathBuf::from(std::env::var_os("SCP_ACCEPTANCE_ROOT").unwrap());
+    // SAFETY: change only this fixture's session, retaining inherited PTY fds.
+    // Detachment avoids terminal session-leader HUP hiding a surviving child.
+    assert!(unsafe { libc::setsid() } > 0);
+    fs::write(root.join("descendant-pid"), std::process::id().to_string()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while !root.join("release").exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if root.join("release").exists() {
+        fs::write(root.join("released"), "acknowledged").unwrap();
+    }
+    std::process::exit(0);
+}
+
+// Adopt only this test binary's orphaned fixtures. Cleanup waits/signals exact
+// child PIDs, never process groups or unrelated processes. Declared before the
+// CLI guard so that the CLI is reaped before adoption cleanup on assertion failure.
+struct FixtureTreeCleanup(PathBuf);
+
+impl Drop for FixtureTreeCleanup {
+    fn drop(&mut self) {
+        for name in ["pid", "descendant-pid"] {
+            let Some(pid) = fs::read_to_string(self.0.join(name))
+                .ok()
+                .and_then(|text| text.parse::<libc::pid_t>().ok())
+                .filter(|pid| *pid > 1)
+            else {
+                continue;
+            };
+            // SAFETY: positive fixture PID only. waitpid confirms ownership
+            // before signaling, avoiding stale/reused non-child PID targets.
+            unsafe {
+                if libc::waitpid(pid, std::ptr::null_mut(), libc::WNOHANG) == 0 {
+                    libc::kill(pid, libc::SIGKILL);
+                    while libc::waitpid(pid, std::ptr::null_mut(), 0) == -1
+                        && std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted
+                    {
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn detached_descendant_distinguishes_completion_drain_from_cancellation_cleanup() {
+    // SAFETY: Linux test-process-only adoption; no production supervisor change.
+    assert_eq!(unsafe { libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1) }, 0);
+    for mode in ["descendant", "descendant-complete"] {
+        let fixture = CaddyFixture::new();
+        let _tree_cleanup = FixtureTreeCleanup(fixture.root.path().to_path_buf());
+        let mut child = CliChild::spawn(&mut fixture.command(mode));
+        let direct_pid = wait_for_child(&fixture.path("pid"), &mut child);
+        let descendant_pid = wait_for_child(&fixture.path("descendant-pid"), &mut child);
+        let fd = Path::new("/proc")
+            .join(descendant_pid.to_string())
+            .join("fd/1");
+        let terminal = fs::read_link(&fd).unwrap();
+        assert!(terminal.starts_with("/dev/pts"), "{terminal:?}");
+        assert!(ProfileOwner::acquire(&fixture.path("profile")).is_err());
+        if mode == "descendant" {
+            assert!(Command::new("/bin/kill")
+                .args(["-TERM", &child.0.as_ref().unwrap().id().to_string()])
+                .status()
+                .unwrap()
+                .success());
+        } else {
+            fs::write(fixture.path("parent-release"), "exit now").unwrap();
+            // Completion drains before polling/reaping. Prove the direct
+            // child really exited, rather than relying on a scheduling delay.
+            wait_for_unreaped_exit(direct_pid);
+            std::thread::sleep(Duration::from_millis(150));
+            assert!(child.0.as_mut().unwrap().try_wait().unwrap().is_none());
+            assert!(ProfileOwner::acquire(&fixture.path("profile")).is_err());
+            assert_eq!(fs::read_link(&fd).unwrap(), terminal);
+            fs::write(fixture.path("release"), "release").unwrap();
+        }
+        let output = child.finish();
+        let (code, result) = if mode == "descendant" {
+            assert!(String::from_utf8_lossy(&output.stderr).contains("Caddy cancelled"));
+            (1, json!({"outcome":"cancelled"}))
+        } else {
+            assert!(output.stderr.is_empty(), "{output:?}");
+            (0, json!({"outcome":"completed", "exitCode":0}))
+        };
+        assert_eq!(output.status.code(), Some(code), "{output:?}");
+        assert_eq!(
+            serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+            result
+        );
+        assert!(!Path::new("/proc").join(direct_pid.to_string()).exists());
+        fixture.assert_released();
+        if mode == "descendant" {
+            // Cancellation closes the master and joins successfully even
+            // though the detached child retains its now hung-up slave fd.
+            let retained = fs::read_link(fd).unwrap();
+            assert_eq!(
+                retained.to_str().unwrap().trim_end_matches(" (deleted)"),
+                terminal.to_str().unwrap()
+            );
+            fs::write(fixture.path("release"), "release").unwrap();
+        }
+        assert_released_descendant_reaped(&fixture, descendant_pid);
+    }
+}
+
+fn wait_for_unreaped_exit(pid: u32) {
+    wait_until(|| {
+        let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+            return false;
+        };
+        stat.rsplit_once(") ")
+            .is_some_and(|(_, fields)| fields.starts_with('Z'))
+    });
+}
+
+fn assert_released_descendant_reaped(fixture: &CaddyFixture, pid: u32) {
+    wait_until(|| fixture.path("released").exists());
+    let mut status = 0;
+    // SAFETY: positive PID published by our fixture, adopted by this test.
+    assert_eq!(
+        unsafe { libc::waitpid(pid as i32, &mut status, 0) },
+        pid as i32
+    );
+    assert!(libc::WIFEXITED(status));
+    assert_eq!(libc::WEXITSTATUS(status), 0);
+    assert!(!Path::new("/proc").join(pid.to_string()).exists());
 }

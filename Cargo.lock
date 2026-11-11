@@ -527,6 +527,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "dirs",
+ "libc",
  "portable-pty",
  "scp-core",
  "serde_json",
