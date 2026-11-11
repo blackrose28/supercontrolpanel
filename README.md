@@ -115,6 +115,42 @@ npm run helper:run -- status
 npm run helper:run -- openvpn status
 ```
 
+## Standalone CLI preview
+
+The separate `scpctl` binary runs with the desktop closed and HTTP disabled. This first
+increment supports read-only server inventory; runtime commands and stdio MCP are still
+planned. The helper above continues to control desktop-owned sessions.
+
+```bash
+cargo run -p scp-cli -- server list
+cargo run -p scp-cli -- --config-dir /path/to/cli-profile server list --json
+cargo build --locked --release -p scp-cli
+cargo test --locked --workspace
+```
+
+The binary is built in `target/release/` (`scpctl.exe` on Windows). This workspace builds
+without Node.js, Tauri, GTK, WebKit, or desktop assets; it needs only a Rust toolchain.
+The desktop remains a separate Cargo package under `src-tauri` with its existing commands.
+
+By default, inventory comes from `servers.json` under a separate CLI directory:
+
+| Platform | Default directory |
+| --- | --- |
+| Linux | `$XDG_CONFIG_HOME/supercontrolpanel-cli`, or `~/.config/supercontrolpanel-cli` |
+| macOS | `~/Library/Application Support/supercontrolpanel-cli` |
+| Windows | Roaming AppData's `supercontrolpanel-cli` directory |
+
+Use `--config-dir` to select another CLI profile. Listing does not create directories,
+migrate settings, read credentials, or start connections. To try an existing inventory,
+copy only `servers.json` into a separate CLI profile. Settings import is not available in
+this preview. A missing inventory returns an empty list; unreadable or malformed inventory
+is an error. `--json` produces a server array on stdout; errors always go to stderr.
+Exit codes are `0` for success, `1` for an operation failure, and `2` for invalid arguments.
+Run `scpctl --help` or `scpctl --version` for usage/version information.
+
+See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
+for runtime ownership, credential isolation, and remaining delivery gates.
+
 ## MCP support
 
 SuperControlPanel can now expose a **minimal localhost HTTP MCP surface** for AI agents and local helper tooling.

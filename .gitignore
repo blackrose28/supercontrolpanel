@@ -4,6 +4,7 @@ dist-ssr
 *.local
 
 # Tauri / Rust
+/target/
 /src-tauri/target
 **/*.rs.bk
 

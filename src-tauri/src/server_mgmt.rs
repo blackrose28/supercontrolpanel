@@ -6,52 +6,10 @@ use tauri::AppHandle;
 use tauri::Manager;
 use uuid::Uuid;
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ServerOs {
-    Linux,
-    Windows,
-}
-
-impl Default for ServerOs {
-    fn default() -> Self {
-        ServerOs::Linux
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ConnectionMethod {
-    Ssh,
-    Boundary,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerService {
-    pub name: String,
-    pub port: u16,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Server {
-    pub id: String,
-    pub name: String,
-    pub host: String,
-    #[serde(default)]
-    pub os: ServerOs,
-    pub connection_method: ConnectionMethod,
-    pub ssh_port: u16,
-    pub ssh_user: String,
-    #[serde(default)]
-    pub boundary_target_id: String,
-    /// Listen port for Boundary tunnel (boundary connect -listen-port). Used when connection_method is Boundary.
-    #[serde(default)]
-    pub boundary_listen_port: u16,
-    #[serde(default)]
-    pub services: Vec<ServerService>,
-}
+pub use scp_core::servers::{ConnectionMethod, Server, ServerOs};
+// Keep the original module path available for consumers of the inventory schema.
+#[allow(unused_imports)]
+pub use scp_core::servers::ServerService;
 
 #[derive(Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]

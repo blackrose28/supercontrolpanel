@@ -9,6 +9,7 @@ default-run = "super-control-panel"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+scp-core = { path = "../crates/scp-core" }
 # Platform features required — without them keyring uses an in-memory mock per Entry,
 # so set_password "succeeds" but the next get_password always misses (see keyring docs).
 keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent"] }

@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 and Work 3 are proposed.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace and read-only inventory CLI; runtime extraction and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -13,7 +13,7 @@ Assessment and review date: 2026-11-11.
 
 The CLI must work with the desktop app closed. It will execute the shared runtime itself, not proxy requests to the desktop HTTP endpoint. Its MCP mode will serve that runtime over stdio. Ordinary shell commands retain human-readable/JSON output; stdio is specifically the MCP server mode.
 
-These findings come from source inspection and protocol documentation, not a working prototype. Cross-platform keyring permissions, headless packaging, and SDK integration require implementation spikes before estimates can be firm.
+The initial feasibility findings came from source inspection and protocol documentation. Implementation progress is recorded below; cross-platform keyring permissions, headless packaging, and SDK integration still require validation before estimates can be firm.
 
 ## Current implementation and evidence
 
@@ -28,11 +28,47 @@ These findings come from source inspection and protocol documentation, not a wor
 - `src-tauri/src/mcp/server.rs`: hand-written TCP/HTTP server, bearer token, localhost restriction, custom REST routes.
 - `src-tauri/src/mcp/tools.rs` and `resources.rs`: substantial existing operation coverage, but descriptors/results and dispatch depend on Tauri and custom envelopes.
 - `src-tauri/src/bin/supercontrolpanelhelper.rs`: existing CLI is an HTTP client requiring the desktop app.
-- `src-tauri/src/main.rs`, `services/pty_service.rs`, `services/boundary_service.rs`: runtime stores, events, child processes, and automated OIDC are coupled to Tauri. No reusable core library currently exists.
+- `src-tauri/src/main.rs`, `services/pty_service.rs`, `services/boundary_service.rs`: runtime stores, events, child processes, and automated OIDC remain coupled to Tauri. The new core library currently shares only server inventory types and read-only inventory access.
 
 If adopted, this proposal replaces the helper-only direction in `MCP_HELPER_CLI_SPEC.md` and `MCP_TRANSPORT_AND_AUTH.md` for the new CLI. Those documents still describe the existing desktop-client helper. Keep that helper functional during migration; desktop control remains useful even after a standalone runtime exists.
 
 ## Shared architecture
+
+### First standalone extraction increment (2026-11-11)
+
+The root Cargo workspace now contains `crates/scp-core` and `crates/scp-cli`. The desktop
+package is explicitly excluded from this workspace and depends on core by path, so its
+existing Tauri build script and build commands stay local to `src-tauri`. The CLI's normal
+and build dependency graph contains no Tauri, GTK/WebKit, HTTP client, or frontend build.
+
+`scp-core::servers` owns the existing server types and a read-only inventory reader with
+an explicit config directory. Desktop `server_mgmt` re-exports the types with the existing
+field names/defaults and retains its configuration gate, paths, and writers. Desktop
+command names, event payloads, and the helper's HTTP behavior are unchanged.
+
+`scpctl server list [--json] [--config-dir DIR]` directly reads this profile's inventory.
+The default directory is the OS config directory plus `supercontrolpanel-cli`, separate
+from desktop configuration. Reads do not initialize a runtime, migrate files, touch the
+keyring, or connect to desktop/CC/MCP. Missing inventory is empty; parse/I/O failures use
+stderr and exit 1, invalid arguments exit 2. JSON success output is an array of servers.
+
+TDD evidence: all five CLI subprocess tests failed against an empty CLI, and the core
+contract test failed because the shared module did not exist. After implementation, five
+CLI tests and four core tests pass on Linux. They cover legacy/full server serialization,
+profile selection, read-only/missing inventory, malformed and unreadable files, output,
+exit codes, help/version, and disabled HTTP settings. The root lockfile pins the headless
+workspace dependencies. Linux validation also passed the 101-test desktop Rust suite,
+strict workspace Clippy, formatting, and a standalone release build. Ripwire quality delta
+reported no gating regressions; its nine new dead-code findings are the test functions,
+which Cargo successfully executed. Native Windows/macOS checks remain required.
+
+This establishes an initial dependency/build seam, not full runtime parity. Next extract
+profile initialization, a per-profile credential namespace and runtime-owner lock before
+adding any credential access, writes, or long-running commands. Then extract runtime
+stores/events and one operation family with foreground child cleanup. SDK interoperability,
+desktop Streamable HTTP, stdio MCP, settings commands, shell completion, and release
+packaging remain open. The inventory preview deliberately has no `status` command: it
+does not yet own runtime sessions and cannot report another process's memory.
 
 Proposed Cargo workspace boundaries:
 

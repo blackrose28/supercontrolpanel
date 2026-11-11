@@ -1,0 +1,4 @@
+[workspace]
+members = ["crates/scp-core", "crates/scp-cli"]
+exclude = ["src-tauri"]
+resolver = "2"
