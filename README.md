@@ -145,6 +145,8 @@ Current compatibility HTTP routes:
 
 All routes require the device-local bearer token, reject browser Origins, and validate the loopback Host and configured port. Use `http://127.0.0.1:<port>/mcp` (or `http://[::1]:<port>/mcp` for an IPv6 listener) for standard clients; the helper continues using the base URL.
 
+MCP calls share a 16-worker limit. Accepted desktop work continues after disconnect or listener restart; query status before retrying a lost response. Standard clients can subscribe to status and transfer snapshot invalidations, including `scp://status/transfers`, or poll snapshots. See [Slice 4 lifecycle and limits](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE4.md).
+
 Detailed design docs live under `docs/mcp/`:
 
 - `docs/mcp/MCP_IMPLEMENTATION_PLAN.md`

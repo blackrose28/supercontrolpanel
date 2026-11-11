@@ -1,6 +1,8 @@
 # Desktop MCP over Streamable HTTP
 
-Status: Slices 1–3 implemented: shared safe contracts/policy and SDK HTTP adapter for the existing catalog. Lifecycle/events, reviewed parity additions, Config UX and native application qualification remain open.
+Status: Slices 1–4 implemented: shared safe contracts/policy, SDK HTTP adapter for the existing catalog, bounded execution, lifecycle and resource invalidations. Reviewed parity additions, Config UX and native application qualification remain open.
+
+[Slice 4 implementation, limits, and verification](DESKTOP_STREAMABLE_HTTP_SLICE4.md).
 
 [Slice 3 implementation and verification](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 

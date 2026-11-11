@@ -2,7 +2,7 @@
 
 ## Existing surface migration (Slice 3)
 
-Standard `/mcp` adapts all 40 registry operations and five fixed resources. Discovery uses current category, sensitive-action and capability policy: at most 37 tools are visible; `config_sync_pull`, `config_git_pull` and `config_git_push` remain unavailable. No new parity operations are added. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md) and the [per-operation test matrix](DESKTOP_STREAMABLE_HTTP_INVENTORY.md).
+Standard `/mcp` adapts all 40 registry operations and six fixed resources (the original five plus `scp://status/transfers`). Discovery uses current category, sensitive-action and capability policy: at most 37 tools are visible; `config_sync_pull`, `config_git_pull` and `config_git_push` remain unavailable. No new parity tools are added. [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) adds status/transfer snapshot subscriptions and bounded transport execution. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md) and the [per-operation test matrix](DESKTOP_STREAMABLE_HTTP_INVENTORY.md).
 
 ## Purpose
 

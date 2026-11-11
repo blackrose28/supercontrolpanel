@@ -9,7 +9,7 @@ use std::{
 };
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Listener, Manager};
 
 use crate::{
     mcp::{
@@ -278,20 +278,38 @@ fn run_http_server_loop(
             Ok(listener) => listener,
             Err(_) => return,
         };
-        let router = super::protocol::protocol_router(desktop_protocol_host(app), port, token, true);
+        let host = desktop_protocol_host(app.clone());
+        let control = host.control.clone();
+        let function_control = control.clone();
+        let transfer_control = control.clone();
+        let function_listener =
+            app.listen("function-status", move |_| function_control.invalidate());
+        let transfer_listener = app.listen("scp-transfer-status", move |_| {
+            transfer_control.invalidate()
+        });
+        let router = super::protocol::protocol_router(host, port, token, true);
         // Transport shutdown drops SDK sessions as well; desktop-owned work stays in its stores.
-        tokio::select! {
-            _ = axum::serve(listener, router) => {},
-            _ = async { while !stop.load(Ordering::SeqCst) { tokio::time::sleep(Duration::from_millis(50)).await; } } => {},
-        }
+        let signal = control.stop.clone();
+        let monitor = tokio::spawn(async move {
+            while !stop.load(Ordering::SeqCst) {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            signal.cancel();
+        });
+        super::lifecycle::serve_transport(listener, router, control).await;
+        monitor.abort();
+        app.unlisten(function_listener);
+        app.unlisten(transfer_listener);
     });
-    runtime.shutdown_timeout(Duration::from_secs(5));
+    runtime.shutdown_timeout(Duration::from_secs(2));
 }
 
 fn desktop_protocol_host(app: AppHandle) -> super::protocol::ProtocolHost {
     let discovery_app = app.clone();
     let execution_app = app.clone();
     super::protocol::ProtocolHost {
+        subscriptions: Default::default(),
+        control: super::lifecycle::TransportControl::default(),
         permitted: Arc::new(move || {
             allowed_mcp_tools(&discovery_app)
                 .map(|tools| tools.into_iter().map(|t| t.name).collect())

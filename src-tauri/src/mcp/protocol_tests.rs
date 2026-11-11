@@ -34,11 +34,30 @@ fn test_policy(mode: u8) -> (&'static str, &'static [&'static str]) {
     (policy, categories)
 }
 
-fn fixture_host() -> ProtocolHost {
-    let fixtures: Value = serde_json::from_str(include_str!(
+fn surface_fixtures() -> Value {
+    serde_json::from_str(include_str!(
         "../../../experiments/mcp-http-slice0/tests/desktop-surface.json"
     ))
-    .unwrap();
+    .unwrap()
+}
+
+fn fixture_result(name: &str, args: &Value, mode: u8, fixtures: &Value) -> Result<Value, String> {
+    assert_eq!(
+        *args, fixtures[name]["args"],
+        "adapter must preserve arguments for {}",
+        name
+    );
+    if mode == 3 {
+        return Err("keyring/remote error: unlabelled-secret".into());
+    }
+    if mode == 4 {
+        return Ok(json!({"password":"unlabelled-secret"}));
+    }
+    Ok(fixtures[name]["data"].clone())
+}
+
+fn fixture_host() -> ProtocolHost {
+    let fixtures = surface_fixtures();
     assert_eq!(
         fixtures.as_object().unwrap().len(),
         super::super::contracts::OPERATIONS.len()
@@ -47,7 +66,10 @@ fn fixture_host() -> ProtocolHost {
     let permitted = Arc::new(AtomicU8::new(0));
     let policy = permitted.clone();
     let execution_policy = permitted.clone();
+    let control = TransportControl::default();
     ProtocolHost {
+        subscriptions: Default::default(),
+        control: control.clone(),
         permitted: Arc::new(move || {
             Ok(super::super::contracts::OPERATIONS
                 .iter()
@@ -62,21 +84,16 @@ fn fixture_host() -> ProtocolHost {
             let mode = execution_policy.load(Ordering::SeqCst);
             let (policy, categories) = test_policy(mode);
             super::super::contracts::execute(name, policy, categories, &args, |op| {
-                assert_eq!(
-                    args, fixtures[op.name]["args"],
-                    "adapter must preserve arguments for {}",
-                    op.name
-                );
-                if mode == 3 {
-                    return Err("keyring/remote error: unlabelled-secret".into());
-                }
-                if mode == 4 {
-                    return Ok(json!({"password":"unlabelled-secret"}));
-                }
-                Ok(fixtures[op.name]["data"].clone())
+                fixture_result(op.name, &args, mode, &fixtures)
             })
         }),
         legacy: Arc::new(move |method, path, _| {
+            if path == "/test/event" {
+                control.invalidate();
+            }
+            if path == "/test/stop" {
+                control.stop.cancel();
+            }
             if method == "POST" {
                 let mode = match path {
                     "/test/approval" => 1,
@@ -133,4 +150,92 @@ async fn check_clients(json_response: bool) {
         String::from_utf8_lossy(&result.stdout),
         String::from_utf8_lossy(&result.stderr)
     );
+}
+
+#[tokio::test]
+async fn snapshot_invalidations_expose_no_event_payloads() {
+    let host = fixture_host();
+    let info = host.get_info();
+    let capabilities = serde_json::to_value(info.capabilities).unwrap();
+    assert_eq!(capabilities["resources"]["subscribe"], true);
+    let requested: SubscriptionFilter = serde_json::from_value(json!({
+        "resourceSubscriptions": ["scp://status/functions", "scp://status/transfers", "secret://unknown"]
+    })).unwrap();
+    let accepted = host.accepted_subscription_filter(&requested).unwrap();
+    assert_eq!(
+        accepted.resource_subscriptions.unwrap(),
+        vec!["scp://status/functions", "scp://status/transfers"]
+    );
+}
+
+#[tokio::test]
+async fn revoked_router_rejects_old_authority_and_rotation_rebinds_port() {
+    let host = fixture_host();
+    let control = host.control.clone();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+    let address = listener.local_addr().unwrap();
+    let router = protocol_router(host, address.port(), "old".into(), true);
+    let serve_control = control.clone();
+    let server = tokio::spawn(super::super::lifecycle::serve_transport(
+        listener,
+        router,
+        serve_control,
+    ));
+    let client = reqwest::Client::new();
+    let url = format!("http://{address}/health");
+    assert_eq!(
+        client
+            .get(&url)
+            .bearer_auth("old")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    control.stop.cancel();
+    tokio::time::timeout(Duration::from_secs(3), server)
+        .await
+        .unwrap()
+        .unwrap();
+    let listener = std::net::TcpListener::bind(address).unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let listener = tokio::net::TcpListener::from_std(listener).unwrap();
+    let router = protocol_router(fixture_host(), address.port(), "new".into(), true);
+    let server = tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    assert_eq!(
+        client
+            .get(&url)
+            .bearer_auth("old")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        401
+    );
+    assert_eq!(
+        client
+            .get(&url)
+            .bearer_auth("new")
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        200
+    );
+    server.abort();
+}
+
+#[tokio::test]
+async fn slow_body_receive_times_out_before_dispatch() {
+    let body = axum::body::Body::from_stream(futures_util::stream::pending::<
+        Result<Bytes, std::io::Error>,
+    >());
+    let request = Request::new(body);
+    let result = tokio::time::timeout(Duration::from_secs(12), receive_body(request))
+        .await
+        .unwrap();
+    assert_eq!(result.unwrap_err().0, StatusCode::REQUEST_TIMEOUT);
 }

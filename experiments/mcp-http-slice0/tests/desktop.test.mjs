@@ -11,6 +11,7 @@ const base = process.env.SLICE2_URL;
 const authorization = 'Bearer test-only';
 const uri = 'scp://status/functions';
 const clients = [];
+const subscriptions = [];
 const fixtures = JSON.parse(readFileSync(new URL('./desktop-surface.json', import.meta.url)));
 const statuses = [{ functionId: "boundary-auth", state: "running", message: "", boundaryTokenSource: "app", sessionId: "synthetic-session", updatedAtMs: 123 }];
 try {
@@ -34,7 +35,7 @@ try {
     assert.equal(client.getServerVersion().name, 'super-control-panel');
     const { tools } = await client.listTools();
     assert.deepEqual(tools.map(t => t.name).sort(), Object.keys(fixtures).filter(n => !fixtures[n].unavailable).sort());
-    assert.equal((await client.listResources()).resources.length, 5);
+    assert.equal((await client.listResources()).resources.length, 6);
     for (const [name, fixture] of Object.entries(fixtures)) {
       const tool = tools.find(t => t.name === name);
       if (fixture.unavailable) {
@@ -60,6 +61,26 @@ try {
         assert.equal(resource.mimeType, 'application/json');
         assert.deepEqual(JSON.parse(resource.text), expected, fixture.uri);
       }
+    }
+    if (era === 'legacy') {
+      await client.subscribeResource({ uri });
+      await client.unsubscribeResource({ uri });
+    } else {
+      const updates = [];
+      client.setNotificationHandler('notifications/resources/updated', notification => updates.push(notification));
+      const subscription = await client.listen({ resourceSubscriptions: [uri, 'scp://status/transfers'] });
+      assert.deepEqual(subscription.honoredFilter.resourceSubscriptions, [uri, 'scp://status/transfers']);
+      await new Promise(resolve => setTimeout(resolve, 100));
+      assert.ok(updates.some(update => update.params.uri === 'scp://status/transfers'));
+      const before = updates.length;
+      await fetch(`${base}/test/event`, { headers: { authorization } });
+      for (let attempt = 0; attempt < 50 && updates.length === before; attempt++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.ok(updates.length > before, 'domain update must invalidate snapshots promptly');
+      assert.ok(updates.every(update => Object.keys(update.params).every(key => ['uri', '_meta'].includes(key))));
+      await subscription.close();
+      assert.equal(await subscription.closed, 'local');
+      const live = await client.listen({ resourceSubscriptions: [uri] });
+      subscriptions.push(live);
     }
     await assert.rejects(client.callTool({ name: 'unknown_operation', arguments: {} }));
     for (const [name, args] of [
@@ -141,6 +162,19 @@ try {
       if (fixture.uri) await assert.rejects(client.readResource({ uri: fixture.uri }));
     }
   }
+  for (const subscription of subscriptions) {
+    await Promise.race([
+      subscription.closed,
+      new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('policy narrowing left subscription alive')), 2500); timer.unref(); }),
+    ]);
+  }
+  await fetch(`${base}/test/reset`, { method: 'POST', headers: { authorization } });
+  const restarting = await clients[1].listen({ resourceSubscriptions: [uri] });
+  await fetch(`${base}/test/stop`, { headers: { authorization } });
+  await Promise.race([
+    restarting.closed,
+    new Promise((_, reject) => { const timer = setTimeout(() => reject(new Error('listener revocation left stream alive')), 2500); timer.unref(); }),
+  ]);
   console.log('auth/Origin/Host on all routes, retained REST envelope, version errors and live policy denial pass');
 } finally {
   for (const client of clients) await client.close();

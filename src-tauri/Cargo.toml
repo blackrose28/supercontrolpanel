@@ -26,6 +26,7 @@ httpdate = "1"
 uuid = { version = "1", features = ["v4"] }
 
 # CC (Control Plane) dependencies
+tokio-util = { version = "0.7", features = ["rt"] }
 tokio = { version = "1", features = ["full"] }
 tokio-tungstenite = "0.21"
 futures-util = "0.3"

@@ -469,7 +469,7 @@ pub static OPERATIONS: &[Operation] = &[
         read_only: true,
         capability: Capability::Desktop,
         lifetime: Lifetime::Query,
-        resource: None,
+        resource: Some(("scp://status/transfers", "SCP transfer status", "file-transfer")),
     },
     Operation {
         handler: Handler::ScpTransferGet,

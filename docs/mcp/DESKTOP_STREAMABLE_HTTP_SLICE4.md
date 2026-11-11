@@ -1,0 +1,39 @@
+# Desktop HTTP MCP Slice 4: lifecycle and updates
+
+Date: 2026-11-11. Slice 4 adds bounded transport execution, SDK cancellation handoff, resource invalidations and listener revocation. It preserves desktop commands/events, helper envelopes, transport/status settings and the existing backup/recovery gate. Native platform and real-runtime qualification remains Slice 6.
+
+## Ownership and execution
+
+Standard tools, resource reads, discovery and compatibility handlers share a process-wide limit of **16 blocking executions**, including across listener replacements. Excess work fails promptly with safe `CONFLICT` guidance (legacy admission failures use HTTP 503 and the legacy envelope). No automatic retries or application work queue is introduced. The blocking closure owns its permit until completion, even if its HTTP request disappears, times out or the listener stops.
+
+The handoff is the blocking worker's cancellation check immediately before entering the existing desktop handler. SDK cancellation, request-future destruction and listener revocation prevent a pending closure from executing later. Once a handler begins, the desktop owns that invocation. Existing blocking PTY/SFTP/keyring/action functions are not forcibly interrupted. This conservative handoff also applies to synchronous transfers: a timeout or lost response means unknown outcome, not rollback or confirmed cancellation. Query existing state and inspect local controls before retrying a mutation. Start/stop and duplicate-call semantics remain those of the existing desktop actions; no durable deduplication is claimed.
+
+Response deadlines are 30 seconds for queries/discovery/resources, 30 minutes for registry `Request` operations (direct transfers and remote directory mutations), and five minutes for other starts/stops/mutations. Legacy tool calls derive the same deadline from registry metadata; other compatibility routes use 30 seconds. A timeout does not release capacity occupied by a running handler. Calls still reload current settings and reenter the backup/recovery lease in `call_mcp_tool` before dispatch. HTTP requests, session IDs and client names confer no authority.
+
+Authenticated bodies have a **1 MiB** limit and **10-second body receive timeout**. Header reception remains the framework's default; the plan's proposed ten-second header bound is not a shipped claim. Worker and stream limits are internal constants rather than user settings. The already-resolved `tokio-util` cancellation token is now a direct dependency; SDK/framework pins are unchanged. This repository ignores production Cargo.lock as before.
+
+## Updates and recovery
+
+The listener subscribes to existing `function-status` and `scp-transfer-status` desktop events. Its callbacks ignore event payloads and only increment a watch-channel generation. This is a single coalesced slot, with constant memory even when consumers stop reading; PTY producers never await an HTTP consumer. There is no terminal output, command, password, path, domain error text or durable event history in the bridge.
+
+Standard resource invalidations are supported through modern `subscriptions/listen` and legacy `resources/subscribe`/`unsubscribe`. The five original URIs remain. New `scp://status/transfers` maps directly to the existing safe `scp_transfer_list` operation under its file-transfer policy, including on the compatibility resource routes. Resources retain their existing JSON wrapper/schema convention. There are no new tools.
+
+At most **eight subscriptions** are active per listener (a legacy resource subscription consumes one slot; a modern listen request consumes one). Each invalidation tells the consumer to read the authorized snapshot. Events may coalesce across domains, so any domain event invalidates the subscribed resources; clients must not count notifications as domain transitions. An initial invalidation covers the snapshot/subscribe race. A one-second refresh also rechecks policy, and five-second notification-send bounds detach slow consumers. SDK transport queues retain the SDK's bounded defaults (legacy session channels default to 16). No 128-event application queue or replay guarantee is claimed. Clients without subscription support poll the corresponding tools/resources.
+
+Subscriptions reauthorize before sending and close on category denial, peer closure or listener revocation. Each SDK legacy session has its own unsubscribe map; all sessions still share the one bearer principal. Local settings saves restart the listener, closing old SDK sessions and subscriptions. Token replacement rejects old bearer requests. Accepted domain work remains in desktop-owned stores.
+
+## Shutdown and backup coordination
+
+Listener stop signals the SDK cancellation token, stops accepting HTTP requests and allows up to two seconds for HTTP drain. A timed-out server task is aborted **and awaited**, releasing its port before replacement. The listener's Tokio runtime then allows up to two seconds for blocking-worker shutdown; accepted blocking work can outlive this interval and retains its process-wide permit. No runtime/store mutex is held across these waits. Stop still takes the listener handle out of its mutex before joining its thread. Event listeners are removed when transport hosting ends.
+
+The settings backup writer/recovery gate is unchanged. A worker denied by maintenance or pending recovery cannot perform its mutation. No shutdown path waits indefinitely for such a worker or acquires a desktop store lock. An isolated process test exercises both gate states without leaving the recovery latch set in the main test process.
+
+## Verification
+
+TDD RED evidence: cancelled/revoked work executed and excess concurrent work ran before admission controls (three expected failures); the subscription-capability assertion failed before the bridge; official clients saw five rather than six resources before the transfer mapping, and legacy subscribe failed with method-not-found before implementation. The reconfiguration test exposed an aborted-task port-release race, then passed after abort-and-await.
+
+Focused tests cover cancelled pending work, dropping a request queued in a saturated blocking pool, accepted work retaining capacity after disconnect, revoked-listener rejection, 100,000 coalesced updates, maintenance/recovery rejection, and same-port token replacement. Both pinned official clients exercise resources and subscriptions in JSON-preferred and SSE modes; the modern client checks payload-free invalidations, prompt domain-event delivery, explicit cancellation and closure after policy narrowing. Existing catalog/schema, helper, auth/Host/Origin, policy/redaction and backup tests remain enabled.
+
+Reproduce with `cargo test --manifest-path src-tauri/Cargo.toml`, `npm run build`, and `npx playwright test`. Client prerequisites and helper build instructions remain in [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md). Test hosts are synthetic: they qualify adapter ownership/capacity behavior, not live VPN elevation, PTY session survival, remote servers, keyrings or native Windows/macOS execution. The existing desktop handlers and stores retain those responsibilities.
+
+Final validation on Linux: **123 Rust tests passed**; `npm run build` passed; Playwright **36 passed, 15 existing skips**. The additional same-port rebind check passed using the production std-to-Tokio listener conversion. `git diff --check` passed. Ripwire edit-check reports the intentional private cancellation parameter on `invoke`, updated callers and unchanged external command/event contracts. Quality delta retains four blocking recent-edit churn findings (`churn=self`), the documented churn exception; no structural blocking regressions or acknowledgement suppressions were added. Remaining nonblocking findings include router length and static dead-code reports for SDK callbacks/test functions that execute in the suites.

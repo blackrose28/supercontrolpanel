@@ -1,10 +1,10 @@
 # SuperControlPanel MCP Transport and Auth
 
-## Implemented Slice 3 transport
+## Implemented Slice 4 transport
 
 One Axum listener serves the SDK at exact `/mcp` and all six REST compatibility routes without redirects. Pinned rmcp 3.9.0/Axum 0.8.8 and SDK-managed legacy sessions are unchanged. The adapter covers all existing registry tools/resources under shared policy, with official-client tests for 2025-11-25 and 2026-07-28. Standard JSON/SSE handling belongs to the SDK. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md) for contracts, tests and qualification limits.
 
-All routes require bearer auth, reject any Origin, and require Host `127.0.0.1:<port>`, `localhost:<port>`, or `[::1]:<port>`. Native requests omit Origin. Bodies are limited to 1 MiB. This remains a local static-bearer deployment without OAuth discovery or general remote-client claims. Listener status retains `transport: "http"` and `implementationStage: "http-streamable-slice2"`. Config UX and lifecycle qualification remain later slices.
+All routes require bearer auth, reject any Origin, and require Host `127.0.0.1:<port>`, `localhost:<port>`, or `[::1]:<port>`. Native requests omit Origin. Bodies are limited to 1 MiB. This remains a local static-bearer deployment without OAuth discovery or general remote-client claims. Listener status retains `transport: "http"` and `implementationStage: "http-streamable-slice2"`. Config UX and native qualification remain later slices. [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) documents shared worker limits, response/body deadlines, subscription invalidations, cancellation handoff and bounded listener shutdown. The transfer snapshot adds `scp://status/transfers` while preserving the five original resource URIs.
 
 ## Goal
 

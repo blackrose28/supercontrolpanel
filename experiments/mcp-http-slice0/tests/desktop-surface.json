@@ -417,7 +417,8 @@
         "destination": null,
         "sessionId": "scp-session"
       }
-    ]
+    ],
+    "uri": "scp://status/transfers"
   },
   "scp_transfer_get": {
     "args": {
