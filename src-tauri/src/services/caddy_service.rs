@@ -50,24 +50,8 @@ pub fn start_caddy_run(
         Option<String>,
     ) -> Result<(), String>,
 ) -> Result<StartFunctionResult, String> {
-    let folder_trim = folder.trim();
-    if folder_trim.is_empty() {
-        return Err("folder cannot be empty".to_string());
-    }
-    let folder_path = PathBuf::from(folder_trim);
-    if !folder_path.exists() {
-        return Err(format!(
-            "folder does not exist: {}",
-            folder_path.to_string_lossy()
-        ));
-    }
-    let caddyfile = folder_path.join("Caddyfile");
-    if !caddyfile.exists() {
-        return Err(format!(
-            "Caddyfile not found in folder: {}",
-            folder_path.to_string_lossy()
-        ));
-    }
+    let cmd = scp_core::caddy::build_caddy_command(&folder)?;
+    let folder_path = PathBuf::from(folder.trim());
 
     if let Some(prev) = lock_err(&function_store.statuses)?
         .get(caddy_function_id)
@@ -78,12 +62,6 @@ pub fn start_caddy_run(
         }
         let _ = update_functions_for_session_exit(app, function_store, &prev, None, "replaced");
     }
-
-    let mut cmd = CommandBuilder::new("caddy");
-    cmd.arg("run");
-    cmd.arg("--config");
-    cmd.arg("Caddyfile");
-    cmd.cwd(folder_path.clone());
 
     let session_id = open_pty_with_command_builder(
         cols,

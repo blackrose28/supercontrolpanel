@@ -219,7 +219,12 @@ indefinitely. This is cooperative cancellation with no hard shutdown deadline. W
 errors and panics remain visible after cleanup. The host must keep the flag set until return.
 Signal handling, process-tree/elevated-helper supervision, status/event publication, and a
 CLI-owned operation family remain pending. The CLI preview still provides inventory and
-profile initialization only.
+profile initialization only. Caddy launch preparation is now shared with the desktop:
+`scp_core::caddy::build_caddy_command` performs the existing folder/Caddyfile checks
+and builds `caddy run --config Caddyfile` with a literal working directory, without a
+shell, credential access, file writes, or launch. This selects Caddy as the first narrow
+foreground operation candidate; it does not yet expose a CLI Caddy command. Existence
+checks are not Caddyfile validation or a guarantee that paths remain valid at launch.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.

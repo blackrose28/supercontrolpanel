@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; signal handling, bounded platform supervision, operation families and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation is extracted; signal handling, bounded platform supervision, operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -466,6 +466,55 @@ signal/EOF policy and a suitable output destination; choose a narrow operation f
 from existing source rather than exposing arbitrary commands. Keep platform deadline,
 process-tree/elevation and real Windows/macOS/keyring qualification explicit release
 gates. Configuration/settings extraction, Streamable HTTP, stdio MCP and packaging remain.
+
+### First operation family: shared Caddy launch preparation (2026-11-11)
+
+Caddy is selected as the first narrow foreground candidate based on
+`services/caddy_service.rs`: it launches `caddy run --config Caddyfile` in a selected
+working folder. Unlike OpenVPN or Boundary/SSH flows, this launch has no application
+credential lookup, elevation helper, browser auth or terminal-input protocol. External
+Caddy configuration can still launch descendants or require privileged network access;
+this choice does not establish process-tree supervision or platform qualification.
+
+`scp_core::caddy::build_caddy_command(&str)` now owns the existing trimmed-folder and
+Caddyfile existence checks and literal PTY command construction. Desktop calls it before
+replacing a running session. The command name, arguments, working directory, errors,
+function/session IDs, status and event adapters are preserved. The helper reads metadata
+only: no config/profile creation, keyring access, file writes, shell, launch or status
+publication. It deliberately preserves the desktop's existence-only validation; Caddy
+validates config contents when run, and files can change after preparation. Explicit
+folder input avoids pulling all device-local configuration into this increment.
+
+TDD: three tests first failed to compile because the core module/API did not exist,
+then passed after extraction. They cover whitespace/absent folders, missing Caddyfile,
+a file supplied as a folder, no creation/modification, and exact executable/arguments/
+literal working directory with spaces, Unicode and shell metacharacters. No Caddy
+installation, network listener or actual external configuration is required by these
+tests. Source review confirms the desktop command alias still calls the same service;
+Ripwire misses that alias and reports no desktop callers or affected tests. Its
+`--affected=build_caddy_command` selects the new core tests, and the service edit-check
+reports unchanged public contract. Linux validation passes 61 workspace tests plus the
+credential compile-fail doctest (two ignored subprocess fixtures are exercised by tests),
+all 103 desktop Rust tests (17 existing warnings), strict all-feature/all-target workspace
+Clippy, formatting, diff whitespace checks and the locked standalone release build.
+Ripwire quality delta has zero gating regressions and three new test dead-code findings;
+Cargo executed all three tests. No acknowledgments were added. Native Windows/macOS
+qualification remains open.
+
+The next focused slice should implement the Caddy foreground **host** boundary, rather
+than another generic PTY primitive: define and test signal registration lifetime,
+monotonic cancellation, stdin EOF/client shutdown, and raw PTY output routing before
+exposing `scpctl caddy ...`. No input forwarding is needed for this operation; stdin EOF
+still needs an explicit cancellation policy. PTY bytes must not be mixed into JSON stdout
+or silently buffered without a limit. A locked stdout writer can block indefinitely;
+select/test a host output destination and failure policy rather than claiming the scoped
+worker makes stdout interruptible. Retain profile ownership through every worker join.
+Use a real direct-child fixture for signal/EOF and output failures, without launching a
+user's Caddyfile during tests. If hard deadlines require a different platform/process
+supervisor, implement or explicitly gate that capability before claiming bounded
+shutdown; do not silently weaken the plan. Runtime status stays absent until genuine
+supervised runtime state exists. Native keyring, elevation, Windows/macOS qualification,
+settings extraction/import, Streamable HTTP, stdio MCP and packaging remain open.
 
 Proposed Cargo workspace boundaries:
 
