@@ -189,6 +189,13 @@ not real credentials). On Linux, building that feature also requires the D-Bus d
 library and `pkg-config`; the default inventory/profile CLI build does not. Real native
 keyring/unlock checks on supported OSes remain release gates.
 
+Desktop and core also share the device-local `SyncSettings`/patch schema in
+`scp_core::local_settings`, including existing JSON field names, defaults and random
+MCP token generation. These models contain MCP/CC tokens, identity and paths; they
+are not CLI/MCP output models. Desktop loading, normalization, migrations, persistence
+and service activation remain host-local. This schema extraction adds no settings
+command or automatic activation; settings import is still pending for the CLI.
+
 Desktop and core now share the function-status store, PTY event payload types, and
 session-exit status transitions. Host event delivery and Boundary token lookup run
 outside the status mutex; late exits recheck the session before changing a replacement

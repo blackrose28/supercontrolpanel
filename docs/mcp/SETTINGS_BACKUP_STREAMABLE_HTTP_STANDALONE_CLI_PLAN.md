@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config schema/read-only file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config and device-local settings schemas/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -812,15 +812,62 @@ test retains its full legacy fixture, exact output and file-preservation asserti
 no quality acknowledgments were added. Native Windows/macOS execution remains
 unqualified; this command has no platform-specific production branches.
 
-Next focused slice: characterize and extract the non-platform device-local settings
-schema into core, preserving the desktop import path and exact defaults/serialization.
-Inspect `SyncSettings`, `SyncSettingsPatch` and their default helpers in
-`src-tauri/src/services/config_service.rs` first. Preserve exact token-generation
-and missing-field/default semantics; keep loaders, initialization, migration,
-keyring and writers host-local. Do not expose local tokens/identity or enable new CLI/MCP settings commands
-as part of schema extraction. Shared policy parsing/validation and coordinated import
-require their own contracts. Standard desktop Streamable HTTP, stdio MCP, other
-operation families and independent packaging remain actionable; native supervision
+### Shared device-local settings schema (2026-11-11)
+
+`scp-core::local_settings` now owns the unchanged `SyncSettings`, `SyncSettingsPatch`
+and five MCP default/token helpers formerly in desktop `services/config_service.rs`.
+Explicit re-exports preserve desktop service imports. `ConfigPaths`, file resolution,
+loaders, normalization, initialization, writers, migration, keyring and activation
+remain desktop-local. No dependency, command, event, CLI/MCP output or network behavior
+changed. The schema contains MCP/CC tokens, device identity and paths; it is not a
+public output DTO, redaction mechanism, restore validator or policy validator.
+
+Both `Default` and missing-field deserialization generate a fresh lowercase, simple
+UUID v4 MCP token. `Default` uses CC auth mode `token`; an omitted serialized field
+continues to deserialize to the empty string. Explicit empty strings/arrays, false
+and port zero remain unchanged by the schema; the desktop loader retains its existing
+normalization. Unknown fields are ignored, unknown policy/category/auth strings are
+preserved, and patch fields remain `Option`: omission and JSON null mean `None`,
+while explicit empty/false/zero values remain `Some`. Validation and service policy
+must be supplied separately; this extraction deliberately does not normalize them.
+
+TDD: five common contract tests first passed against the original desktop schema.
+The new core target failed with the missing-module RED, then passed after moving the
+exact definitions. A desktop identity test separately failed with distinct-type
+mismatches before desktop re-exports; it passes after adoption. The common contract
+is compiled by core and desktop to cover exact serialized fields/defaults, generated
+token shape/freshness, legacy omission behavior, Clone, explicit empty/zero values,
+all 18 patch fields, null semantics, unknown values and schema/type/port errors.
+No settings files, native keyring, listener or external executable are used.
+
+Validation: locked workspace all-feature tests pass 87 tests plus the credential
+compile-fail doctest; seven ignored subprocess fixtures are exercised by their tests.
+The locked desktop suite passes 109 tests with its 17 existing warnings. Strict
+workspace all-feature/all-target Clippy, workspace formatting, formatting of the
+changed desktop file, diff whitespace checks and a locked standalone release build
+pass. The desktop identity check is rerun after final test cleanup. A source comparison
+also confirms the moved production definitions are unchanged. Ripwire impact shows
+config/backup/MCP/CC/UI consumers; test selection finds the common contract but does
+not fully model include-based desktop coverage. Its full test gate exits 4 with
+177 unmodeled/untested impacted symbols across the existing desktop caller surface;
+this is not a clean static coverage gate. Executed core/desktop suites provide
+the regression evidence. Quality delta has zero gating/preexisting regressions; its eight
+non-gating new reachability rows are executed tests and their test modules. No quality
+acknowledgments were added. Native Windows/macOS execution remains unqualified;
+the extracted definitions contain no platform-specific branches.
+
+Next focused slice: characterize the existing MCP operation metadata/policy boundary
+and establish a shared registry/policy seam with fail-closed validation. Start with
+`src-tauri/src/mcp/tools.rs` (`list_mcp_tools`, `is_sensitive_tool`, `tool_category`,
+`enforce_tool_policy`) and the descriptors/HTTP caller, using Ripwire before reads.
+Keep names/categories/read-only/sensitivity aligned with actual dispatch; unknown
+policy values and unknown operation names must not grant authority. Preserve the
+permissive persistence schema above and validate at the execution boundary. Inspect
+local policy changes carefully: remote `config_set_sync_settings` must not be able to
+escalate its own authorization. Scope the next increment from source and tests; do
+not add transports or expose device-local tokens while extracting metadata/policy.
+Coordinated CLI settings import, standard desktop Streamable HTTP, stdio MCP, other
+operation families and independent packaging remain actionable. Native supervision
 and actual Caddy/keyring/elevation qualification stay gated rather than blocking
 independent increments.
 
