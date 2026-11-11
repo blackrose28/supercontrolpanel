@@ -285,3 +285,29 @@ External certificate/key/OVPN/SSH-identity/Caddy files are referenced, not bundl
 2. Persist per-server terminal history between app launches.
 3. Add richer error handling and diagnostics for Boundary/SSH/SCP flows.
 4. Harden security (permission scoping, safer command construction, audit logging).
+
+## Code intelligence
+
+Use [Ripwire](https://github.com/redhat-et/ripwire) for local code navigation and impact analysis. It is a development tool, separate from the application runtime and npm dependencies.
+
+Install the official prebuilt release on Linux or macOS (see [platform requirements](https://github.com/redhat-et/ripwire/blob/main/INSTALL.md)):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh -o /tmp/ripwire-install.sh
+# Review the downloaded script before running it.
+RIPWIRE_REPO=redhat-et/ripwire bash /tmp/ripwire-install.sh
+export PATH="$HOME/.local/bin:$PATH"
+ripwire --version
+```
+
+The installer verifies the release checksum and activates skills for detected coding agents. Re-run it to update. The CLI works without MCP setup or advisory hooks. Windows contributors can run it from a Linux environment such as WSL.
+
+From this repository:
+
+```bash
+ripwire . --for="server SSH session lifecycle" --legend=compact
+ripwire . --impact="start_server_ssh" --legend=compact
+ripwire . --uses="start_server_ssh" --legend=compact
+```
+
+Ripwire builds an incremental cache outside the repository automatically; no committed index or manual indexing step is needed. Follow AGENTS.md for impact review and the required TDD workflow.
