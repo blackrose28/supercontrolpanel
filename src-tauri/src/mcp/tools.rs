@@ -17,7 +17,7 @@ use crate::{
     mcp::{
         McpAppOverviewResult, McpBoundaryGetStatusResult, McpFunctionStatusGetArgs,
         McpFunctionStatusGetResult, McpFunctionStatusListResult, McpOpenVpnGetStatusResult,
-        McpToolCallEnvelope,
+        McpServerGetArgs, McpServerGetResult, McpServersListResult, McpToolCallEnvelope,
     },
     server_mgmt::{load_servers, Server},
     services::{
@@ -204,15 +204,15 @@ pub fn call_mcp_tool(
                 statuses.get(boundary_auth_function_id).cloned();
             json!(result)
         }
-        "servers_list" => json!(load_servers(app)?),
+        "servers_list" => {
+            let result: McpServersListResult = load_servers(app)?;
+            json!(result)
+        }
         "server_get" => {
-            let server_id = args
-                .get("serverId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "serverId is required".to_string())?;
-            let server = load_servers(app)?
+            let args = McpServerGetArgs::from_args(&args)?;
+            let server: McpServerGetResult = load_servers(app)?
                 .into_iter()
-                .find(|server| server.id == server_id)
+                .find(|server| server.id == args.server_id)
                 .ok_or_else(|| "server not found".to_string())?;
             json!(server)
         }

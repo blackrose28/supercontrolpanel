@@ -20,7 +20,7 @@ pub use scp_core::mcp_resources::McpResourceDescriptor;
 pub use scp_core::mcp_dto::{
     McpAppOverviewResult, McpBoundaryGetStatusResult, McpFunctionStatusGetArgs,
     McpFunctionStatusGetResult, McpFunctionStatusListResult, McpOpenVpnGetStatusResult,
-    McpToolCallEnvelope,
+    McpServerGetArgs, McpServerGetResult, McpServersListResult, McpToolCallEnvelope,
 };
 
 #[cfg(test)]
@@ -118,5 +118,28 @@ mod shared_service_status_identity {
             scp_core::mcp_dto::McpBoundaryGetStatusResult,
         ) -> crate::mcp::McpBoundaryGetStatusResult =
             std::convert::identity::<super::McpBoundaryGetStatusResult>;
+    }
+}
+
+#[cfg(test)]
+mod servers_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_servers.rs"
+    ));
+}
+
+#[cfg(test)]
+mod shared_servers_identity {
+    #[test]
+    fn desktop_paths_accept_core_server_contracts_without_conversion() {
+        let input = serde_json::json!({"serverId":"s"});
+        let shared = scp_core::mcp_dto::McpServerGetArgs::from_args(&input).unwrap();
+        let dto: super::McpServerGetArgs<'_> = shared;
+        let _: crate::mcp::McpServerGetArgs<'_> = dto;
+        let _: fn(crate::server_mgmt::Server) -> crate::mcp::McpServerGetResult =
+            std::convert::identity::<super::McpServerGetResult>;
+        let _: fn(Vec<crate::server_mgmt::Server>) -> crate::mcp::McpServersListResult =
+            std::convert::identity::<super::McpServersListResult>;
     }
 }

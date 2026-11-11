@@ -719,41 +719,42 @@ Where `items` is an array of `BoundaryTargetSummary`.
 
 ### Input
 
-```json
-{
-  "filter": "prod"
-}
-```
+`{}` is conventional. All arguments are ignored, including filters and non-objects.
 
 ### Output `data`
 
-```json
-{
-  "items": []
-}
-```
-
-Where `items` is an array of `Server`.
+A bare array of `Server` records, or `[]` for an empty inventory, with loader
+order and duplicates preserved. `McpServersListResult` aliases `Vec<Server>`;
+there is no `items` wrapper, filtering, sorting or deduplication.
 
 ## `server_get`
 
 ### Input
 
 ```json
-{
-  "serverId": "server-1"
-}
+{"serverId":"server-1"}
 ```
+
+Serialize-only borrowed `McpServerGetArgs` preserves the existing
+`.get("serverId").and_then(Value::as_str)` lookup: extra fields are ignored;
+empty, whitespace, Unicode and control strings are accepted without normalization.
+Missing/null/non-string IDs and non-object inputs fail with `serverId is required`.
 
 ### Output `data`
 
-```json
-{
-  "item": {}
-}
-```
+A bare `Server` object. `McpServerGetResult` aliases the existing shared inventory
+model; there is no `item` wrapper. The host loads inventory and returns the first
+exact ID match, or `server not found`. Loader errors still propagate.
 
-Where `item` is a `Server`.
+Both result aliases serialize all ten existing camelCase fields: `id`, `name`,
+`host`, `os` (`linux`/`windows`), `connectionMethod` (`ssh`/`boundary`), `sshPort`,
+`sshUser`, `boundaryTargetId`, `boundaryListenPort`, and `services` (ordered
+`{name, port}` records, including duplicates). Empty strings/arrays and zero ports
+remain explicit. These aliases inherit the inventory model's existing derives;
+they add no validation, wrappers or credential lookup. Both tools retain the
+existing policy-first dispatch and custom success envelope. The desktop loader
+retains its settings-maintenance gate and path creation/read behavior; it is not
+replaced by the standalone read-only inventory reader.
 
 ## `server_tunnel_start`
 

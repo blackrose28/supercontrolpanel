@@ -1,0 +1,39 @@
+[
+  {
+    "id": "z-雪\n\u001b",
+    "name": "",
+    "host": " host ",
+    "os": "windows",
+    "connectionMethod": "boundary",
+    "sshPort": 0,
+    "sshUser": "雪\u0000",
+    "boundaryTargetId": "",
+    "boundaryListenPort": 65535,
+    "services": [
+      {
+        "name": "b",
+        "port": 65535
+      },
+      {
+        "name": "",
+        "port": 0
+      },
+      {
+        "name": "b",
+        "port": 65535
+      }
+    ]
+  },
+  {
+    "id": "",
+    "name": "a",
+    "host": "",
+    "os": "linux",
+    "connectionMethod": "ssh",
+    "sshPort": 65535,
+    "sshUser": "",
+    "boundaryTargetId": "unused",
+    "boundaryListenPort": 0,
+    "services": []
+  }
+]

@@ -357,6 +357,13 @@ and `McpBoundaryGetStatusResult` aliases. Each returns the bare stored status or
 the desktop retains its fixed function-ID lookups. These contracts add no CLI
 status command.
 
+Server inventory MCP contracts also share `McpServerGetArgs`, `McpServerGetResult`
+and `McpServersListResult`. Results remain bare server objects/arrays in loader
+order, with every inventory field and duplicate preserved. Get accepts any string
+`serverId` unchanged and retains the existing required/not-found errors; list
+ignores all arguments. Desktop policy, loader and envelope behavior are unchanged.
+This extraction does not add standalone MCP or CLI commands.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

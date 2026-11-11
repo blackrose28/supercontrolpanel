@@ -1331,15 +1331,63 @@ workspace suite), but cannot infer their runners. Twelve untested paths include
 the 11 downstream dispatcher symbols and an unrelated SETTINGS_BACKUP Markdown
 heading. This is not a clean static coverage verdict or transport/UI E2E proof.
 
-Next focused increment: inspect `servers_list` / `server_get` handlers and
-consumers, then share their argument/result contracts with exact shared and
-desktop fixtures if the existing inventory type is appropriate. Preserve list
-ordering, permissive string lookup, exact errors, ignored list arguments and
-policy/loader behavior; do not add CLI operations incidentally. Standard desktop
-Streamable HTTP is independently actionable after checking current official
-SDK/protocol sources. Coordinated CLI import, other operation families, stdio
-MCP and packaging remain open. Do not retry the unchanged-host cgroup spike or
-claim stronger cleanup/keyring/elevation guarantees.
+### Shared server-inventory MCP contracts (2026-11-11)
+
+`scp-core::mcp_dto` now exports Serialize-only borrowed `McpServerGetArgs`,
+with the previous permissive string lookup and exact `serverId is required`
+error. Empty/whitespace/control/Unicode IDs are accepted unchanged; extra fields
+are ignored. Non-object inputs and missing/null/non-string IDs fail alike.
+`McpServerGetResult` aliases the existing `servers::Server` and
+`McpServersListResult` aliases its vector, inheriting existing inventory derives.
+Desktop DTO/public paths re-export them; dispatcher branches use the shared
+parser and result annotations. No validation, normalization, wrappers, dependencies,
+CLI commands or transport changes were introduced.
+
+List still ignores ALL arguments (including filters/non-objects), preserving loader
+order and duplicates. Get still loads after parsing, selects the first exact ID
+match and returns `server not found` on absence. Policy remains first; loader
+errors, settings-maintenance gate, path creation/read behavior and success envelope
+are unchanged. Shared standalone read-only inventory loading does not replace the
+desktop loader. HTTP/direct Tauri share this dispatcher; inventory resource delegates
+to list with `{}`; helper list/get send `{}`/`{serverId}` and print envelopes without
+inspecting server fields. Schema examples now correctly show bare arrays/objects,
+rather than stale `items`/`item` wrappers, and list all ten inventory fields.
+
+TDD: the exact result fixture first passed against local aliases of the original
+`Server`/`Vec<Server>` representations. Core and desktop RED failed on missing
+shared/re-exported types. GREEN includes result and argument contracts shared by
+core and desktop plus desktop public-path type identity. Fixtures pin every field,
+both OS/connection variants, empty values, Unicode/control text, zero/u16::MAX
+ports, service ordering/duplicates and inventory ordering/duplicates. Argument
+cases pin accepted strings/borrowed storage, ignored extras and exact errors for
+invalid shapes. These tests do not execute dispatcher selection, ignored list
+arguments, policy/loader behavior, HTTP/Tauri/helper integration or UI flows.
+
+Validation: locked workspace all-feature suite passes 110 tests plus the credential
+compile-fail doctest; seven ignored subprocess fixtures are exercised by acceptance
+tests. Locked desktop suite passes 144 tests with 17 existing warnings. Strict
+workspace all-feature/all-target Clippy, locked release CLI build, workspace fmt,
+changed desktop/shared-contract rustfmt and diff whitespace checks pass. No further
+production refactor was needed. Native Windows/macOS qualification remains open.
+
+Ripwire dispatcher impact/uses identifies three direct HTTP/resource/Tauri callers
+and eleven downstream paths; affected finds no modeled tests. Edit-check reports
+unchanged dispatcher signature. The first quality pass flagged parser/test clones;
+the final pass after simplifying the parser and consolidating argument cases has
+zero gating regressions/acks, one minor ambient dispatcher churn finding, and five
+new nongating test/module reachability findings. Staged test gate exits 4, selecting
+the two new server test files and existing function-status contract (all exercised
+by Cargo), with unknown runners and twelve untested paths including eleven
+downstream dispatcher symbols and an unrelated SETTINGS_BACKUP Markdown heading.
+This is not a clean static coverage verdict or transport/UI E2E proof.
+
+Next focused increment: inspect `config_get_paths` and its consumers, and share
+its MCP result contract if the existing configuration-path model is appropriate;
+preserve host path resolution, errors and ignored arguments. No incidental CLI
+enablement. Standard desktop Streamable HTTP is independently actionable after
+checking current official SDK/protocol sources. Coordinated CLI import, other
+operation families, stdio MCP and packaging remain open. Do not retry the
+unchanged-host cgroup spike or claim stronger cleanup/keyring/elevation guarantees.
 
 Proposed Cargo workspace boundaries:
 

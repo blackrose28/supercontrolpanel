@@ -55,3 +55,28 @@ pub struct McpAppOverviewResult {
     pub active_functions: usize,
     pub known_function_count: usize,
 }
+
+/// Existing `server_get` arguments; no trimming, normalization or ID validation.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerGetArgs<'a> {
+    pub server_id: &'a str,
+}
+
+impl<'a> McpServerGetArgs<'a> {
+    /// Preserve the dispatcher's string lookup and error; ignore extra fields.
+    pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
+        Ok(Self {
+            server_id: args
+                .get("serverId")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("serverId is required")?,
+        })
+    }
+}
+
+/// Bare inventory record, with the shared server model's exact fields.
+pub type McpServerGetResult = crate::servers::Server;
+
+/// Bare array in host loader order, with no filtering, sorting or deduplication.
+pub type McpServersListResult = Vec<McpServerGetResult>;
