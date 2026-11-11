@@ -1,7 +1,5 @@
 use std::{
-    collections::HashMap,
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -65,13 +63,6 @@ impl Default for McpRuntimeState {
             listener: Mutex::new(None),
         }
     }
-}
-
-struct SimpleHttpRequest {
-    method: String,
-    path: String,
-    headers: HashMap<String, String>,
-    body: Vec<u8>,
 }
 
 fn is_localhost_bind(bind_address: &str) -> bool {
@@ -139,7 +130,7 @@ pub fn sync_mcp_runtime_from_settings(
             state,
             bind_address,
             settings.mcp_port,
-            "http-minimal",
+            "http-streamable-slice2",
             &message,
         );
         return Err(message);
@@ -155,7 +146,7 @@ pub fn sync_mcp_runtime_from_settings(
             state,
             bind_address,
             port,
-            "http-minimal",
+            "http-streamable-slice2",
             "MCP auth token cannot be empty",
         );
         return Err("MCP auth token cannot be empty".to_string());
@@ -165,7 +156,13 @@ pub fn sync_mcp_runtime_from_settings(
         Ok(listener) => listener,
         Err(err) => {
             let message = format!("failed to bind MCP listener: {err}");
-            set_runtime_error(state, bind_address, port, "http-minimal", &message);
+            set_runtime_error(
+                state,
+                bind_address,
+                port,
+                "http-streamable-slice2",
+                &message,
+            );
             return Err(message);
         }
     };
@@ -198,7 +195,7 @@ pub fn sync_mcp_runtime_from_settings(
         snapshot.bind_address = bind_address;
         snapshot.port = port;
         snapshot.transport = "http".to_string();
-        snapshot.implementation_stage = "http-minimal".to_string();
+        snapshot.implementation_stage = "http-streamable-slice2".to_string();
         snapshot.last_error = None;
         snapshot.last_started_at_ms = Some(now_ms());
     }
@@ -268,37 +265,66 @@ fn run_http_server_loop(
     stop: Arc<AtomicBool>,
     token: String,
 ) {
-    while !stop.load(Ordering::SeqCst) {
-        match listener.accept() {
-            Ok((mut stream, _)) => {
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-                let _ = handle_http_connection(&app, &mut stream, &token);
-            }
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(100));
-            }
-            Err(_) => {
-                thread::sleep(Duration::from_millis(100));
-            }
+    let runtime = match tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(_) => return,
+    };
+    runtime.block_on(async move {
+        let port = listener.local_addr().map(|a| a.port()).unwrap_or(46739);
+        let listener = match tokio::net::TcpListener::from_std(listener) {
+            Ok(listener) => listener,
+            Err(_) => return,
+        };
+        let router = super::protocol::protocol_router(desktop_protocol_host(app), port, token, true);
+        // Transport shutdown drops SDK sessions as well; desktop-owned work stays in its stores.
+        tokio::select! {
+            _ = axum::serve(listener, router) => {},
+            _ = async { while !stop.load(Ordering::SeqCst) { tokio::time::sleep(Duration::from_millis(50)).await; } } => {},
         }
+    });
+    runtime.shutdown_timeout(Duration::from_secs(5));
+}
+
+fn desktop_protocol_host(app: AppHandle) -> super::protocol::ProtocolHost {
+    let discovery_app = app.clone();
+    let execution_app = app.clone();
+    super::protocol::ProtocolHost {
+        permitted: Arc::new(move || {
+            allowed_mcp_tools(&discovery_app)
+                .map(|tools| tools.iter().any(|t| t.name == "function_status_list"))
+                .map_err(super::contracts::classify_host_error)
+        }),
+        execute: Arc::new(move |args| {
+            audit_mcp_call("tool.call", "function_status_list", &args);
+            call_mcp_tool(
+                &execution_app,
+                "function_status_list",
+                args,
+                crate::services::now_ms,
+                "openvpn-connect",
+                "boundary-auth",
+                mcp_config_paths,
+            )
+            .map(|envelope| envelope.data)
+            .map_err(super::contracts::classify_host_error)
+        }),
+        legacy: Arc::new(move |method, path, body| {
+            match legacy_request(&app, method, path, body) {
+                Ok(payload) => (200, payload),
+                Err(error) => (
+                    if error == "Not found" { 404 } else { 400 },
+                    error_envelope(&error, crate::services::now_ms),
+                ),
+            }
+        }),
     }
 }
 
-fn handle_http_connection(
-    app: &AppHandle,
-    stream: &mut TcpStream,
-    token: &str,
-) -> Result<(), String> {
-    let request = match read_http_request(stream) {
-        Ok(request) => request,
-        Err(err) => return write_error_envelope(stream, 400, &err, crate::services::now_ms),
-    };
-    if !is_authorized(&request, token) {
-        return write_error_envelope(stream, 401, "Unauthorized", crate::services::now_ms);
-    }
-
-    match (request.method.as_str(), request.path.as_str()) {
+fn legacy_request(app: &AppHandle, method: &str, path: &str, body: &[u8]) -> Result<Value, String> {
+    match (method, path) {
         ("GET", "/health") | ("GET", "/mcp/status") => {
             let state = app.state::<McpRuntimeState>();
             let mut status = mcp_runtime_status(&state)?;
@@ -306,40 +332,26 @@ fn handle_http_connection(
                 .last_error
                 .map(|_| "MCP listener failed; inspect local desktop diagnostics.".into());
             let payload = serde_json::to_value(status).map_err(|e| e.to_string())?;
-            write_json_response(stream, 200, payload)
+            Ok(payload)
         }
         ("GET", "/mcp/tools") => {
             let payload =
                 serde_json::to_value(allowed_mcp_tools(app)?).map_err(|e| e.to_string())?;
-            write_json_response(stream, 200, payload)
+            Ok(payload)
         }
         ("GET", "/mcp/resources") => {
             let payload =
                 serde_json::to_value(allowed_mcp_resources(app)?).map_err(|e| e.to_string())?;
-            write_json_response(stream, 200, payload)
+            Ok(payload)
         }
         ("POST", "/mcp/tools/call") => {
-            let body: Value = match serde_json::from_slice(&request.body) {
+            let body: Value = match serde_json::from_slice(body) {
                 Ok(body) => body,
-                Err(err) => {
-                    return write_error_envelope(
-                        stream,
-                        400,
-                        &format!("invalid JSON body: {err}"),
-                        crate::services::now_ms,
-                    )
-                }
+                Err(err) => return Err(format!("invalid JSON body: {err}").to_string()),
             };
             let tool_name = match body.get("toolName").and_then(Value::as_str) {
                 Some(tool_name) => tool_name,
-                None => {
-                    return write_error_envelope(
-                        stream,
-                        400,
-                        "toolName is required",
-                        crate::services::now_ms,
-                    )
-                }
+                None => return Err("toolName is required".to_string()),
             };
             let args = body.get("args").cloned().unwrap_or_else(|| json!({}));
             audit_mcp_call("tool.call", tool_name, &args);
@@ -353,35 +365,19 @@ fn handle_http_connection(
                 mcp_config_paths,
             ) {
                 Ok(envelope) => envelope,
-                Err(err) => {
-                    return write_error_envelope(stream, 400, &err, crate::services::now_ms)
-                }
+                Err(err) => return Err(err.to_string()),
             };
             let payload = serde_json::to_value(envelope).map_err(|e| e.to_string())?;
-            write_json_response(stream, 200, payload)
+            Ok(payload)
         }
         ("POST", "/mcp/resources/read") => {
-            let body: Value = match serde_json::from_slice(&request.body) {
+            let body: Value = match serde_json::from_slice(body) {
                 Ok(body) => body,
-                Err(err) => {
-                    return write_error_envelope(
-                        stream,
-                        400,
-                        &format!("invalid JSON body: {err}"),
-                        crate::services::now_ms,
-                    )
-                }
+                Err(err) => return Err(format!("invalid JSON body: {err}").to_string()),
             };
             let uri = match body.get("uri").and_then(Value::as_str) {
                 Some(uri) => uri,
-                None => {
-                    return write_error_envelope(
-                        stream,
-                        400,
-                        "uri is required",
-                        crate::services::now_ms,
-                    )
-                }
+                None => return Err("uri is required".to_string()),
             };
             audit_mcp_call("resource.read", uri, &json!({}));
             let envelope = match read_mcp_resource(
@@ -393,14 +389,12 @@ fn handle_http_connection(
                 mcp_config_paths,
             ) {
                 Ok(envelope) => envelope,
-                Err(err) => {
-                    return write_error_envelope(stream, 400, &err, crate::services::now_ms)
-                }
+                Err(err) => return Err(err.to_string()),
             };
             let payload = serde_json::to_value(envelope).map_err(|e| e.to_string())?;
-            write_json_response(stream, 200, payload)
+            Ok(payload)
         }
-        _ => write_error_envelope(stream, 404, "Not found", crate::services::now_ms),
+        _ => Err("Not found".into()),
     }
 }
 
@@ -411,164 +405,18 @@ fn mcp_config_paths(app: &AppHandle) -> Result<ConfigPaths, String> {
     })
 }
 
-fn is_authorized(request: &SimpleHttpRequest, token: &str) -> bool {
-    request
-        .headers
-        .get("authorization")
-        .map(|value| value.trim() == format!("Bearer {token}"))
-        .unwrap_or(false)
-}
-
 fn audit_mcp_call(kind: &str, name: &str, args: &Value) {
     eprintln!("{}", super::contracts::audit_summary(kind, name, args));
 }
 
-fn read_http_request(stream: &mut TcpStream) -> Result<SimpleHttpRequest, String> {
-    let mut buf = Vec::new();
-    let mut temp = [0u8; 4096];
-    let mut header_end = None;
-    let mut content_length = 0usize;
-
-    loop {
-        let n = stream
-            .read(&mut temp)
-            .map_err(|e| format!("failed to read request: {e}"))?;
-        if n == 0 {
-            break;
-        }
-        buf.extend_from_slice(&temp[..n]);
-        if header_end.is_none() {
-            header_end = find_header_end(&buf);
-            if let Some(end) = header_end {
-                content_length = parse_content_length(&buf[..end]);
-                if buf.len() >= end + content_length {
-                    break;
-                }
-            }
-        } else if let Some(end) = header_end {
-            if buf.len() >= end + content_length {
-                break;
-            }
-        }
-        if buf.len() > 1024 * 1024 {
-            return Err("request too large".to_string());
-        }
-    }
-
-    let header_end = header_end.ok_or_else(|| "invalid HTTP request".to_string())?;
-    let headers_raw = &buf[..header_end];
-    let body = buf[header_end..].to_vec();
-    let header_text = String::from_utf8(headers_raw.to_vec())
-        .map_err(|e| format!("request headers were not valid UTF-8: {e}"))?;
-    let mut lines = header_text.split("\r\n");
-    let request_line = lines
-        .next()
-        .ok_or_else(|| "missing request line".to_string())?;
-    let mut request_parts = request_line.split_whitespace();
-    let method = request_parts
-        .next()
-        .ok_or_else(|| "missing HTTP method".to_string())?
-        .to_string();
-    let path = request_parts
-        .next()
-        .ok_or_else(|| "missing HTTP path".to_string())?
-        .to_string();
-    let mut headers = HashMap::new();
-    for line in lines {
-        if line.is_empty() {
-            continue;
-        }
-        if let Some((name, value)) = line.split_once(':') {
-            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
-        }
-    }
-
-    Ok(SimpleHttpRequest {
-        method,
-        path,
-        headers,
-        body,
-    })
-}
-
-fn find_header_end(buf: &[u8]) -> Option<usize> {
-    buf.windows(4)
-        .position(|window| window == b"\r\n\r\n")
-        .map(|idx| idx + 4)
-}
-
-fn parse_content_length(headers_raw: &[u8]) -> usize {
-    let header_text = String::from_utf8_lossy(headers_raw);
-    for line in header_text.lines() {
-        if let Some((name, value)) = line.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("content-length") {
-                return value.trim().parse::<usize>().unwrap_or(0);
-            }
-        }
-    }
-    0
-}
-
-fn write_json_response(stream: &mut TcpStream, status: u16, payload: Value) -> Result<(), String> {
-    let status_text = match status {
-        200 => "OK",
-        400 => "Bad Request",
-        401 => "Unauthorized",
-        404 => "Not Found",
-        500 => "Internal Server Error",
-        _ => "OK",
-    };
-    let body =
-        serde_json::to_vec(&payload).map_err(|e| format!("failed to encode JSON response: {e}"))?;
-    let response = format!(
-        "HTTP/1.1 {status} {status_text}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
-    stream
-        .write_all(response.as_bytes())
-        .and_then(|_| stream.write_all(&body))
-        .map_err(|e| format!("failed to write HTTP response: {e}"))
-}
-
-fn write_error_envelope(
-    stream: &mut TcpStream,
-    status: u16,
-    message: &str,
-    now_ms: fn() -> u64,
-) -> Result<(), String> {
-    write_json_response(
-        stream,
-        status,
-        json!({
-            "ok": false,
-            "message": safe_http_error(message),
-            "data": {},
-            "warnings": [],
-            "timestamp": now_ms(),
-        }),
-    )
+fn error_envelope(message: &str, now_ms: fn() -> u64) -> Value {
+    json!({"ok":false,"message":safe_http_error(message),"data":{},"warnings":[],"timestamp":now_ms()})
 }
 
 fn safe_http_error(message: &str) -> String {
-    use super::contracts::{ErrorCode, OperationError};
-    for code in [
-        ErrorCode::PolicyDenied,
-        ErrorCode::InvalidArguments,
-        ErrorCode::CapabilityUnavailable,
-        ErrorCode::NotFound,
-        ErrorCode::Conflict,
-        ErrorCode::Cancelled,
-        ErrorCode::Timeout,
-        ErrorCode::OperationFailed,
-    ] {
-        let safe = OperationError::new(code).legacy_message();
-        if message == safe {
-            return safe;
-        }
-    }
     match message {
         "Unauthorized" | "Not found" | "toolName is required" | "uri is required" => message.into(),
-        _ => OperationError::new(ErrorCode::OperationFailed).legacy_message(),
+        _ => super::contracts::classify_host_error(message.into()).legacy_message(),
     }
 }
 
@@ -577,16 +425,8 @@ mod slice1_tests {
     use super::*;
     #[test]
     fn legacy_http_errors_do_not_echo_runtime_or_parser_secrets() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
-        let (mut server, _) = listener.accept().unwrap();
-        write_error_envelope(&mut server, 400, "keyring error: unlabelled-secret", || 123).unwrap();
-        drop(server);
-        let mut response = String::new();
-        client.read_to_string(&mut response).unwrap();
-        assert!(!response.contains("unlabelled-secret"));
-        let envelope: Value =
-            serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let envelope = error_envelope("keyring error: unlabelled-secret", || 123);
+        assert!(!envelope.to_string().contains("unlabelled-secret"));
         assert_eq!(envelope["ok"], false);
         assert_eq!(envelope["timestamp"], 123);
         assert!(envelope["message"]

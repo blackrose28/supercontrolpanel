@@ -567,7 +567,7 @@ pub fn execute<T>(
     host(op).map_err(classify_host_error)
 }
 
-fn classify_host_error(message: String) -> OperationError {
+pub(super) fn classify_host_error(message: String) -> OperationError {
     for code in [
         ErrorCode::PolicyDenied,
         ErrorCode::InvalidArguments,

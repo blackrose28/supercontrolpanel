@@ -1,5 +1,9 @@
 # SuperControlPanel MCP Security Model
 
+## Slice 2 standard endpoint
+
+`/mcp` exposes only the read-only function-status operation and its resource. Both execute through the same Slice 1 authorization, validation, backup gate, safe DTO projection, and output checks as legacy calls. Every discovery/call/read checks current policy; a legacy session does not confer authority. All HTTP routes reject missing/invalid bearer (401), browser Origin and invalid Host/port (403). Legacy auth errors retain the existing envelope fields. Operational tool failures use `isError: true` with safe stable application codes; invalid arguments and resources use SDK protocol errors. See [Slice 2 verification](DESKTOP_STREAMABLE_HTTP_SLICE2.md). Subscription revocation, worker limits, and cancellation ownership remain Slice 4 work.
+
 ## Security goals
 
 - Keep MCP access local by default

@@ -1,5 +1,9 @@
 # SuperControlPanel MCP Tool Catalog
 
+## Implemented standard subset (Slice 2)
+
+At `/mcp`, only `function_status_list` and `scp://status/functions` are advertised, subject to current read-only policy. Their shared payload is `{ "statuses": [...] }`; each item uses the Slice 1 safe DTO. This does not migrate the rest of the 40-operation REST catalog. See [Slice 2](DESKTOP_STREAMABLE_HTTP_SLICE2.md).
+
 ## Purpose
 
 This document defines the proposed MCP tool surface for SuperControlPanel so AI agents can inspect state and operate the running app.

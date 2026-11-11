@@ -1,5 +1,11 @@
 # SuperControlPanel MCP Transport and Auth
 
+## Implemented Slice 2 transport
+
+One Axum listener now serves the SDK at exact `/mcp` and retains all six REST compatibility routes without redirects. It uses pinned rmcp 3.9.0/Axum 0.8.8 and SDK-managed legacy sessions. The implemented standard subset is `function_status_list` and `scp://status/functions`; both revisions (2025-11-25 and 2026-07-28) have official-client integration tests. Standard JSON/SSE handling belongs to the SDK. See [Slice 2](DESKTOP_STREAMABLE_HTTP_SLICE2.md) for scope and reproduction.
+
+All routes require bearer auth, reject any Origin, and require Host `127.0.0.1:<port>`, `localhost:<port>`, or `[::1]:<port>`. Native requests omit Origin. Bodies are limited to 1 MiB. This is a local static-bearer deployment; OAuth discovery and general remote clients are not claimed. Listener status retains `transport: "http"`; active `implementationStage` is now `http-streamable-slice2`. Config copy/setup UX and lifecycle qualification remain later slices.
+
 ## Goal
 
 Provide an MCP connection model that works well when the SuperControlPanel desktop app is already running and an AI agent wants to call into that live app instance.

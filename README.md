@@ -117,7 +117,7 @@ npm run helper:run -- openvpn status
 
 ## MCP support
 
-SuperControlPanel can now expose a **minimal localhost HTTP MCP surface** for AI agents and local helper tooling.
+SuperControlPanel exposes **localhost Streamable HTTP MCP at `/mcp`** with a deliberately small read-only surface, alongside the existing REST helper routes.
 
 Current implementation highlights:
 
@@ -132,7 +132,9 @@ Current implementation highlights:
 
 [Slice 1 compatibility and test record](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE1.md) documents protected fields, stricter inputs, filtered discovery, and reduced remote diagnostics.
 
-Current HTTP routes:
+Standard `/mcp` currently advertises only `function_status_list` and `scp://status/functions`. Both return `{ "statuses": [...] }` using the safe function-status DTO. Standard calls publish input/output schemas and structured plus text results. Other operations remain available only through the policy-controlled REST/Tauri paths until later slices.
+
+Current compatibility HTTP routes:
 
 - `GET /health`
 - `GET /mcp/status`
@@ -141,7 +143,7 @@ Current HTTP routes:
 - `POST /mcp/tools/call`
 - `POST /mcp/resources/read`
 
-This is still a **repo-local minimal transport**, not a final spec-polished MCP server.
+All routes require the device-local bearer token, reject browser Origins, and validate the loopback Host and configured port. Use `http://127.0.0.1:<port>/mcp` (or `http://[::1]:<port>/mcp` for an IPv6 listener) for standard clients; the helper continues using the base URL.
 
 Detailed design docs live under `docs/mcp/`:
 
@@ -162,8 +164,9 @@ The [combined roadmap](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_P
 tracks its relationship to settings backup and the standalone CLI.
 The [operation inventory](docs/mcp/DESKTOP_STREAMABLE_HTTP_INVENTORY.md) and
 [Slice 0 compatibility report](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE0.md)
-record the source audit and isolated SDK/client spike; the standard endpoint is
-not yet implemented in the desktop app.
+record the source audit and isolated SDK/client spike.
+[Slice 2 implementation and verification](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE2.md)
+records the integrated read-only endpoint and the remaining qualification limits.
 
 Helper CLI note:
 

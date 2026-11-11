@@ -1,8 +1,12 @@
 # SuperControlPanel MCP Tool Schemas
 
+## Slice 2 standard result schema
+
+Standard `function_status_list` takes an empty object (`additionalProperties: false`). Its output is an object with required `statuses`, an array whose items use `SafeFunctionStatus::schema()`, and no additional properties. The tool advertises this output schema and returns identical JSON as `structuredContent` and text. `scp://status/functions` returns that same object as text with `application/json`. Legacy `data` remains the unwrapped array. Invalid arguments produce a JSON-RPC invalid-params error; runtime/policy failures produce tool `isError: true` with a safe code/message. Other standard tools/resources are unimplemented and unadvertised.
+
 ## Implemented Slice 1 contract
 
-The executable schemas in `src-tauri/src/mcp/validation.rs` and `public_dto.rs`, with [Slice 1 corrections](DESKTOP_STREAMABLE_HTTP_SLICE1.md), describe current legacy `data` payloads. Older examples below are planning context where they differ. Inputs reject unknown fields and invalid types/bounds. Config/settings outputs omit secrets rather than returning password/token fields. Status `message` and transfer title/detail are empty, transfer source/destination are null, and direct SCP result text is a static acknowledgement. `boundaryTokenSource` remains provenance, never a credential. Full standard MCP result wrappers are a later adapter concern.
+The executable schemas in `src-tauri/src/mcp/validation.rs` and `public_dto.rs`, with [Slice 1 corrections](DESKTOP_STREAMABLE_HTTP_SLICE1.md), describe current legacy `data` payloads. Older examples below are planning context where they differ. Inputs reject unknown fields and invalid types/bounds. Config/settings outputs omit secrets rather than returning password/token fields. Status `message` and transfer title/detail are empty, transfer source/destination are null, and direct SCP result text is a static acknowledgement. `boundaryTokenSource` remains provenance, never a credential. The Slice 2 wrapper above applies only to the implemented standard function-status operation.
 
 ## Purpose
 

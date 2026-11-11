@@ -156,6 +156,8 @@ Every code increment follows repository strict TDD: write a behavioral test, run
 | 5. Reviewed parity additions | Target search, executable detection, approved RDP/credential operations | Capability, policy, platform/error tests for each addition |
 | 6. Config UX and qualification | Tested setup examples, docs, real-client and native smoke evidence | Release checklist below; no unsupported interoperability claims |
 
+Slice 2 implementation and verification: [DESKTOP_STREAMABLE_HTTP_SLICE2.md](DESKTOP_STREAMABLE_HTTP_SLICE2.md).
+
 Complete the policy foundation before enabling mutations through the standard endpoint. Slice 2 may land behind the existing disabled-by-default setting while later families are migrated; clearly expose the implemented subset.
 
 ## Acceptance tests and release checklist
