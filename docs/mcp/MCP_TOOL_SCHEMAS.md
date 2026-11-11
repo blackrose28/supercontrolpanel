@@ -187,15 +187,29 @@ execution handler, CLI operation or generated standard MCP JSON Schema.
 {}
 ```
 
+All arguments are ignored, including non-object values. A supplied `functionId`
+does not change the host's fixed `openvpn-connect` lookup.
+
 ### Output `data`
 
 ```json
 {
-  "status": {}
+  "functionId": "openvpn-connect",
+  "state": "stopped",
+  "message": "",
+  "boundaryTokenSource": null,
+  "sessionId": null,
+  "updatedAtMs": 0
 }
 ```
 
-Where `status` is a `FunctionStatus`.
+A bare `FunctionStatus`, or JSON `null` when no status is stored under the fixed
+ID; there is no `status` wrapper or not-found error. The shared
+`McpOpenVpnGetStatusResult` aliases `Option<FunctionStatus>`. All six status
+fields serialize unchanged, including null optional fields, arbitrary strings
+and the full u64 timestamp. The result type does not validate the stored
+`functionId`, state or token source, or synthesize a stopped status. Policy and
+locking remain host responsibilities; no CLI status command is added.
 
 ## `openvpn_start`
 
@@ -241,15 +255,29 @@ Where `result` is a `StartFunctionResult`.
 {}
 ```
 
+All arguments are ignored, including non-object values. A supplied `functionId`
+does not change the host's fixed `boundary-auth` lookup.
+
 ### Output `data`
 
 ```json
 {
-  "status": {}
+  "functionId": "boundary-auth",
+  "state": "stopped",
+  "message": "",
+  "boundaryTokenSource": null,
+  "sessionId": null,
+  "updatedAtMs": 0
 }
 ```
 
-Where `status` is a `FunctionStatus`.
+A bare `FunctionStatus`, or JSON `null` when no status is stored under the fixed
+ID; there is no `status` wrapper or not-found error. The shared
+`McpBoundaryGetStatusResult` aliases `Option<FunctionStatus>`. All six status
+fields serialize unchanged, including null optional fields, arbitrary strings
+and the full u64 timestamp. The result type does not validate the stored
+`functionId`, state or token source, or synthesize a stopped status. Policy and
+locking remain host responsibilities; no CLI status command is added.
 
 ## `boundary_auth_start`
 

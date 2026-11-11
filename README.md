@@ -351,6 +351,12 @@ The overview result also uses a shared `McpAppOverviewResult`: `appVersion`,
 (all stored statuses). Desktop counting and ignored-argument behavior are unchanged;
 the schema example now matches those existing fields. No CLI overview command is added.
 
+OpenVPN and Boundary MCP status results use shared `McpOpenVpnGetStatusResult`
+and `McpBoundaryGetStatusResult` aliases. Each returns the bare stored status or
+`null` when absent, with unchanged fields and values. Arguments remain ignored and
+the desktop retains its fixed function-ID lookups. These contracts add no CLI
+status command.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

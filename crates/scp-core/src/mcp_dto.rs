@@ -40,6 +40,12 @@ pub type McpFunctionStatusGetResult = crate::runtime::FunctionStatus;
 /// Bare array in host-supplied iteration order; no sorting or filtering.
 pub type McpFunctionStatusListResult = Vec<McpFunctionStatusGetResult>;
 
+/// Bare `openvpn_get_status` status or null when the host's fixed-ID lookup is absent.
+pub type McpOpenVpnGetStatusResult = Option<crate::runtime::FunctionStatus>;
+
+/// Bare `boundary_get_status` status or null when the host's fixed-ID lookup is absent.
+pub type McpBoundaryGetStatusResult = Option<crate::runtime::FunctionStatus>;
+
 /// Bare `app_get_overview` result; hosts supply version and store-derived counts.
 /// Active functions count statuses with any session ID, independently of state.
 #[derive(Serialize)]

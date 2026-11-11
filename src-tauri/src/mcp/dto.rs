@@ -18,8 +18,9 @@ pub use scp_core::mcp_catalog::McpToolDescriptor;
 pub use scp_core::mcp_resources::McpResourceDescriptor;
 
 pub use scp_core::mcp_dto::{
-    McpAppOverviewResult, McpFunctionStatusGetArgs, McpFunctionStatusGetResult,
-    McpFunctionStatusListResult, McpToolCallEnvelope,
+    McpAppOverviewResult, McpBoundaryGetStatusResult, McpFunctionStatusGetArgs,
+    McpFunctionStatusGetResult, McpFunctionStatusListResult, McpOpenVpnGetStatusResult,
+    McpToolCallEnvelope,
 };
 
 #[cfg(test)]
@@ -94,5 +95,28 @@ mod shared_app_overview_identity {
     fn desktop_public_paths_accept_the_core_overview_without_conversion() {
         let _: fn(scp_core::mcp_dto::McpAppOverviewResult) -> crate::mcp::McpAppOverviewResult =
             std::convert::identity::<super::McpAppOverviewResult>;
+    }
+}
+
+#[cfg(test)]
+mod service_status_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_service_status.rs"
+    ));
+}
+
+#[cfg(test)]
+mod shared_service_status_identity {
+    #[test]
+    fn desktop_public_paths_accept_core_service_status_results_without_conversion() {
+        let _: fn(
+            scp_core::mcp_dto::McpOpenVpnGetStatusResult,
+        ) -> crate::mcp::McpOpenVpnGetStatusResult =
+            std::convert::identity::<super::McpOpenVpnGetStatusResult>;
+        let _: fn(
+            scp_core::mcp_dto::McpBoundaryGetStatusResult,
+        ) -> crate::mcp::McpBoundaryGetStatusResult =
+            std::convert::identity::<super::McpBoundaryGetStatusResult>;
     }
 }

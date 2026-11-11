@@ -1,0 +1,19 @@
+[
+  null,
+  {
+    "functionId": "unrelated-雪\n\u001b",
+    "state": "future-state",
+    "message": "雪\n\u0000\u001b",
+    "boundaryTokenSource": null,
+    "sessionId": null,
+    "updatedAtMs": 18446744073709551615
+  },
+  {
+    "functionId": "",
+    "state": "",
+    "message": "",
+    "boundaryTokenSource": "",
+    "sessionId": "",
+    "updatedAtMs": 0
+  }
+]

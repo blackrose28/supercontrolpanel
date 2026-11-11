@@ -15,8 +15,9 @@ use crate::commands::{
 };
 use crate::{
     mcp::{
-        McpAppOverviewResult, McpFunctionStatusGetArgs, McpFunctionStatusGetResult,
-        McpFunctionStatusListResult, McpToolCallEnvelope,
+        McpAppOverviewResult, McpBoundaryGetStatusResult, McpFunctionStatusGetArgs,
+        McpFunctionStatusGetResult, McpFunctionStatusListResult, McpOpenVpnGetStatusResult,
+        McpToolCallEnvelope,
     },
     server_mgmt::{load_servers, Server},
     services::{
@@ -190,7 +191,8 @@ pub fn call_mcp_tool(
                 .statuses
                 .lock()
                 .map_err(|_| "function status lock poisoned".to_string())?;
-            json!(statuses.get(openvpn_function_id).cloned())
+            let result: McpOpenVpnGetStatusResult = statuses.get(openvpn_function_id).cloned();
+            json!(result)
         }
         "boundary_get_status" => {
             let function_store = app.state::<FunctionStore>();
@@ -198,7 +200,9 @@ pub fn call_mcp_tool(
                 .statuses
                 .lock()
                 .map_err(|_| "function status lock poisoned".to_string())?;
-            json!(statuses.get(boundary_auth_function_id).cloned())
+            let result: McpBoundaryGetStatusResult =
+                statuses.get(boundary_auth_function_id).cloned();
+            json!(result)
         }
         "servers_list" => json!(load_servers(app)?),
         "server_get" => {

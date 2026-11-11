@@ -1279,6 +1279,68 @@ SDK/protocol sources. Other operation contracts, coordinated CLI import, stdio
 MCP and packaging remain open. Do not retry the cgroup spike on this unchanged
 host or claim stronger supervision/keyring/elevation guarantees.
 
+### Shared OpenVPN/Boundary MCP status results (2026-11-11)
+
+`scp-core::mcp_dto` now exposes `McpOpenVpnGetStatusResult` and
+`McpBoundaryGetStatusResult`, both aliases of `Option<runtime::FunctionStatus>`.
+Desktop DTO/public paths re-export them and the two existing dispatcher branches
+use type annotations before serializing. These aliases add no wrapper, parser,
+validation, normalization or new derives. Missing status remains bare JSON null;
+present status keeps all six runtime fields, including null options, arbitrary
+states/IDs/token sources, empty strings and the full u64 timestamp. Host lookups
+still select `openvpn-connect` / `boundary-auth` and clone under the same lock.
+All arguments, including non-objects and supplied `functionId`, remain ignored.
+Policy still runs first; poison errors and success envelope construction are
+unchanged. No CLI status command, transport, dependency, credential, profile,
+runtime or platform-specific behavior was added.
+
+Consumer inspection found helper status commands send `{}` and print envelopes
+without inspecting status fields. HTTP/direct Tauri calls share the dispatcher;
+the existing OpenVPN/Boundary resource URIs delegate to these same tools with
+`{}`. Both `MCP_TOOL_SCHEMAS.md` examples incorrectly showed a `status` wrapper;
+they now document the existing bare status-or-null result and ignored arguments.
+This fixes documentation drift without removing a production field.
+
+TDD: the exact fixture first passed against local aliases of the original
+`Option<FunctionStatus>` representation. Core RED then failed on missing shared
+aliases; desktop RED failed on missing shared/re-exported types. GREEN passed
+one shared fixture contract in core and the same included desktop contract plus
+a compile-time public-path identity test for both aliases. The fixture covers
+null, all six fields, null/empty optional strings, arbitrary noncanonical ID and
+state, Unicode/control text, zero and u64::MAX timestamps. Its length assertion
+prevents zip truncation from hiding fixture cases. No further refactor was needed.
+These synthetic wire/type tests do not execute fixed-ID selection, ignored-argument
+handling, locking, policy, HTTP/Tauri integration, helper output or UI flows.
+
+Validation: locked workspace all-feature suite passes 108 tests plus the credential
+compile-fail doctest; seven ignored subprocess fixtures are exercised by acceptance
+tests. Locked desktop suite passes 141 tests with 17 existing warnings. Strict
+workspace all-feature/all-target Clippy, locked release CLI build, workspace fmt,
+changed desktop/shared contract rustfmt and diff whitespace checks pass. Native
+Windows/macOS qualification remains open.
+
+Ripwire reports three direct dispatcher callers (HTTP, resource, Tauri), 11
+downstream symbols and zero modeled affected tests. Edit-check reports the
+signature unchanged. Quality delta has zero gating findings/acknowledgments,
+two minor dispatcher findings (ambient churn and three added body lines) and
+four new non-gating test/module reachability findings. These are understood
+limits of the focused annotations and included-test modeling, not proof of
+handler coverage. The staged test gate exits 4: it selects the two new contract/
+target test files and the existing function-status contract (all exercised by the
+workspace suite), but cannot infer their runners. Twelve untested paths include
+the 11 downstream dispatcher symbols and an unrelated SETTINGS_BACKUP Markdown
+heading. This is not a clean static coverage verdict or transport/UI E2E proof.
+
+Next focused increment: inspect `servers_list` / `server_get` handlers and
+consumers, then share their argument/result contracts with exact shared and
+desktop fixtures if the existing inventory type is appropriate. Preserve list
+ordering, permissive string lookup, exact errors, ignored list arguments and
+policy/loader behavior; do not add CLI operations incidentally. Standard desktop
+Streamable HTTP is independently actionable after checking current official
+SDK/protocol sources. Coordinated CLI import, other operation families, stdio
+MCP and packaging remain open. Do not retry the unchanged-host cgroup spike or
+claim stronger cleanup/keyring/elevation guarantees.
+
 Proposed Cargo workspace boundaries:
 
 ```text
