@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close; host runtime supervision and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling; host runtime supervision and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -28,7 +28,7 @@ The initial feasibility findings came from source inspection and protocol docume
 - `src-tauri/src/mcp/server.rs`: hand-written TCP/HTTP server, bearer token, localhost restriction, custom REST routes.
 - `src-tauri/src/mcp/tools.rs` and `resources.rs`: substantial existing operation coverage, but descriptors/results and dispatch depend on Tauri and custom envelopes.
 - `src-tauri/src/bin/supercontrolpanelhelper.rs`: existing CLI is an HTTP client requiring the desktop app.
-- `scp-core` now shares server inventory, CLI profile ownership/identity, profile-bound credential/cache adapters, function status state/transitions, PTY event payload types, and session handles/launch/I/O/close. `src-tauri/src/main.rs`, `services/pty_service.rs`, and `services/boundary_service.rs` still host runtime monitoring/IDs, event transport/telemetry, and automated OIDC through Tauri.
+- `scp-core` now shares server inventory, CLI profile ownership/identity, profile-bound credential/cache adapters, function status state/transitions, PTY event payload types, and session handles/launch/I/O/close with launch-bound exit polling. `src-tauri/src/main.rs`, `services/pty_service.rs`, and `services/boundary_service.rs` still host runtime monitoring/IDs, event transport/telemetry, and automated OIDC through Tauri.
 
 If adopted, this proposal replaces the helper-only direction in `MCP_HELPER_CLI_SPEC.md` and `MCP_TRANSPORT_AND_AUTH.md` for the new CLI. Those documents still describe the existing desktop-client helper. Keep that helper functional during migration; desktop control remains useful even after a standalone runtime exists.
 
@@ -253,6 +253,66 @@ Next extract host runtime context/IDs and identity-safe monitoring/shutdown, the
 operation family with foreground supervision and platform cleanup gates before exposing
 standalone runtime commands. Settings commands/import, full config extraction, standard
 Streamable HTTP, stdio MCP, and packaging remain pending.
+
+### Launch-bound PTY exit polling (2026-11-11)
+
+`spawn_pty` now returns `SpawnedPty`: the reader and a `SessionMonitor` bound atomically
+at launch to that specific session through a weak reference. `poll` returns Running,
+Detached, or an owned exit payload. It checks registry identity before polling the
+original child and rechecks identity atomically before removal. A monitor cannot poll
+or remove a replacement registered under the same forced ID, including replacement
+while `try_wait` is in progress. Weak observers do not keep children alive after the
+store's final ownership is dropped. Platform polling/cleanup runs outside the registry
+mutex, and event delivery remains outside all core locks.
+
+Watchers now belong to each `PtySession` rather than an ID-only global map. Removal and
+exit retirement clear only that object's subscribers after releasing the registry lock;
+a stale monitor cannot clear replacement subscribers. Desktop watcher adapters delegate
+to core. Adding a watcher to a missing session now returns `session not found: {id}`
+instead of retaining an unowned subscription; the only desktop caller already treats
+registration failure as an aborted automation. Broadcasting to a missing session stays
+a no-op. Existing direct master/child/writer access remains available to desktop adapters.
+
+The desktop keeps its 100ms polling thread, reader thread, nonce/ID generation, settings
+gate, Tauri/CC output/exit delivery, transfer completion, and function-exit callbacks.
+Normal status strings, exit-code conversion, `wait_error: ...`, and command close
+payloads are unchanged. The unused ID-only desktop removal wrapper was deleted.
+The core launch return type and watcher-storage layout changed; all in-repository
+consumers were updated. Ripwire's edit-check reports unchanged arity/publicness but
+does not verify return types; source review and both Cargo builds verify that migration.
+
+TDD evidence: the initial three tests failed on the missing monitor/poll/watcher API.
+The deterministic two-barrier regression pauses `try_wait`, removes the old entry,
+launches a replacement, and subscribes a replacement watcher before resuming polling.
+It fails with ID-only retirement and passes with the atomic identity recheck. The
+12-test PTY suite also covers natural exit delivered once, wait-error payloads,
+replacement before polling, weak observer lifetime, watcher release, existing launch/
+I/O/close failures, and the real Linux PTY round trip. Linux validation passed all
+47 workspace all-feature tests plus the compile-fail doctest (one ignored subprocess
+fixture is exercised by its ownership test), all 103 desktop tests, strict workspace
+all-feature/all-target Clippy, formatting, and the locked standalone release build.
+
+Ripwire quality delta has zero unacknowledged gating regressions. The constructor-only
+acknowledgments were refreshed for the smaller independent SessionStore initializer,
+which now resembles two unrelated store constructors; no runtime/test findings were
+suppressed. New test entries still appear as dead code. The static test gate still
+exits 4 with 135 unmapped impacted symbols, primarily desktop callers, rather than a
+clean coverage gate. Executed Cargo tests are the verification evidence.
+
+This guarantees identity-safe child polling/registry retirement, not generation-fenced
+host event delivery. Output, telemetry, function/transfer callbacks, and queued UI events
+still use existing ID-only contracts; an event already returned by core can race a later
+reuse of that ID. A future runtime context must serialize lifecycle/publication or carry
+internal generation identity through adapters before claiming full replacement safety.
+No CLI runtime command or status view was added. Native child polling/kill/wait may still
+block; descendant-tree cleanup, elevated Windows helpers, bounded shutdown/cancellation,
+signals, and native Windows/macOS qualification remain open.
+
+Next build the host runtime context/lifecycle and supervision boundary, including the
+publication/reuse rule, before a foreground operation family. Keep profile ownership
+alive throughout runtime cleanup and keep native keyring calls behind host supervision.
+Full config extraction, settings commands/import, Streamable HTTP, stdio MCP, and
+packaging remain pending.
 
 Proposed Cargo workspace boundaries:
 

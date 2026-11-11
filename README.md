@@ -193,7 +193,11 @@ Desktop and core also share PTY session handles, launch registration, input, and
 Reader/writer setup completes before spawning a child; duplicate IDs are rejected without
 replacing an existing session, and a child that loses concurrent registration is killed
 and reaped. Closing a session or dropping its final owner attempts direct-child cleanup.
-Desktop retains output/exit monitoring, events, telemetry, and session-ID generation.
+Core exit polling is bound to the launched session: a stale monitor cannot poll/remove
+another child that reuses its ID or clear that replacement's watchers. Weak monitors do
+not keep children alive after the store is dropped. Desktop retains reader/polling
+threads, events, telemetry, and session-ID generation. Host event delivery still uses
+existing IDs; full lifecycle/publication ordering remains part of runtime supervision.
 This is not full process-tree or elevated-helper supervision: cancellation, bounded
 shutdown, runtime context, and a CLI-owned operation family remain pending. The CLI
 preview still provides inventory and profile initialization only.

@@ -2,7 +2,7 @@ use portable_pty::{
     Child, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtyPair, PtySize, PtySystem,
     SlavePty,
 };
-use scp_core::sessions::{spawn_pty, SessionStore};
+use scp_core::sessions::{spawn_pty, SessionPoll, SessionStore};
 use std::{
     io::{self, Read, Write},
     sync::{Arc, Barrier, Mutex},
@@ -20,6 +20,7 @@ struct FakePty {
     fail: &'static str,
     barrier: Option<Arc<Barrier>>,
     registry: Option<std::sync::Weak<SessionStore>>,
+    poll_gate: Option<Arc<(Barrier, Barrier)>>,
 }
 impl FakePty {
     fn calls(&self) -> Vec<&'static str> {
@@ -128,6 +129,10 @@ impl ChildKiller for FakeChild {
 }
 impl Child for FakeChild {
     fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+        if let Some(gate) = self.pty.poll_gate.take() {
+            gate.0.wait();
+            gate.1.wait();
+        }
         self.pty.record("poll").map_err(io::Error::other)?;
         Ok(self.exited.then(|| ExitStatus::with_exit_code(0)))
     }
@@ -145,7 +150,7 @@ impl Child for FakeChild {
     }
 }
 fn launch(pty: &FakePty, store: &SessionStore, id: &str) -> Result<Box<dyn Read + Send>, String> {
-    spawn_pty(pty, store, id, 80, 24, CommandBuilder::new("unused"))
+    spawn_pty(pty, store, id, 80, 24, CommandBuilder::new("unused")).map(|launched| launched.reader)
 }
 
 #[test]
@@ -236,17 +241,20 @@ fn io_watchers_and_close_keep_existing_contracts() {
     store.write("one", "hello\r").unwrap();
     assert_eq!(pty.trace.lock().unwrap().input, b"hello\r");
     let (sender, receiver) = std::sync::mpsc::channel();
-    store
-        .watchers
-        .lock()
-        .unwrap()
-        .insert("one".into(), vec![sender]);
+    store.add_watcher("one", sender).unwrap();
     let exit = store.close("one").unwrap().unwrap();
     assert_eq!(
         (exit.id.as_str(), exit.exit_code, exit.reason.as_str()),
         ("one", Some(0), "closed_by_command")
     );
     assert!(receiver.recv().is_err());
+    let (sender, receiver) = std::sync::mpsc::channel();
+    assert_eq!(
+        store.add_watcher("one", sender).unwrap_err(),
+        "session not found: one"
+    );
+    assert!(receiver.recv().is_err());
+    store.broadcast_watchers("one", "ignored").unwrap();
     assert!(store.close("one").unwrap().is_none());
     assert_eq!(
         store.write("one", "x").unwrap_err(),
@@ -323,7 +331,8 @@ fn native_pty_prepared_before_spawn_round_trips_input_and_reaps_on_close() {
         24,
         cmd,
     )
-    .unwrap();
+    .unwrap()
+    .reader;
     let (sender, receiver) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || {
         let mut output = String::new();
@@ -338,4 +347,118 @@ fn native_pty_prepared_before_spawn_round_trips_input_and_reaps_on_close() {
     assert!(result.unwrap().unwrap().contains("received:hello"));
     assert_eq!(exit.reason, "closed_by_command");
     assert!(session.child.lock().unwrap().try_wait().unwrap().is_some());
+}
+
+#[test]
+fn monitor_is_bound_to_launch_and_does_not_retain_child_ownership() {
+    let store = SessionStore::default();
+    let old = FakePty::default();
+    let launched = spawn_pty(&old, &store, "same", 80, 24, CommandBuilder::new("unused")).unwrap();
+    assert!(matches!(
+        launched.monitor.poll(&store).unwrap(),
+        SessionPoll::Running
+    ));
+    let retained_old = store.sessions.lock().unwrap()["same"].clone();
+    store.close("same").unwrap();
+    let replacement = FakePty::default();
+    let _reader = launch(&replacement, &store, "same").unwrap();
+    let before = replacement.calls();
+    assert!(matches!(
+        launched.monitor.poll(&store).unwrap(),
+        SessionPoll::Detached
+    ));
+    assert_eq!(
+        replacement.calls(),
+        before,
+        "stale monitor must not poll replacement"
+    );
+    assert_eq!(store.sessions.lock().unwrap().len(), 1);
+    assert!(old.calls().contains(&"wait"));
+    drop(retained_old);
+
+    let live = FakePty::default();
+    let launched = spawn_pty(&live, &store, "live", 80, 24, CommandBuilder::new("unused")).unwrap();
+    drop(store);
+    assert!(
+        live.calls().ends_with(&["poll", "kill", "wait"]),
+        "monitor must be weak"
+    );
+    drop(launched);
+}
+
+#[test]
+fn monitor_reports_exit_once_and_releases_only_its_watchers() {
+    let store = Arc::new(SessionStore::default());
+    let pty = FakePty {
+        registry: Some(Arc::downgrade(&store)),
+        ..FakePty::default()
+    };
+    let launched = spawn_pty(&pty, &store, "one", 80, 24, CommandBuilder::new("unused")).unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    store.add_watcher("one", sender).unwrap();
+    store.broadcast_watchers("one", "hello").unwrap();
+    assert_eq!(receiver.recv().unwrap(), "hello");
+    let session = store.sessions.lock().unwrap()["one"].clone();
+    session.child.lock().unwrap().wait().unwrap();
+    let SessionPoll::Exited(payload) = launched.monitor.poll(&store).unwrap() else {
+        panic!("expected exit")
+    };
+    assert_eq!(payload.id, "one");
+    assert_eq!(payload.exit_code, Some(0));
+    assert!(!payload.reason.is_empty());
+    assert!(receiver.recv().is_err());
+    assert!(store.sessions.lock().unwrap().is_empty());
+    assert!(matches!(
+        launched.monitor.poll(&store).unwrap(),
+        SessionPoll::Detached
+    ));
+}
+
+#[test]
+fn monitor_wait_errors_keep_existing_payload_and_retire_session() {
+    let store = SessionStore::default();
+    let pty = FakePty {
+        fail: "poll",
+        ..FakePty::default()
+    };
+    let launched = spawn_pty(&pty, &store, "one", 80, 24, CommandBuilder::new("unused")).unwrap();
+    let SessionPoll::Exited(payload) = launched.monitor.poll(&store).unwrap() else {
+        panic!("expected wait error")
+    };
+    assert_eq!(payload.exit_code, None);
+    assert_eq!(payload.reason, "wait_error: injected poll");
+    assert!(store.sessions.lock().unwrap().is_empty());
+    assert!(pty.calls().ends_with(&["poll", "kill", "wait"]));
+}
+
+#[test]
+fn replacement_during_poll_keeps_its_child_and_watchers() {
+    let store = Arc::new(SessionStore::default());
+    let gate = Arc::new((Barrier::new(2), Barrier::new(2)));
+    let old = FakePty {
+        fail: "poll",
+        poll_gate: Some(gate.clone()),
+        ..FakePty::default()
+    };
+    let launched = spawn_pty(&old, &store, "same", 80, 24, CommandBuilder::new("unused")).unwrap();
+    let worker_store = store.clone();
+    let worker = std::thread::spawn(move || launched.monitor.poll(&worker_store));
+    gate.0.wait();
+    let removed = store.remove("same").unwrap();
+    let replacement = FakePty::default();
+    let _reader = launch(&replacement, &store, "same").unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    store.add_watcher("same", sender).unwrap();
+    gate.1.wait();
+    assert!(matches!(
+        worker.join().unwrap().unwrap(),
+        SessionPoll::Detached
+    ));
+    drop(removed);
+    assert!(!replacement.calls().contains(&"poll"));
+    assert_eq!(store.sessions.lock().unwrap().len(), 1);
+    store.broadcast_watchers("same", "replacement").unwrap();
+    assert_eq!(receiver.recv().unwrap(), "replacement");
+    store.close("same").unwrap();
+    assert!(receiver.recv().is_err());
 }

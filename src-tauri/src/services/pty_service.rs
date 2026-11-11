@@ -1,9 +1,4 @@
-use std::{
-    io::Read,
-    sync::{mpsc::Sender, Arc},
-    thread,
-    time::Duration,
-};
+use std::{io::Read, sync::mpsc::Sender, thread, time::Duration};
 
 use portable_pty::{native_pty_system, CommandBuilder};
 use tauri::{AppHandle, Emitter, Manager};
@@ -12,7 +7,7 @@ use crate::{
     cc::telemetry::forward_log_event,
     models::{PtyExitPayload, PtyOutputPayload},
     services::{complete_scp_transfer_session, handle_scp_transfer_output, lock_err},
-    stores::{FunctionStore, PtySession, RemotePtyStore, ScpTransferStore, SessionStore},
+    stores::{FunctionStore, RemotePtyStore, ScpTransferStore, SessionStore},
 };
 
 /// CC-plane sessionId for telemetry tagging: canonical `ccpty:…` when the local PTY
@@ -105,23 +100,13 @@ fn session_id_run_nonce() -> &'static str {
     })
 }
 
-pub fn remove_session(store: &SessionStore, id: &str) -> Result<Option<Arc<PtySession>>, String> {
-    store.remove(id)
-}
-
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 pub fn add_watcher(store: &SessionStore, id: &str, sender: Sender<String>) -> Result<(), String> {
-    let mut watchers = lock_err(&store.watchers)?;
-    watchers.entry(id.to_string()).or_default().push(sender);
-    Ok(())
+    store.add_watcher(id, sender)
 }
 
 pub fn broadcast_watchers(store: &SessionStore, id: &str, data: &str) -> Result<(), String> {
-    let mut watchers = lock_err(&store.watchers)?;
-    if let Some(list) = watchers.get_mut(id) {
-        list.retain(|sender| sender.send(data.to_string()).is_ok());
-    }
-    Ok(())
+    store.broadcast_watchers(id, data)
 }
 
 pub fn emit_pty_exit(app: &AppHandle, payload: PtyExitPayload) {
@@ -160,8 +145,11 @@ pub fn open_pty_with_command_builder(
         Some(forced) => forced.to_string(),
         None => next_session_id(store)?,
     };
-    let mut reader =
+    let launched =
         scp_core::sessions::spawn_pty(&*native_pty_system(), store, &session_id, cols, rows, cmd)?;
+
+    let mut reader = launched.reader;
+    let monitor = launched.monitor;
 
     let output_session_id = session_id.clone();
     let output_app = app.clone();
@@ -184,49 +172,10 @@ pub fn open_pty_with_command_builder(
     thread::spawn(move || loop {
         thread::sleep(Duration::from_millis(100));
 
-        let session = {
-            let state = monitor_app.state::<SessionStore>();
-            let lookup = match lock_err(&state.sessions) {
-                Ok(sessions) => sessions.get(&monitor_session_id).cloned(),
-                Err(_) => None,
-            };
-            lookup
-        };
-
-        let Some(session) = session else {
-            break;
-        };
-
-        let exit_payload = {
-            let mut child = match lock_err(&session.child) {
-                Ok(child) => child,
-                Err(_) => break,
-            };
-            match child.try_wait() {
-                Ok(Some(status)) => Some(PtyExitPayload {
-                    id: monitor_session_id.clone(),
-                    exit_code: i32::try_from(status.exit_code()).ok(),
-                    reason: status.to_string(),
-                }),
-                Ok(None) => None,
-                Err(err) => Some(PtyExitPayload {
-                    id: monitor_session_id.clone(),
-                    exit_code: None,
-                    reason: format!("wait_error: {err}"),
-                }),
-            }
-        };
-
-        if let Some(payload) = exit_payload {
-            let removed = {
-                let state = monitor_app.state::<SessionStore>();
-                remove_session(&state, &monitor_session_id)
-                    .ok()
-                    .flatten()
-                    .is_some()
-            };
-
-            if removed {
+        let result = monitor.poll(&monitor_app.state::<SessionStore>());
+        match result {
+            Ok(scp_core::sessions::SessionPoll::Running) => continue,
+            Ok(scp_core::sessions::SessionPoll::Exited(payload)) => {
                 emit_pty_exit(&monitor_app, payload.clone());
                 if let Some(transfer_state) = monitor_app.try_state::<ScpTransferStore>() {
                     let _ = complete_scp_transfer_session(
@@ -246,8 +195,9 @@ pub fn open_pty_with_command_builder(
                     &payload.reason,
                 );
             }
-            break;
+            Ok(scp_core::sessions::SessionPoll::Detached) | Err(_) => {}
         }
+        break;
     });
 
     Ok(session_id)
