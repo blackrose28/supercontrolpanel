@@ -1,7 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::sync::Mutex;
-
 mod cc;
 use cc::{get_cc_status, init_cc_connection, sync_cc_status_from_settings};
 use tauri::Manager;
@@ -67,19 +65,6 @@ use commands::{
     stop_boundary_auth, stop_caddy_run, stop_openvpn_function, stop_server_ssh, stop_server_tunnel,
     sync_config_pull, sync_config_push, upsert_server, write_pty,
 };
-
-impl Default for FunctionStore {
-    fn default() -> Self {
-        let statuses = services::default_function_statuses(
-            OPENVPN_FUNCTION_ID,
-            CADDY_FUNCTION_ID,
-            BOUNDARY_AUTH_FUNCTION_ID,
-        );
-        Self {
-            statuses: Mutex::new(statuses),
-        }
-    }
-}
 
 fn main() {
     init_environment();

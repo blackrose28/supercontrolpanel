@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Mutex};
+pub use scp_core::runtime::{lock_err, now_ms};
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -22,43 +22,6 @@ fn telemetry_session_id_for_cc_ingest(
     )
 }
 
-pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
-pub fn lock_err<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, String> {
-    mutex.lock().map_err(|_| "mutex poisoned".to_string())
-}
-
-pub fn default_function_statuses(
-    openvpn_function_id: &str,
-    caddy_function_id: &str,
-    boundary_auth_function_id: &str,
-) -> HashMap<String, FunctionStatus> {
-    let mut statuses = HashMap::new();
-    for (id, msg) in [
-        (openvpn_function_id, "Ready"),
-        (caddy_function_id, "Ready"),
-        (boundary_auth_function_id, "Not authenticated"),
-    ] {
-        statuses.insert(
-            id.to_string(),
-            FunctionStatus {
-                function_id: id.to_string(),
-                state: "idle".to_string(),
-                message: msg.to_string(),
-                boundary_token_source: None,
-                session_id: None,
-                updated_at_ms: now_ms(),
-            },
-        );
-    }
-    statuses
-}
-
 pub fn upsert_function_status(
     app: &AppHandle,
     function_store: &FunctionStore,
@@ -76,24 +39,20 @@ pub fn upsert_function_status(
         updated_at_ms: now_ms(),
     };
 
-    {
-        let mut statuses = lock_err(&function_store.statuses)?;
-        statuses.insert(function_id.to_string(), status.clone());
-    }
-
-    let _ = app.emit("function-status", status.clone());
-    let telemetry_session_id = telemetry_session_id_for_cc_ingest(
-        status.session_id.as_deref(),
-        &*app.state::<RemotePtyStore>(),
-    );
-    forward_log_event(
-        app,
-        "function-status",
-        telemetry_session_id.as_deref(),
-        Some(&status.function_id),
-        &status,
-    );
-    Ok(())
+    function_store.publish(status, |status| {
+        let _ = app.emit("function-status", status.clone());
+        let telemetry_session_id = telemetry_session_id_for_cc_ingest(
+            status.session_id.as_deref(),
+            &*app.state::<RemotePtyStore>(),
+        );
+        forward_log_event(
+            app,
+            "function-status",
+            telemetry_session_id.as_deref(),
+            Some(&status.function_id),
+            &status,
+        );
+    })
 }
 
 pub fn upsert_boundary_status(
@@ -114,30 +73,54 @@ pub fn upsert_boundary_status(
         updated_at_ms: now_ms(),
     };
 
-    {
-        let mut statuses = lock_err(&function_store.statuses)?;
-        statuses.insert(boundary_auth_function_id.to_string(), status.clone());
-    }
-
-    let _ = app.emit("function-status", status.clone());
-    let telemetry_session_id = telemetry_session_id_for_cc_ingest(
-        status.session_id.as_deref(),
-        &*app.state::<RemotePtyStore>(),
-    );
-    forward_log_event(
-        app,
-        "function-status",
-        telemetry_session_id.as_deref(),
-        Some(&status.function_id),
-        &status,
-    );
-    Ok(())
+    function_store.publish(status, |status| {
+        let _ = app.emit("function-status", status.clone());
+        let telemetry_session_id = telemetry_session_id_for_cc_ingest(
+            status.session_id.as_deref(),
+            &*app.state::<RemotePtyStore>(),
+        );
+        forward_log_event(
+            app,
+            "function-status",
+            telemetry_session_id.as_deref(),
+            Some(&status.function_id),
+            &status,
+        );
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::stores::RemotePtyStore;
+
+    #[test]
+    fn desktop_store_and_payloads_use_the_shared_core_types() {
+        let store = FunctionStore::default();
+        let shared: &scp_core::runtime::FunctionStore = &store;
+        let snapshot = shared.snapshot().unwrap();
+        assert_eq!(
+            snapshot
+                .iter()
+                .map(|status| status.function_id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                crate::BOUNDARY_AUTH_FUNCTION_ID,
+                crate::CADDY_FUNCTION_ID,
+                crate::OPENVPN_FUNCTION_ID
+            ],
+        );
+        let payload = crate::models::PtyExitPayload {
+            id: "pty-test".into(),
+            exit_code: None,
+            reason: "wait_error".into(),
+        };
+        let shared_payload: scp_core::runtime::PtyExitPayload = payload;
+        assert_eq!(
+            serde_json::to_value(shared_payload).unwrap(),
+            serde_json::json!({"id":"pty-test","exitCode":null,"reason":"wait_error"})
+        );
+    }
 
     #[test]
     fn telemetry_session_uses_cc_id_when_bound() {

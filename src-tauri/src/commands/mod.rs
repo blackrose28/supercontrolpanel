@@ -21,15 +21,15 @@ pub use server::*;
 use tauri::{AppHandle, Emitter};
 
 use crate::cc::telemetry::forward_log_event;
-use crate::models::FunctionStatus;
+use crate::models::PtyExitPayload;
 use crate::services::{
-    boundary_token_summary as boundary_token_summary_service, lock_err, now_ms,
-    BoundaryTokenSummary,
+    boundary_token_summary as boundary_token_summary_service, now_ms, BoundaryTokenSummary,
 };
 use crate::stores::FunctionStore;
 #[cfg(target_os = "windows")]
 use crate::CREATE_NO_WINDOW;
 use crate::{BOUNDARY_AUTH_FUNCTION_ID, OPENVPN_FUNCTION_ID};
+use scp_core::runtime::BoundaryTokenStatus;
 
 pub(crate) fn upsert_function_status(
     app: &AppHandle,
@@ -86,76 +86,27 @@ pub(crate) fn update_functions_for_session_exit(
     exit_code: Option<i32>,
     reason: &str,
 ) -> Result<(), String> {
-    let mut changed = Vec::<FunctionStatus>::new();
-    let mut openvpn_terminal: Option<(String, String)> = None;
-    {
-        let mut statuses = lock_err(&function_store.statuses)?;
-        for status in statuses.values_mut() {
-            if status.session_id.as_deref() != Some(session_id) {
-                continue;
-            }
-            if status.function_id == BOUNDARY_AUTH_FUNCTION_ID {
-                status.session_id = None;
-                status.updated_at_ms = now_ms();
-                let (state, message, source) = match boundary_token_summary(app) {
-                    Ok(summary) => (
-                        "authenticated".to_string(),
-                        summary.message,
-                        Some(summary.source.to_string()),
-                    ),
-                    Err(_) => {
-                        if exit_code == Some(0) {
-                            (
-                                "authenticated".to_string(),
-                                "Login completed, but the saved Boundary token could not be verified yet. Refresh Status or retry login."
-                                    .to_string(),
-                                None,
-                            )
-                        } else {
-                            (
-                                "unauthenticated".to_string(),
-                                format!(
-                                    "Not logged in or login interrupted (exit {}). {}",
-                                    exit_code
-                                        .map(|v| v.to_string())
-                                        .unwrap_or_else(|| "?".to_string()),
-                                    if reason.len() > 80 {
-                                        format!("{}…", &reason[..80])
-                                    } else {
-                                        reason.to_string()
-                                    }
-                                ),
-                                None,
-                            )
-                        }
-                    }
-                };
-                status.state = state;
-                status.message = message;
-                status.boundary_token_source = source;
-                changed.push(status.clone());
-                continue;
-            }
-            let function_id = status.function_id.clone();
-            status.state = if exit_code == Some(0) {
-                "stopped".to_string()
-            } else {
-                "error".to_string()
-            };
-            status.message = format!(
-                "PTY exited (code={}, reason={reason})",
-                exit_code
-                    .map(|v| v.to_string())
-                    .unwrap_or_else(|| "unknown".to_string())
-            );
-            // Keep sessionId so tunnel logs remain queryable after PTY exits.
-            status.updated_at_ms = now_ms();
-            changed.push(status.clone());
-            if function_id == OPENVPN_FUNCTION_ID {
-                openvpn_terminal = Some((status.state.clone(), status.message.clone()));
-            }
-        }
-    }
+    let changed = function_store.finish_session(
+        &PtyExitPayload {
+            id: session_id.to_string(),
+            exit_code,
+            reason: reason.to_string(),
+        },
+        BOUNDARY_AUTH_FUNCTION_ID,
+        now_ms(),
+        || {
+            boundary_token_summary(app)
+                .ok()
+                .map(|summary| BoundaryTokenStatus {
+                    message: summary.message,
+                    source: summary.source.to_string(),
+                })
+        },
+    )?;
+    let openvpn_terminal = changed
+        .iter()
+        .find(|status| status.function_id == OPENVPN_FUNCTION_ID)
+        .map(|status| (status.state.clone(), status.message.clone()));
 
     if let Some((state, message)) = openvpn_terminal {
         openvpn::handle_openvpn_terminal_state(app, &state, &message);

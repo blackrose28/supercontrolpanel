@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, and profile-bound credential/cache adapters; runtime extraction and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions; PTY/runtime ownership and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -28,7 +28,7 @@ The initial feasibility findings came from source inspection and protocol docume
 - `src-tauri/src/mcp/server.rs`: hand-written TCP/HTTP server, bearer token, localhost restriction, custom REST routes.
 - `src-tauri/src/mcp/tools.rs` and `resources.rs`: substantial existing operation coverage, but descriptors/results and dispatch depend on Tauri and custom envelopes.
 - `src-tauri/src/bin/supercontrolpanelhelper.rs`: existing CLI is an HTTP client requiring the desktop app.
-- `src-tauri/src/main.rs`, `services/pty_service.rs`, `services/boundary_service.rs`: runtime stores, events, child processes, and automated OIDC remain coupled to Tauri. The new core library currently shares only server inventory types and read-only inventory access.
+- `scp-core` now shares server inventory, CLI profile ownership/identity, profile-bound credential/cache adapters, function status state/transitions, and PTY event payload types. `src-tauri/src/main.rs`, `services/pty_service.rs`, and `services/boundary_service.rs` still host PTY sessions/child processes, event transport/telemetry, and automated OIDC through Tauri.
 
 If adopted, this proposal replaces the helper-only direction in `MCP_HELPER_CLI_SPEC.md` and `MCP_TRANSPORT_AND_AUTH.md` for the new CLI. Those documents still describe the existing desktop-client helper. Keep that helper functional during migration; desktop control remains useful even after a standalone runtime exists.
 
@@ -153,9 +153,55 @@ Markdown heading, so Cargo results provide the executed coverage evidence.
 Native OS unlock/persistence and Windows/macOS checks
 remain unvalidated; these mocks establish the adapter contract, not platform qualification.
 
-Next: extract runtime stores/events and lifecycle context, then an operation family
-with foreground child cleanup. Integrate the credential adapter only behind bounded
-host capabilities; settings import and CLI credential commands remain unimplemented.
+The next increment below extracts function-status state and transitions. PTY ownership,
+lifecycle context, and an operation family with foreground child cleanup remain next.
+Integrate the credential adapter only behind bounded host capabilities; settings import
+and CLI credential commands remain unimplemented.
+
+### Shared function-status state and exit transitions (2026-11-11)
+
+`scp-core::runtime` now owns `FunctionStore`, `FunctionStatus`, `PtyOutputPayload`, and
+`PtyExitPayload`. Desktop modules re-export these same types, preserving all command
+signatures, event names, camelCase payload fields, explicit nulls, and the initial three
+idle statuses. The default store initialization, clock, and mutex-error helper moved to
+core; desktop consumers retain their existing helper imports. The status map remains
+public during migration so current desktop writers use the same mutex/state.
+
+The core's `publish` commits the status before calling a host-provided typed event sink
+outside the mutex. Desktop adapters retain Tauri delivery and CC session-ID translation.
+`finish_session` applies the existing exit rules and returns owned status events after
+releasing its lock; the desktop still runs OpenVPN reconnect handling before emitting
+those events and retains its existing exit-telemetry behavior. Normal exits keep their
+session IDs for log queries and become stopped/error; Boundary clears its auth session,
+preserves App/CLI token-source reporting, and retains the existing verified-token and
+unverified-login messages.
+
+Boundary token lookup now runs outside the status lock. Core rechecks the current
+session after lookup so a late exit cannot overwrite a replacement session. Long
+Boundary error reasons keep the existing 80-byte limit/ellipsis for ASCII and truncate
+on a valid UTF-8 boundary for Unicode, fixing the previous byte-slicing panic. Snapshots
+are sorted, owned copies of this store's state; no cross-process status view is implied.
+
+TDD evidence: core runtime tests first failed on the absent module; a desktop migration
+test failed on separate store/payload types before re-exports; the shared lock-helper
+test failed before that helper moved. Tests cover exact JSON, default statuses, publication
+after commit/outside locks, all regular/Boundary exit outcomes, history preservation,
+token lookup outside locks, replacement-session races, Unicode boundaries, and poisoned
+mutexes. Desktop migration and existing CC/OpenVPN/tunnel tests exercise the adapters.
+Linux validation passes 34 workspace tests with native features, the credential lifetime
+doctest, all 102 desktop tests, strict workspace Clippy, formatting, and a standalone
+locked release build. Ripwire quality delta reports zero gating regressions; its new
+dead-code findings are test entries plus the string-formatting helper reached by tests.
+The static test gate still exits 4: moving shared types/the generic lock helper exposes
+a broad pre-existing desktop caller surface (113 symbols) that its graph does not mark
+covered, despite the executed core/desktop tests. This is not a clean coverage gate;
+native UI/PTY/CC interaction smoke tests and Windows/macOS qualification remain open.
+
+This is a status/event boundary, not the standalone process runtime. `SessionStore`,
+PTY spawning/monitoring, child supervision, cancellation/shutdown, host runtime IDs,
+and CLI runtime commands remain unimplemented in core. No GUI/keyring/native dependency
+was added by this slice. Next extract the session ownership/lifecycle boundary and one
+operation family with foreground cleanup before exposing runtime commands or stdio MCP.
 
 Proposed Cargo workspace boundaries:
 

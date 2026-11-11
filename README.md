@@ -184,6 +184,13 @@ not real credentials). On Linux, building that feature also requires the D-Bus d
 library and `pkg-config`; the default inventory/profile CLI build does not. Real native
 keyring/unlock checks on supported OSes remain release gates.
 
+Desktop and core now share the function-status store, PTY event payload types, and
+session-exit status transitions. Host event delivery and Boundary token lookup run
+outside the status mutex; late exits recheck the session before changing a replacement
+login's status. Long Boundary exit reasons are truncated safely for Unicode text.
+PTY spawning, process cleanup, and a CLI-owned runtime remain the next extraction work;
+the preview still provides inventory and profile initialization only.
+
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.
 
