@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation is extracted; signal handling, bounded platform supervision, operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -515,6 +515,84 @@ supervisor, implement or explicitly gate that capability before claiming bounded
 shutdown; do not silently weaken the plan. Runtime status stays absent until genuine
 supervised runtime state exists. Native keyring, elevation, Windows/macOS qualification,
 settings extraction/import, Streamable HTTP, stdio MCP and packaging remain open.
+
+### Linux Caddy foreground host preview (2026-11-11)
+
+`scpctl caddy run --foreground --folder FOLDER --output NEW_FILE [--json]` now connects
+shared Caddy launch preparation to `ProfileRuntime::run_foreground_cancellable`. This
+is a focused Linux host adapter in `crates/scp-cli/src/caddy_host.rs`; the desktop's
+commands/events and shared core APIs are unchanged. Inventory/profile commands keep
+their existing behavior. The explicit folder avoids extracting device-local settings.
+Windows/macOS fail before creating a profile/log or launching; qualification is open.
+
+The command validates the folder, registers SIGINT/SIGTERM/SIGHUP flag actions before
+PTY/worker launch, takes the profile owner lock, and exclusively creates the output
+file with owner-only permissions (subject to umask). No signal handler performs I/O,
+cleanup or locking. The shared cancellation flag only changes false→true during the
+invocation; repeated signals do not force exit. Registration guards survive runtime
+cleanup and result reporting, and unregister their actions on return/partial setup
+failure. `signal-hook` does **not** restore previous/default dispositions after
+unregistration ([upstream lifetime contract](https://docs.rs/signal-hook/0.4.6/signal_hook/));
+this private adapter belongs to a process that exits immediately after this invocation.
+It must not be embedded into desktop/MCP or reused as a general runtime adapter.
+
+Raw output goes to a new file, never stdout/stderr or an unbounded memory queue.
+Existing files/symlinks/special nodes are rejected by exclusive creation; no parent
+folders are created for the log. Completed output is drained/flushed; cancellation
+may discard unread bytes. Output write/flush failures remain errors and attempt
+direct-child cleanup before profile release. Ordinary file I/O can block and logs
+can grow without limit; no rotation, disk quota or durable crash transcript is
+promised. Failure after setup may leave a local profile and empty/partial log.
+The runtime retains the profile throughout every worker join and direct-child cleanup.
+
+Stdin is deliberately unused, including EOF: this noninteractive foreground command
+has no input forwarding or protocol client. The separate future stdio host still
+requires EOF/client shutdown cancellation. JSON stdout contains only a completed
+result with actual nullable `exitCode`, or `{"outcome":"cancelled"}`; no raw reason,
+credential or PTY transcript is included. Setup/I/O failures have no completion
+result. Success exits 0, usage exits 2; cancelled/nonzero/unknown child exits and
+host failures exit 1. This is not a background start/status/stop API.
+
+**Supervision limit:** this Linux preview is cooperative, with no hard shutdown
+bound. Native launch/read/write/flush/kill/wait, or descendants retaining the PTY,
+can prevent return. Signals request direct-child close/kill/reap through the shared
+core; there is no graceful Caddy stop handshake, descendant/elevated-helper cleanup,
+forced-exit escalation, or crash/abort guarantee. This does not satisfy the eventual
+bounded platform-supervision release gate. A platform supervisor and native Windows/
+macOS qualification remain required before claiming those capabilities.
+
+TDD: command tests first failed because `caddy` was unknown; host tests then failed
+to compile for the missing signal/output adapter. All pass after implementation.
+Subprocess fixtures use the current test executable as the real PTY direct child;
+no installed Caddy, user config, listener, keyring or desktop is used. Tests cover
+all three signals/repeated cancellation, stdin EOF policy, pre-cancel without a
+child, >128 KiB plus final-marker output, nonzero exits, partial output writes,
+write/flush failures, owner-lock retention/release, child reaping, private log mode,
+required arguments, validation before file creation, and existing-log preservation.
+An end-to-end CLI test uses an exec-only PATH shim to replace the child with the
+Rust fixture, checks the literal Unicode/metacharacter working directory, and
+parses stdout as a single JSON result while verifying the complete raw log.
+
+Linux validation: all 68 workspace tests plus the credential compile-fail doctest
+pass with `cargo test --locked --workspace --all-features`; five ignored fixtures
+are exercised as subprocesses. Desktop Rust tests pass (103; 17 existing warnings).
+Strict workspace all-feature/all-target Clippy, workspace format, diff whitespace
+checks and the standalone release build pass. Ripwire reports unchanged CLI `run`
+contract; affected-test inference misses subprocess dispatch, covered by the CLI
+integration suite. Quality delta has zero gating findings after one narrowly scoped
+false-clone acknowledgment: the Caddy log's exclusive private-file creation is not
+the desktop telemetry append helper's contract. Thirteen remaining new-code
+reachability findings concern test/fixture/Drop methods (Linux tests/guards execute;
+the unsupported-platform test awaits native execution), plus two minor churn rows.
+Native Windows/macOS checks were not performed.
+
+Next: strengthen this operation's host supervision rather than adding unrelated
+runtime commands: qualify real Linux Caddy signal/exit behavior and descendants with
+controlled fixtures; design a platform supervisor/output policy if hard shutdown
+bounds are required. Windows/macOS stay explicitly gated until their adapters and
+native acceptance checks exist. Native keyring calls remain unexposed pending host
+supervision. Focused settings extraction/import, standard desktop Streamable HTTP,
+other operation families, stdio MCP and independent packaging remain actionable.
 
 Proposed Cargo workspace boundaries:
 

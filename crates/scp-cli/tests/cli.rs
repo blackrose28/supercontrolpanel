@@ -188,3 +188,160 @@ fn profile_init_reports_owner_conflict_but_inventory_stays_read_only() {
     assert_eq!(fs::read(temp.path().join("profile.json")).unwrap(), before);
     drop(owner);
 }
+
+#[test]
+fn caddy_requires_explicit_foreground_folder_and_log() {
+    let help = cli(&["caddy", "run", "--help"]);
+    assert!(help.status.success(), "{help:?}");
+    for flag in ["--foreground", "--folder", "--output"] {
+        assert!(String::from_utf8_lossy(&help.stdout).contains(flag));
+    }
+    for args in [
+        vec!["caddy", "run", "--folder", ".", "--output", "log"],
+        vec!["caddy", "run", "--foreground", "--output", "log"],
+        vec!["caddy", "run", "--foreground", "--folder", "."],
+    ] {
+        assert_eq!(cli(&args).status.code(), Some(2));
+    }
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn caddy_validation_and_log_conflicts_do_not_launch_or_overwrite() {
+    let temp = tempfile::tempdir().unwrap();
+    let folder = temp.path().join("Caddy folder");
+    let profile = temp.path().join("profile");
+    let log = temp.path().join("log");
+    fs::create_dir(&folder).unwrap();
+    let args = [
+        "--config-dir",
+        profile.to_str().unwrap(),
+        "--json",
+        "caddy",
+        "run",
+        "--foreground",
+        "--folder",
+        folder.to_str().unwrap(),
+        "--output",
+        log.to_str().unwrap(),
+    ];
+    let missing = cli(&args);
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(missing.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("Caddyfile not found"));
+    assert!(!profile.exists());
+    assert!(!log.exists());
+    fs::write(folder.join("Caddyfile"), "never execute user configuration").unwrap();
+    fs::write(&log, "keep existing log").unwrap();
+    let conflict = cli(&args);
+    assert_eq!(conflict.status.code(), Some(1));
+    assert!(conflict.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&conflict.stderr).contains("create Caddy output file"));
+    assert_eq!(fs::read_to_string(&log).unwrap(), "keep existing log");
+    assert!(scp_core::profile::ProfileOwner::acquire(&profile).is_ok());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn caddy_real_cli_keeps_completed_raw_bytes_out_of_json_and_returns_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let bin = root.path().join("bin");
+    let folder = root.path().join("Caddy folder λ ; literal");
+    let log = root.path().join("raw-output");
+    let profile = root.path().join("profile");
+    fs::create_dir(&bin).unwrap();
+    fs::create_dir(&folder).unwrap();
+    fs::write(folder.join("Caddyfile"), "not executed by tests").unwrap();
+    // The shim immediately execs this test executable: the PTY's direct child
+    // becomes the Rust fixture, with no descendant keeping the PTY alive.
+    let shim = bin.join("caddy");
+    fs::write(&shim, "#!/bin/sh\nexec \"$SCP_CADDY_FIXTURE_EXE\" --ignored --exact caddy_cli_child_fixture --nocapture\n").unwrap();
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o700)).unwrap();
+    let child = Command::new(env!("CARGO_BIN_EXE_scpctl"))
+        .env("PATH", &bin)
+        .env("SCP_CADDY_FIXTURE_EXE", std::env::current_exe().unwrap())
+        .env("SCP_CADDY_FIXTURE_ROOT", root.path())
+        .args([
+            "--config-dir",
+            profile.to_str().unwrap(),
+            "--json",
+            "caddy",
+            "run",
+            "--foreground",
+            "--folder",
+            folder.to_str().unwrap(),
+            "--output",
+            log.to_str().unwrap(),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut child = child;
+    let start = std::time::Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > std::time::Duration::from_secs(10) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("CLI fixture timed out");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        json!({"outcome":"completed", "exitCode":7})
+    );
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Caddy exited"));
+    let raw = fs::read(log).unwrap();
+    assert!(raw.len() > 128 * 1024);
+    assert!(String::from_utf8_lossy(&raw).contains("RAW-FINAL-MARKER"));
+    assert_eq!(
+        fs::read_to_string(root.path().join("cwd")).unwrap(),
+        folder.to_str().unwrap()
+    );
+    assert!(scp_core::profile::ProfileOwner::acquire(&profile).is_ok());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "direct child fixture exercised by Caddy CLI subprocess test"]
+fn caddy_cli_child_fixture() {
+    use std::io::Write;
+    let root = std::path::PathBuf::from(std::env::var_os("SCP_CADDY_FIXTURE_ROOT").unwrap());
+    fs::write(
+        root.join("cwd"),
+        std::env::current_dir().unwrap().to_str().unwrap(),
+    )
+    .unwrap();
+    for _ in 0..2048 {
+        println!("{}", "x".repeat(64));
+    }
+    println!("RAW-FINAL-MARKER");
+    std::io::stdout().flush().unwrap();
+    std::process::exit(7);
+}
+
+#[test]
+#[cfg(not(target_os = "linux"))]
+fn unqualified_caddy_platform_fails_before_creating_profile_or_log() {
+    let root = tempfile::tempdir().unwrap();
+    let output = cli(&[
+        "--config-dir",
+        root.path().join("profile").to_str().unwrap(),
+        "caddy",
+        "run",
+        "--foreground",
+        "--folder",
+        "missing",
+        "--output",
+        root.path().join("log").to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Linux preview"));
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}

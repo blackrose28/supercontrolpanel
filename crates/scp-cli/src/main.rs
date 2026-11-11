@@ -1,3 +1,5 @@
+mod caddy_host;
+
 use clap::{Parser, Subcommand};
 use scp_core::servers::read_servers;
 use std::{
@@ -10,7 +12,7 @@ use std::{
 #[command(
     name = "scpctl",
     version,
-    about = "Standalone SuperControlPanel CLI (inventory and profile preview)"
+    about = "Standalone SuperControlPanel CLI preview"
 )]
 struct Cli {
     /// CLI profile directory (default: OS config directory/supercontrolpanel-cli)
@@ -25,6 +27,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Run Caddy in the foreground (Linux preview; direct-child cleanup only)
+    Caddy {
+        #[command(subcommand)]
+        command: CaddyCommand,
+    },
     /// Initialize the selected CLI profile's local identity
     Profile {
         #[command(subcommand)]
@@ -34,6 +41,22 @@ enum Command {
     Server {
         #[command(subcommand)]
         command: ServerCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum CaddyCommand {
+    /// Run with raw PTY output in a new file; stdin is unused, including EOF
+    Run {
+        /// Explicitly retain ownership until completion or signal cancellation
+        #[arg(long, required = true)]
+        foreground: bool,
+        /// Caddy working directory containing Caddyfile
+        #[arg(long)]
+        folder: String,
+        /// New raw output file; existing files are never overwritten (may grow without limit)
+        #[arg(long)]
+        output: PathBuf,
     },
 }
 
@@ -65,6 +88,9 @@ fn run(cli: Cli) -> Result<(), String> {
         .or_else(|| dirs::config_dir().map(|root| root.join("supercontrolpanel-cli")))
         .ok_or("cannot locate the OS config directory; pass --config-dir")?;
     match cli.command {
+        Command::Caddy {
+            command: CaddyCommand::Run { folder, output, .. },
+        } => caddy_host::run(&config_dir, &folder, &output, cli.json),
         Command::Profile {
             command: ProfileCommand::Init,
         } => initialize_profile(&config_dir, cli.json),

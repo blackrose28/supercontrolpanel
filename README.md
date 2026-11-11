@@ -118,13 +118,15 @@ npm run helper:run -- openvpn status
 ## Standalone CLI preview
 
 The separate `scpctl` binary runs with the desktop closed and HTTP disabled. This preview
-supports read-only server inventory and local profile initialization; runtime commands and stdio MCP are still
-planned. The helper above continues to control desktop-owned sessions.
+supports read-only server inventory, local profile initialization, and a Linux-only Caddy
+foreground command. Other runtime commands and stdio MCP are still planned. The helper above continues to control desktop-owned sessions.
 
 ```bash
 cargo run -p scp-cli -- server list
 cargo run -p scp-cli -- --config-dir /path/to/cli-profile server list --json
 cargo run -p scp-cli -- --config-dir /path/to/cli-profile profile init --json
+# Linux preview; requires Caddy on PATH and a new output filename:
+cargo run -p scp-cli -- caddy run --foreground --folder /path/to/caddy --output /path/to/new-caddy.log --json
 cargo build --locked --release -p scp-cli
 cargo test --locked --workspace
 ```
@@ -167,7 +169,8 @@ Runtime and config writers must retain the core ownership guard for their full
 lifetime. Inventory listing stays read-only and can run while a profile is owned.
 This lock coordinates this CLI profile only; it does not isolate host VPN routes or
 external Boundary state. Guard drop explicitly unlocks even if a concurrent subprocess
-briefly inherits the open file descriptor. CLI runtime shutdown remains planned.
+briefly inherits the open file descriptor. Caddy retains this lock through foreground
+output drainage and direct-child cleanup.
 
 The core now provides a profile-bound credential store and a cache keyed by namespace
 and account. Its optional `os-keyring` feature uses the same persistent native stores as
@@ -202,7 +205,7 @@ The core also provides a CLI-local `ProfileRuntime` that owns a private session 
 and retains the profile lock until direct-child cleanup finishes. It allocates a fresh
 session ID for every launch, using a per-runtime random nonce and a non-wrapping counter;
 callers cannot inject or reuse IDs through this context. Returned readers and weak
-monitors do not retain child/profile ownership. It is not wired to CLI commands yet.
+monitors do not retain child/profile ownership. The Linux Caddy host now uses this context.
 Its new core-only `run_foreground` path launches one child, streams raw PTY bytes to a
 supplied writer, then flushes output before returning the exit payload. Output errors and
 Rust unwinding attempt direct-child cleanup while retaining profile ownership. Nonzero
@@ -217,14 +220,39 @@ Cancellation may discard unread output and skip flush; already-running I/O may f
 A blocked sink, descendant-held reader, launch, or native cleanup can still delay return
 indefinitely. This is cooperative cancellation with no hard shutdown deadline. Worker I/O
 errors and panics remain visible after cleanup. The host must keep the flag set until return.
-Signal handling, process-tree/elevated-helper supervision, status/event publication, and a
-CLI-owned operation family remain pending. The CLI preview still provides inventory and
-profile initialization only. Caddy launch preparation is now shared with the desktop:
+Process-tree/elevated-helper supervision and status/event publication remain pending.
+Caddy launch preparation is shared with the desktop:
 `scp_core::caddy::build_caddy_command` performs the existing folder/Caddyfile checks
 and builds `caddy run --config Caddyfile` with a literal working directory, without a
-shell, credential access, file writes, or launch. This selects Caddy as the first narrow
-foreground operation candidate; it does not yet expose a CLI Caddy command. Existence
-checks are not Caddyfile validation or a guarantee that paths remain valid at launch.
+shell, credential access, file writes, or launch. Existence checks are not Caddyfile
+validation or a guarantee that paths remain valid at launch.
+
+`scpctl caddy run --foreground --folder FOLDER --output NEW_FILE` now runs Caddy through
+the core PTY runtime on Linux. It takes the selected CLI profile's owner lock and uses
+only the explicit folder; it does not read desktop configuration or credentials. Windows
+and macOS return an explicit unsupported error before creating a profile/log or launching
+a child; native host qualification remains pending. Caddy must be available on `PATH`.
+
+Raw PTY bytes go to the new output file (Unix mode `0600`, subject to umask), never stdout.
+Existing files and symlinks are rejected; parent directories must already exist. Completed
+runs drain and flush all bytes before reporting. The log can grow without limit; there is
+no in-memory output queue or log rotation. It can contain sensitive Caddy output. Write or
+flush failure attempts direct-child cleanup and returns an error. Setup/launch failure can
+leave the newly initialized profile and an empty log; errors do not remove those files.
+
+SIGINT, SIGTERM and SIGHUP set a monotonic cancellation flag. Repeated signals do not force
+exit past cleanup guards. This is **cooperative direct-child cleanup**, with no hard
+shutdown deadline or process-tree guarantee: file I/O, native calls or descendants holding
+the PTY can still block indefinitely. Cancellation may discard remaining output. Stdin is
+unused, including EOF, and there is no input forwarding. This policy is for foreground
+Caddy only; the future stdio MCP host must separately handle EOF/client shutdown.
+
+`--json` writes one completion result to stdout: `{"outcome":"completed","exitCode":0}`
+(or the actual child exit code), or `{"outcome":"cancelled"}`. Diagnostics use stderr.
+Exit status is `0` only for a completed zero child exit; cancellation, nonzero/unknown
+child exits and host failures return `1`, and invalid arguments return `2`. Setup/I/O
+failures produce no completion JSON. These are per-invocation results; no cross-process
+status, stop command, background daemon or MCP runtime is provided.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.
