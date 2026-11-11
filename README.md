@@ -254,6 +254,12 @@ child exits and host failures return `1`, and invalid arguments return `2`. Setu
 failures produce no completion JSON. These are per-invocation results; no cross-process
 status, stop command, background daemon or MCP runtime is provided.
 
+Linux acceptance tests exercise the actual CLI with an exec-only PATH fixture for
+SIGINT/SIGTERM/SIGHUP, closed stdin, direct-child reaping and profile release, zero and
+nonzero exits, missing executable and profile conflicts. They verify JSON/log separation
+without running installed Caddy or user configuration. Actual Caddy behavior and descendant
+cleanup remain unqualified; test watchdogs do not establish a production shutdown bound.
+
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.
 

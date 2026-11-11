@@ -594,6 +594,46 @@ native acceptance checks exist. Native keyring calls remain unexposed pending ho
 supervision. Focused settings extraction/import, standard desktop Streamable HTTP,
 other operation families, stdio MCP and independent packaging remain actionable.
 
+### Linux Caddy CLI lifecycle acceptance (2026-11-11)
+
+`crates/scp-cli/tests/caddy_lifecycle.rs` adds acceptance coverage through the actual
+`scpctl` executable, keeping the production adapter and contracts unchanged. A temporary
+PATH shim immediately execs this integration-test executable as the PTY's direct child.
+No installed Caddy, user configuration, listener, desktop or keyring is used.
+
+The tests check INT/TERM/HUP delivered to the real CLI with stdin already closed,
+cancelled JSON plus exit 1, direct-child reaping and profile release. Zero completion
+checks exit 0, one JSON value, empty stderr and a final raw-log marker. The earlier
+CLI test retains nonzero/large-output coverage. Competing ownership fails before log
+creation or child launch and preserves profile metadata. A missing executable fails
+without completion JSON, leaves an empty log, preserves metadata and releases ownership.
+All release checks retain the persistent owner-lock file.
+
+RED/GREEN: the first new acceptance run failed at child readiness and the final-log
+marker because the new child fixture was absent; adding the fixture made all three
+tests pass. The launch-failure/conflict case passed immediately against existing behavior.
+No production fix was required. CLI subprocesses have a finite polling watchdog and
+are killed/reaped on assertion failure; the direct-child fixture itself exits after six
+seconds if orphaned by a failed test. Those safeguards apply only to tests and provide
+no production shutdown deadline or descendant-tree guarantee.
+
+Validation: all 71 workspace tests and the credential compile-fail doctest pass with
+`cargo test --locked --workspace --all-features`; six ignored fixtures are exercised
+by subprocess tests. Strict all-feature/all-target workspace Clippy, formatting and
+diff whitespace checks pass. Ripwire selects the new acceptance file for its helper
+and reports its intended new private contract. Quality delta has zero gating findings
+after a scoped acknowledgment of the short watchdog polling idiom shared with a
+private helper in a separate test binary. Five remaining new-code reachability rows
+are the three executed tests, subprocess fixture and RAII cleanup method. Desktop
+tests were not rerun for this test/documentation-only slice; the previous 103-test
+desktop validation still applies, and no production files changed.
+
+Next: use controlled descendant fixtures to establish the existing cleanup limits,
+then choose a concrete platform-supervisor/output policy before claiming bounded cleanup.
+Actual installed Caddy behavior and Windows/macOS qualification remain open. Settings
+extraction/import, desktop Streamable HTTP, other operation families, stdio MCP and
+independent packaging remain actionable under the same release gates above.
+
 Proposed Cargo workspace boundaries:
 
 ```text
