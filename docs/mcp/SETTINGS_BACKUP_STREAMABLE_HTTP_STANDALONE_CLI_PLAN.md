@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 has Slice 0 inventory and isolated SDK/client feasibility evidence in its dedicated plan; implementation remains proposed. Work 3 remains proposed here.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 Slices 1–6 are implemented; release qualification limits are recorded in its dedicated plan. Work 3 remains proposed in its dedicated plan.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -111,61 +111,9 @@ Work 2 can ship once the operation registry/policy and desktop adapter seams exi
 
 ## Work 3: standalone CLI and stdio MCP
 
-### Operation lifetime contract
+The detailed scope, shared-core extraction, operation lifetime, command surface, profile/credential isolation, headless capabilities, stdio contract, delivery slices, and acceptance tests now live in [Standalone CLI and stdio MCP](STANDALONE_CLI_STDIO_MCP_PLAN.md). That file is the source of truth for Work 3 implementation details; this roadmap retains cross-work dependencies and delivery order.
 
-Separate accepted/running/completed results. Start tools return a runtime identifier plus session/transfer identifier; status queries report eventual outcomes. Request cancellation stops only work still owned by that request, not an already-started VPN or tunnel; those use explicit stop operations. Desktop HTTP disconnect must not tear down app-owned work after the start response. In contrast, shutdown of the CLI stdio host cleans up everything it owns. A lost start response is an unknown outcome: inspect state before retrying and never use JSON-RPC request IDs as durable deduplication keys. Define duplicate-start and stop-already-stopped behavior per operation.
-
-### Proposed commands
-
-```sh
-scpctl status --json
-scpctl server list
-scpctl openvpn start --foreground
-scpctl server tunnel start --server-id ID --foreground
-scpctl server ssh --server-id ID
-scpctl scp upload --server-id ID --local FILE --remote PATH
-scpctl settings export --output settings.scpbackup
-scpctl settings import --input settings.scpbackup --preview
-scpctl mcp serve --stdio
-```
-
-`scpctl` is provisional (check naming conflicts before release). Offer version/help, stable exit codes, JSON output, completion, explicit config/profile selection, and safe stdin/file/terminal secret input. Never accept passphrases/passwords as routine command-line values.
-
-### Runtime ownership and process lifetime
-
-- One-shot queries and completed transfers exit after producing results. A fresh `scpctl status` process has no view of another foreground CLI process; report configured capabilities and this process's runtime ID/state explicitly. Use the existing helper to inspect desktop-owned state. Cross-invocation CLI status/control requires the deferred daemon.
-- Long-running VPN/tunnel/Caddy commands stay in the foreground in v1, own their child processes, and handle termination cleanly. Starting a tunnel and then exiting cannot honestly return a usable persistent runtime.
-- Boundary-backed one-shot SSH/SCP must create, await, and clean up a temporary tunnel within the same invocation, or use a tunnel explicitly supplied as an external dependency. Do not require a second same-profile CLI owner to start the tunnel while the first holds the owner lock. The stdio host can reuse tunnels it already owns. Tests cover readiness timeout and cleanup when either connection or transfer fails.
-- The stdio server is a long-running headless runtime owner; sessions survive between MCP calls while that process lives. Status reports this runtime's state, not a fabricated view of the desktop's memory.
-- On stdin EOF, signal, or client shutdown, cancel operations and clean up owned sessions, transfers, browser handles, and children within a bounded timeout. Test platform-specific elevated OpenVPN ownership carefully: the existing `terminateOpenVpnWhenHelperExits` setting can conflict with foreground lifetime. Require compatible child ownership for CLI-managed VPN or reject the start. Crash/forced-termination cleanup requires platform process supervision; document limits rather than guaranteeing cleanup after every kill.
-- If independent `start`, `status`, and `stop` invocations must manage persistent background work, add an explicit CLI-owned daemon in a later phase. That daemon must not depend on the desktop. Do not accidentally invent persistence through orphan processes.
-- Use separate runtime/profile identifiers and an exclusive runtime-owner lock per profile in v1; multiple MCP clients commonly spawn separate stdio processes. Fail with an actionable conflict when a second process tries to own that profile. Protect config writes with cross-process locking and detect tunnel/listener port conflicts. Do not share PTY ownership across desktop and CLI or let a CLI shutdown stop desktop children.
-- Default to a deterministic separate CLI config root/profile, with explicit profile selection and settings import for migration. Each CLI profile gets a stable, locally generated credential namespace that is not copied from the archive. A different config directory alone does not isolate the current process-global cache or fixed keyring accounts. Key caches by namespace/account and keep existing desktop identifiers unchanged. Defer sharing desktop files until cross-process coordination and cache invalidation are implemented.
-- Separate profiles do not isolate machine-wide VPN routes/DNS, elevation, or external Boundary CLI credential stores. Define a host-wide conflict policy for VPN ownership and choose isolated external CLI state where supported; otherwise surface the sharing and require explicit use. Do not promise concurrent VPN isolation merely because locks/ports differ.
-
-### Host capability differences
-
-| Capability | Headless CLI approach |
-| --- | --- |
-| Config, servers, SCP/SFTP, tunnels, Caddy | Shared core operations |
-| Interactive SSH/password Boundary auth | CLI terminal/PTYS; MCP cannot borrow protocol stdin for password prompts |
-| Browser-based Boundary login | System browser only where available; otherwise explicit unsupported/manual flow |
-| Automated OIDC using hidden Tauri webview | Desktop-only initially; headless replacement is a separate validated project |
-| OpenVPN elevation | Preserve Windows helper/UAC and Unix sudo behavior through platform adapters; clearly fail when interaction is unavailable |
-| RDP launch | Optional native-client capability on supported interactive hosts |
-| OS keyring | Same supported OS stores, with explicit locked/unavailable errors; Linux headless environments may lack a secret service |
-| CC agent/telemetry | Remains desktop-hosted initially; CLI must not duplicate enrolled device identity or emit duplicate telemetry |
-
-Expose capability availability/reasons rather than promising identical behavior on a machine without a browser, desktop, keyring, or elevation mechanism. Document this matrix as the deliberate limit of parity.
-
-### stdio MCP contract
-
-- Use the same SDK adapter, operation schemas, policy, and redaction as desktop MCP, hosted directly on the headless runtime.
-- Standard newline-delimited JSON-RPC on stdin/stdout; diagnostics only on stderr. Capture child output and convert it into explicit results/events so it cannot corrupt the protocol stream.
-- No listening HTTP port or desktop token discovery in stdio mode. Authorization comes from the launching user's process context plus explicit local operation policy; tokens remain relevant to HTTP.
-- Never prompt on protocol stdin or block indefinitely on an invisible approval UI. For sensitive actions require an explicit configured allow policy, otherwise fail closed with an actionable error. This applies even though a client can launch the process.
-- Support concurrent requests, cancellation, progress, and bounded output; keep raw terminal/secret output out of ordinary status resources.
-- Produce a separately installable binary that runs without Tauri, a webview, frontend assets, or the desktop app. External programs such as OpenVPN, Boundary, SSH/SCP, and Caddy remain prerequisites for their respective operations.
+The CLI executes a Tauri-independent runtime directly with the desktop closed and HTTP disabled. Foreground commands and the stdio host own their sessions and child processes. Reuse Work 2's schemas/policy and Work 1's backup implementation; daemon-based control and shared desktop/CLI profiles remain deferred.
 
 ## Delivery order and TDD gates
 
