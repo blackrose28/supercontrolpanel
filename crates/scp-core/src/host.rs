@@ -1,7 +1,7 @@
 //! CLI-local runtime ownership. Desktop hosts retain their existing adapters.
 //!
-//! This context owns children, not reader threads or event delivery. Native cleanup can
-//! block; signal handling, bounded cancellation, and process-tree supervision remain host work.
+//! This context owns children and offers synchronous foreground output drainage. Native I/O
+//! and cleanup can block; signals, bounded cancellation, and process-tree supervision remain host work.
 
 use crate::{
     profile::ProfileOwner,
@@ -9,7 +9,11 @@ use crate::{
     sessions::{spawn_pty, SessionMonitor, SessionPoll, SessionStore},
 };
 use portable_pty::{CommandBuilder, PtySystem};
-use std::{io::Read, path::Path};
+use std::{
+    io::{self, Read, Write},
+    path::Path,
+    time::Duration,
+};
 use uuid::Uuid;
 
 pub struct ProfileRuntime {
@@ -72,6 +76,34 @@ impl ProfileRuntime {
         })
     }
 
+    /// Run one child synchronously, draining and flushing output before returning its exit.
+    /// No status/event publication or input forwarding is performed. Reader, sink, and native
+    /// child operations may block indefinitely (including descendants retaining the PTY).
+    /// Errors and unwinding attempt direct-child cleanup while the profile remains owned.
+    pub fn run_foreground(
+        &mut self,
+        system: &dyn PtySystem,
+        cols: u16,
+        rows: u16,
+        command: CommandBuilder,
+        output: &mut dyn Write,
+    ) -> Result<PtyExitPayload, String> {
+        let mut launched = self.spawn(system, cols, rows, command)?;
+        let cleanup = ForegroundCleanup {
+            runtime: self,
+            id: launched.id().to_owned(),
+        };
+        let result = drain_foreground(self, &mut launched, output);
+        if let Err(primary) = result {
+            cleanup
+                .runtime
+                .close(&cleanup.id)
+                .map_err(|error| format!("{primary}; cleanup failed: {error}"))?;
+            return Err(primary);
+        }
+        result
+    }
+
     pub fn write(&self, id: &str, data: &str) -> Result<(), String> {
         self.sessions.write(id, data)
     }
@@ -84,5 +116,36 @@ impl ProfileRuntime {
     /// publish them; this does not fence desktop callbacks or queued ID-only events.
     pub fn poll(&self, launched: &RuntimePty) -> Result<SessionPoll, String> {
         launched.monitor.poll(&self.sessions)
+    }
+}
+
+// No strong session handles escape. This also runs if a host output writer panics.
+struct ForegroundCleanup<'a> {
+    runtime: &'a ProfileRuntime,
+    id: String,
+}
+
+impl Drop for ForegroundCleanup<'_> {
+    fn drop(&mut self) {
+        let _ = self.runtime.close(&self.id);
+    }
+}
+
+fn drain_foreground(
+    runtime: &ProfileRuntime,
+    launched: &mut RuntimePty,
+    output: &mut dyn Write,
+) -> Result<PtyExitPayload, String> {
+    io::copy(&mut launched.reader, output)
+        .map_err(|error| format!("failed to stream pty output: {error}"))?;
+    output
+        .flush()
+        .map_err(|error| format!("failed to flush pty output: {error}"))?;
+    loop {
+        match runtime.poll(launched)? {
+            SessionPoll::Running => std::thread::sleep(Duration::from_millis(20)),
+            SessionPoll::Detached => return Err("foreground session detached".to_string()),
+            SessionPoll::Exited(exit) => return Ok(exit),
+        }
     }
 }

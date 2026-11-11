@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context; foreground supervision and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous foreground output drainage; cancellable supervision and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -354,6 +354,59 @@ credential supervision, and event ordering remain open. Next implement a focused
 foreground lifecycle with real-child tests, then an operation family once its supervision
 contract is established. Full config extraction, settings commands/import, Streamable
 HTTP, stdio MCP, and packaging remain pending.
+
+### Synchronous foreground output and completion (2026-11-11)
+
+`ProfileRuntime::run_foreground` now launches one child through the existing private
+ownership boundary, streams raw PTY bytes to a host-supplied `Write`, flushes the sink,
+and only then polls for and returns the launch-bound exit payload. Output is streamed
+with bounded copy buffering; partial writes and interrupted I/O use standard-library
+copy behavior. Nonzero child exits retain their normal payload rather than becoming
+host errors. No new CLI command, dependency, background thread, desktop adapter, status
+mutation, or event delivery was added.
+
+The mutable runtime borrow keeps profile ownership throughout the call. A private
+cleanup guard attempts close on Rust unwinding, including host sink panics; normal
+read/write/flush/poll failures explicitly close and retain the primary error, appending
+any cleanup error. The guard retains no strong session handle. Successful completion
+retires the session through the existing monitor and leaves the runtime/profile usable.
+Callbacks execute outside the core registry/status locks. Abort/forced process exit
+cannot run Rust drop guards and is not covered by the unwind guarantee.
+
+This is a deliberately synchronous completion contract, not cancellable supervision.
+It drains to EOF before polling; a descendant retaining the PTY can therefore delay
+completion after the direct child exits. EOF alone does not imply child exit: subsequent
+polling waits for that child. Reader, sink, poll/kill/wait can block without a deadline;
+there is no concurrent input forwarding, signal handler, output worker, status integration,
+or bounded shutdown. Do not expose this as an arbitrary-command CLI or use it for native
+keyring calls. Desktop reader/telemetry/publication races remain unchanged.
+
+TDD evidence: the two real-child tests initially failed to compile because the method
+was absent. A Rust subprocess fixture produces over 128 KiB plus a final marker and
+exits 7, exercising native PTY drainage, partial sink writes, flush, exit conversion,
+session retirement, profile retention, and ownership release after runtime drop. Real
+children also exercise sink write/flush errors, panic unwinding, and subsequent launches.
+The fake-backend regression verifies kill/wait before return/unwind, ownership throughout
+cleanup, read errors, and combined output/cleanup errors. Removing the unwind guard's
+close deterministically fails the kill assertion; restoring it passes. The injected
+reader-failure case was separately confirmed RED before adding the faulty reader fixture.
+
+Linux validation passes 53 workspace all-feature tests plus the credential compile-fail
+doctest (two ignored fixtures are exercised by subprocess tests), all 103 desktop tests
+with 17 existing warnings, strict workspace all-feature/all-target Clippy, formatting,
+and the locked standalone release build. Ripwire quality delta has zero gating
+regressions; new findings include test/Drop entries and the new method's parameter count.
+No acknowledgments were added. The host-file static test gate exits 4 with eight unmapped
+impacted symbols, including existing desktop paths; this is not a clean coverage gate.
+Executed Cargo suites supply the validation evidence.
+
+Next implement a focused cancellable host lifecycle with real-child tests, deciding
+worker ownership and how blocked readers/sinks and EOF are handled without releasing
+the profile prematurely. Preserve this drain-before-exit contract for completed output;
+explicitly define truncation on cancellation. Then add an operation family after its
+supervision contract is established. Native Windows/macOS, descendant trees/elevated
+helpers, keyring supervision, full config/settings extraction, Streamable HTTP, stdio
+MCP, and packaging remain open.
 
 Proposed Cargo workspace boundaries:
 

@@ -203,9 +203,15 @@ and retains the profile lock until direct-child cleanup finishes. It allocates a
 session ID for every launch, using a per-runtime random nonce and a non-wrapping counter;
 callers cannot inject or reuse IDs through this context. Returned readers and weak
 monitors do not retain child/profile ownership. It is not wired to CLI commands yet.
-This is not full process-tree or elevated-helper supervision: cancellation, bounded
-shutdown, reader/event orchestration, and a CLI-owned operation family remain pending. The CLI
-preview still provides inventory and profile initialization only.
+Its new core-only `run_foreground` path launches one child, streams raw PTY bytes to a
+supplied writer, then flushes output before returning the exit payload. Output errors and
+Rust unwinding attempt direct-child cleanup while retaining profile ownership. Nonzero
+child exits remain exit payloads, distinct from host I/O errors. This synchronous path
+has no input forwarding or cancellation: reads, output writers, native cleanup, or a
+descendant retaining the PTY can block indefinitely. It starts no background workers.
+Signal handling, bounded shutdown, process-tree/elevated-helper supervision, status/event
+publication, and a CLI-owned operation family remain pending. The CLI preview still
+provides inventory and profile initialization only.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.

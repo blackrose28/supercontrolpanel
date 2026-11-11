@@ -70,6 +70,9 @@ impl MasterPty for FakePty {
     }
     fn try_clone_reader(&self) -> anyhow::Result<Box<dyn Read + Send>> {
         self.record("reader")?;
+        if self.fail == "read" {
+            return Ok(Box::new(FailedReader));
+        }
         Ok(Box::new(io::Cursor::new(b"output")))
     }
     fn take_writer(&self) -> anyhow::Result<Box<dyn Write + Send>> {
@@ -83,6 +86,12 @@ impl MasterPty for FakePty {
     #[cfg(unix)]
     fn as_raw_fd(&self) -> Option<std::os::fd::RawFd> {
         None
+    }
+}
+struct FailedReader;
+impl Read for FailedReader {
+    fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+        Err(io::Error::other("injected read"))
     }
 }
 impl Write for FakePty {
@@ -570,4 +579,56 @@ fn profile_runtime_failed_launch_retains_lock_and_can_retry() {
     ));
     drop(runtime);
     assert!(ProfileOwner::acquire(temp.path()).is_ok());
+}
+
+#[test]
+fn foreground_failures_reap_before_return_or_unwind_and_report_cleanup_errors() {
+    struct RejectedOutput(bool);
+    impl Write for RejectedOutput {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            if self.0 {
+                panic!("output panic fixture");
+            }
+            Err(io::Error::other("output rejected"))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let mut runtime = ProfileRuntime::acquire(dir.path()).unwrap();
+    for (panic, fail) in [(false, ""), (true, ""), (false, "wait"), (false, "read")] {
+        let pty = FakePty {
+            fail,
+            owned_profile: Some(dir.path().to_owned()),
+            ..FakePty::default()
+        };
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            runtime.run_foreground(
+                &pty,
+                80,
+                24,
+                CommandBuilder::new("unused"),
+                &mut RejectedOutput(panic),
+            )
+        }));
+        if panic {
+            assert!(result.is_err());
+        } else {
+            let error = result.unwrap().err().unwrap();
+            assert!(error.contains(if fail == "read" {
+                "injected read"
+            } else {
+                "output rejected"
+            }));
+            assert_eq!(
+                error.contains("cleanup failed: failed to wait child"),
+                fail == "wait"
+            );
+        }
+        let calls = pty.calls();
+        assert!(calls.contains(&"kill"));
+        assert!(calls.contains(&"wait"));
+        assert!(ProfileOwner::acquire(dir.path()).is_err());
+    }
 }
