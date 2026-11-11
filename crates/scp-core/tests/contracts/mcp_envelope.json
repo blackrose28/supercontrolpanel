@@ -1,0 +1,7 @@
+{
+  "ok": true,
+  "message": "function_status_list completed",
+  "data": [{"functionId": "boundary-auth", "sessionId": null, "status": "idle"}],
+  "warnings": ["Minimal localhost HTTP transport is enabled; full MCP spec compatibility is still in progress."],
+  "timestamp": 1730000000123
+}

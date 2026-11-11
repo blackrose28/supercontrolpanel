@@ -8,7 +8,17 @@ These schemas are also the contract that `supercontrolpanelhelper` should map on
 
 ## Response envelope
 
-All tools should prefer a consistent result shape:
+The existing desktop custom transport uses `scp-core::mcp_dto::McpToolCallEnvelope`,
+re-exported by desktop `mcp::dto` and `mcp`. It serializes all five fields below,
+including empty warnings and null data. The DTO has Serialize only; it does not
+validate arguments/results, sanitize values, authorize calls, read the clock, or
+construct failures. Desktop dispatch retains its success message, transport warning
+and injected millisecond clock; action/policy failures remain `Err(String)` outside
+this success envelope. `ok: false` remains representable by the DTO but is not a
+new dispatcher error path. This is the custom transport contract, not a standard
+MCP result or a CLI capability.
+
+The result shape is:
 
 ```json
 {
@@ -25,7 +35,7 @@ All tools should prefer a consistent result shape:
 - `ok`: boolean success flag
 - `message`: short human-readable summary
 - `data`: tool-specific payload
-- `warnings`: optional string array
+- `warnings`: string array, always serialized (including when empty)
 - `timestamp`: Unix epoch milliseconds
 
 ## Shared data shapes

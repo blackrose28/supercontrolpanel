@@ -336,6 +336,11 @@ metadata; reads still use the tool dispatcher's execution policy. Unknown URIs
 retain the existing error including the supplied URI. This extraction does not
 expose resources in `scpctl` or add a standard MCP transport.
 
+The custom tool/resource response envelope now lives in `scp-core::mcp_dto`,
+re-exported through the existing desktop paths. Its five serialized fields and
+opaque `data` are unchanged; desktop dispatch still supplies messages, warnings
+and timestamps. This shared DTO does not add CLI operations or standard MCP results.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

@@ -7,6 +7,7 @@ pub mod credentials;
 pub mod host;
 pub mod local_settings;
 pub mod mcp_catalog;
+pub mod mcp_dto;
 pub mod mcp_policy;
 pub mod mcp_resources;
 pub mod profile;

@@ -1109,6 +1109,53 @@ independent packaging remain actionable. Native supervision/keyring/elevation ga
 are unchanged; do not repeat the cgroup spike or spawn blocked successors while
 independent work remains.
 
+### Shared custom MCP response envelope (2026-11-11)
+
+`scp-core::mcp_dto` now owns the existing `McpToolCallEnvelope`, with the same
+Serialize-only/camelCase declaration and public bool/String/JSON/Vec<String>/u64
+fields. Desktop `mcp::dto` re-exports it; the `mcp::*` path and all consumers remain
+compatible. No constructor, defaults, Deserialize, normalization or validation was
+added. The dispatcher still constructs success messages, warnings and timestamps
+and propagates policy/action errors separately. Opaque data, false/empty/null
+values, warning ordering/duplicates and the full timestamp range remain representable.
+This is a pure DTO extraction, with no transport, execution, auth, runtime, profile,
+credential, CLI capability or dependency changes. Standard MCP result conversion
+and dedicated operation schemas remain separate work.
+
+TDD: three shared fixture/edge-case tests first pass against the original desktop
+DTO. The core target fails on the missing module, and a desktop identity test also
+fails before extraction. After moving the unchanged definition, all three contracts
+run against core and desktop; the identity test verifies both desktop public paths
+accept the core type directly without conversion. Tests use synthetic values only.
+They cover serialization/type ownership, not executed tool handlers or HTTP/Tauri/UI
+transport behavior; the existing resource adapter/error and policy tests still run.
+
+Linux validation: locked workspace all-feature tests pass 102 tests plus the
+credential compile-fail doctest; seven ignored subprocess fixtures are exercised
+by acceptance tests. Locked desktop tests pass 132 tests with 17 existing warnings.
+Strict workspace all-feature/all-target Clippy, workspace/changed-file formatting,
+locked release CLI build and diff whitespace checks pass. Native Windows/macOS
+qualification remains open; this extraction has no platform-specific code.
+
+Ripwire identified 15 downstream symbols across seven files before editing;
+`--uses` and affected selection found no modeled sites/tests. Edit-check reports
+the moved DTO as new; the compiler and public-path identity test verify re-exports.
+Quality delta has zero existing-symbol/gating regressions, no acknowledgments and
+six non-gating new test/module reachability findings. The staged test gate exits 4
+with one unrelated Markdown heading and three selected contract/fixture/target
+files with unknown runners, all exercised by the core target. Inline/included
+desktop tests are not modeled. This is not clean static coverage or transport E2E.
+
+Next focused increment: extract one small read-only operation's argument/result
+DTOs with exact shared and desktop wire fixtures, after inspecting its consumers
+and current parsing. Function-status get/list are candidates, but preserve current
+missing/wrong-type argument errors, optional/null fields, collection ordering and
+status semantics; do not silently harden parsing or introduce a CLI handler. Keep
+DTO extraction separate from standard desktop Streamable HTTP integration (which
+requires current official SDK/protocol sources). Coordinated CLI import, other
+operation families, stdio MCP and packaging also remain actionable. Existing native
+supervision/keyring/elevation gates are unchanged; do not repeat the cgroup spike.
+
 Proposed Cargo workspace boundaries:
 
 ```text
