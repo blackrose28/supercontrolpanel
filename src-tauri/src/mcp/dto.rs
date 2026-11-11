@@ -20,7 +20,8 @@ pub use scp_core::mcp_resources::McpResourceDescriptor;
 pub use scp_core::mcp_dto::{
     McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
     McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-    McpOpenVpnGetStatusResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
+    McpOpenVpnGetStatusResult, McpScpTransferGetArgs, McpScpTransferGetResult,
+    McpScpTransferListResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
     McpToolCallEnvelope,
 };
 
@@ -163,5 +164,43 @@ mod shared_config_paths_identity {
             app_config_path: "config.json".to_owned(),
         });
         assert_eq!(result.app_config_path, "config.json");
+    }
+}
+
+#[cfg(test)]
+mod transfers_contract {
+    use super::{McpScpTransferGetResult, McpScpTransferListResult};
+    use crate::models::ScpTransferState;
+    mod wire {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../crates/scp-core/tests/contracts/mcp_transfers.rs"
+        ));
+    }
+}
+#[cfg(test)]
+mod transfer_arguments_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_transfer_args.rs"
+    ));
+}
+#[cfg(test)]
+mod shared_transfer_identity {
+    #[test]
+    fn desktop_model_and_mcp_paths_accept_core_types() {
+        let _: fn(scp_core::scp_transfer::ScpTransferEntry) -> crate::models::ScpTransferEntry =
+            std::convert::identity;
+        let _: fn(scp_core::scp_transfer::ScpTransferState) -> crate::models::ScpTransferState =
+            std::convert::identity;
+        let _: fn(crate::models::ScpTransferEntry) -> crate::mcp::McpScpTransferGetResult =
+            std::convert::identity::<super::McpScpTransferGetResult>;
+        let _: fn(Vec<crate::models::ScpTransferEntry>) -> crate::mcp::McpScpTransferListResult =
+            std::convert::identity::<super::McpScpTransferListResult>;
+        let input = serde_json::json!({"transferId":"id"});
+        let shared = scp_core::mcp_dto::McpScpTransferGetArgs::from_args(&input).unwrap();
+        let dto: super::McpScpTransferGetArgs<'_> = shared;
+        let public: crate::mcp::McpScpTransferGetArgs<'_> = dto;
+        assert_eq!(public.transfer_id, "id");
     }
 }

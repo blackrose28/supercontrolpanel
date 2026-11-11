@@ -641,6 +641,11 @@ Where the returned value is the full saved device-local sync settings object.
 
 ## `scp_transfer_list`
 
+All arguments, including non-object values, are ignored after the existing policy
+check. Results clone the host history in its current order (new entries are
+inserted first; history retains at most 32 entries); list adds no sorting,
+filtering or deduplication. Store lock errors propagate unchanged.
+
 ### Input
 
 ```json
@@ -667,6 +672,20 @@ Where the returned value is the full saved device-local sync settings object.
 ```
 
 ## `scp_transfer_get`
+
+After policy, `transferId` uses the existing string lookup: missing, null,
+non-string and non-object arguments return `transferId is required`. Empty,
+whitespace, Unicode and control strings are accepted unchanged; extra fields are
+ignored. The host returns the first exact ID match or `transfer not found`;
+store lock errors propagate unchanged.
+
+Both transfer tools return the Serialize-only `ScpTransferEntry` model through
+shared MCP result aliases. All ten fields are emitted. `progressPercent`,
+`source`, `destination` and `sessionId` emit explicit nulls when absent; present
+strings are unchanged. States are exactly `pending`, `success`, `error`.
+Timestamps preserve `u64` values and progress preserves `u8` values without
+DTO validation (including values above 100); hosts retain update semantics.
+The existing custom envelope and execution policy remain unchanged.
 
 ### Input
 

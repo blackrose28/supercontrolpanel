@@ -17,7 +17,8 @@ use crate::{
     mcp::{
         McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
         McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-        McpOpenVpnGetStatusResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
+        McpOpenVpnGetStatusResult, McpScpTransferGetArgs, McpScpTransferGetResult,
+        McpScpTransferListResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
         McpToolCallEnvelope,
     },
     server_mgmt::{load_servers, Server},
@@ -630,16 +631,15 @@ pub fn call_mcp_tool(
             json!({ "sessionId": session_id })
         }
         "scp_transfer_list" => {
-            let entries = list_scp_transfer_entries(&app.state::<ScpTransferStore>())?;
+            let entries: McpScpTransferListResult =
+                list_scp_transfer_entries(&app.state::<ScpTransferStore>())?;
             json!(entries)
         }
         "scp_transfer_get" => {
-            let transfer_id = args
-                .get("transferId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "transferId is required".to_string())?;
-            let entry = get_scp_transfer_entry(&app.state::<ScpTransferStore>(), transfer_id)?
-                .ok_or_else(|| "transfer not found".to_string())?;
+            let args = McpScpTransferGetArgs::from_args(&args)?;
+            let entry: McpScpTransferGetResult =
+                get_scp_transfer_entry(&app.state::<ScpTransferStore>(), args.transfer_id)?
+                    .ok_or_else(|| "transfer not found".to_string())?;
             json!(entry)
         }
         "config_sync_pull" => {

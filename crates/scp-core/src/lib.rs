@@ -12,5 +12,6 @@ pub mod mcp_policy;
 pub mod mcp_resources;
 pub mod profile;
 pub mod runtime;
+pub mod scp_transfer;
 pub mod servers;
 pub mod sessions;

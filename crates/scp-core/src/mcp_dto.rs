@@ -26,11 +26,9 @@ impl<'a> McpFunctionStatusGetArgs<'a> {
     /// Match the custom dispatcher's permissive string lookup, including its error.
     /// Extra fields are ignored. Non-object, missing and non-string values fail alike.
     pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
-        let function_id = args
-            .get("functionId")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "functionId is required".to_string())?;
-        Ok(Self { function_id })
+        Ok(Self {
+            function_id: required_string_arg(args, "functionId")?,
+        })
     }
 }
 
@@ -67,10 +65,7 @@ impl<'a> McpServerGetArgs<'a> {
     /// Preserve the dispatcher's string lookup and error; ignore extra fields.
     pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
         Ok(Self {
-            server_id: args
-                .get("serverId")
-                .and_then(serde_json::Value::as_str)
-                .ok_or("serverId is required")?,
+            server_id: required_string_arg(args, "serverId")?,
         })
     }
 }
@@ -83,3 +78,31 @@ pub type McpServersListResult = Vec<McpServerGetResult>;
 
 /// Bare `config_get_paths` object; desktop hosts retain path resolution and errors.
 pub type McpConfigGetPathsResult = crate::config::ConfigPaths;
+
+/// Existing transfer lookup arguments; any string is accepted without normalization.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpScpTransferGetArgs<'a> {
+    pub transfer_id: &'a str,
+}
+
+impl<'a> McpScpTransferGetArgs<'a> {
+    /// Preserve the host's string lookup and required error; ignore extra fields.
+    pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
+        Ok(Self {
+            transfer_id: required_string_arg(args, "transferId")?,
+        })
+    }
+}
+
+/// Bare stored transfer, with the model's exact fields and null semantics.
+pub type McpScpTransferGetResult = crate::scp_transfer::ScpTransferEntry;
+
+/// Bare transfer array in host store order; no sorting, filtering or deduplication.
+pub type McpScpTransferListResult = Vec<McpScpTransferGetResult>;
+
+fn required_string_arg<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
+    args.get(key)
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| format!("{key} is required"))
+}

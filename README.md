@@ -370,6 +370,14 @@ only `appConfigPath`, ignores all arguments, and uses desktop path resolution an
 errors. The existing UI command and resource keep their contracts. This adds no
 CLI path command or path-resolution behavior to core.
 
+SCP transfer MCP contracts share `McpScpTransferGetArgs`, `McpScpTransferGetResult`
+and `McpScpTransferListResult`, backed by the unchanged core transfer models.
+List returns the bare store-ordered array and ignores all arguments. Get accepts
+any string `transferId` unchanged, returns the first exact match, and preserves
+`transferId is required` / `transfer not found` errors. All ten result fields,
+nullable values and lowercase states are unchanged. Desktop transfer execution,
+policy, events and envelopes retain their behavior; no CLI transfer command is added.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

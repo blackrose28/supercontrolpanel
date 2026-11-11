@@ -1439,6 +1439,69 @@ current official SDK/protocol sources. Coordinated CLI import, other operation
 families, stdio MCP and packaging remain open. Do not retry the unchanged-host
 cgroup spike or claim stronger cleanup/keyring/elevation guarantees.
 
+### Shared SCP transfer MCP contracts (2026-11-11)
+
+`scp-core::scp_transfer` now owns the unchanged Serialize + Clone transfer entry
+and state models. Existing desktop model paths re-export them. Shared
+`McpScpTransferGetArgs`, `McpScpTransferGetResult` and `McpScpTransferListResult`
+are re-exported by desktop DTO/public paths and adopted by the dispatcher.
+No execution, store, event, dependency or CLI command is extracted or enabled.
+
+Policy still runs before all parsing/store access. List ignores ALL arguments,
+including non-objects, and clones the host vector unchanged. The host inserts new
+entries first and retains at most 32; the DTO does not sort, filter or deduplicate.
+Get borrows any string `transferId` unchanged (empty/whitespace/control/Unicode
+included); extra fields are ignored. Missing/null/non-string/non-object arguments
+retain `transferId is required`. Store lookup still returns the first exact match,
+or `transfer not found`; lock errors and custom envelope construction are unchanged.
+The ten entry fields retain camelCase names, explicit nullable progress/source/
+destination/session fields, lowercase pending/success/error states, full u64
+timestamps and unvalidated u8 progress. No new deserialization/validation is added.
+
+TDD: the result fixture first passed against the original desktop model. Core RED
+then failed on missing shared module/DTOs; desktop RED failed on missing shared/
+re-exported types. GREEN runs the same wire and argument fixtures in both hosts,
+covering all states/nulls, empty/control/Unicode strings, full u64 timestamps,
+progress above 100, array order/duplicates/empty lists, borrowing and exact required
+errors. Identity tests pin desktop model and public DTO type compatibility.
+The third required-string parser triggered a private `required_string_arg` refactor;
+existing function/server argument fixtures and new transfer fixtures all pass.
+These fixtures do not execute live transfers, host history lookup/lock failures,
+ignored-list arguments, policy, HTTP/Tauri/helper/resource or UI integration.
+Unchanged source establishes those host contracts. Existing Playwright transfer
+state tests pass six project runs; they exercise state logic, not browser/native E2E.
+
+Final Linux validation: locked all-feature workspace tests pass 115 tests plus the
+credential compile-fail doctest (seven ignored subprocess fixtures exercised by
+acceptance); desktop passes 149 tests with its existing 17 warnings. Strict
+workspace all-feature/all-target Clippy, locked release CLI build, workspace fmt,
+changed desktop/shared-contract rustfmt and diff whitespace checks pass. No native
+Windows/macOS, installed SCP or stronger process supervision qualification is claimed.
+
+Ripwire transfer entry impact reaches 33 symbols across 13 files, including Rust/
+TypeScript definitions, transfer commands/stores, UI and HTTP/resource/Tauri paths;
+uses is empty and affected names the existing transfer UI state test only. The
+dispatcher has three direct callers and eleven downstream symbols, no modeled
+affected tests. Parser affected selects function/server/transfer fixtures, all run
+by Cargo. Existing dispatcher and parser signatures remain unchanged; the moved
+core model/new parser are new symbols to edit-check. Quality delta reports zero
+unacknowledged gates, three minor churn rows and eight new test/module reachability
+rows. Two narrow acknowledgements accept the remaining 18-token typed constructor
+wrappers after centralizing actual lookup/error logic; no runtime duplication is
+hidden by a generic public DTO or macro.
+Staged test-gate exits 4: five test files (all exercised by Cargo), unknown
+runners, and twelve untested downstream symbols including an unrelated Markdown
+heading. Four of eighteen hunks locate inside symbols; module/model moves force
+file-granular fallback. This is not a clean static coverage or transport E2E verdict.
+
+Next focused increment: inspect remote-browser read operations and their model/
+consumer footprint for another bounded shared argument/result seam; preserve host
+session ownership, errors, paths, policy and envelopes, and avoid extracting SFTP
+execution incidentally. Standard desktop Streamable HTTP is independently actionable
+after checking current official SDK/protocol sources. Coordinated CLI import,
+other operation families, stdio MCP and packaging remain open. The unchanged-host
+cgroup supervision gate is still blocked and must not be retried here.
+
 Proposed Cargo workspace boundaries:
 
 ```text
