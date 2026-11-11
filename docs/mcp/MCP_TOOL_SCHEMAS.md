@@ -479,6 +479,18 @@ Where the returned value is the full saved device-local sync settings object.
 
 ## `remote_browser_list_children`
 
+The list and stat tools share `scp-core::mcp_dto::McpRemoteBrowserReadArgs`.
+`browserId` must be a string (including empty/whitespace/control text), otherwise
+`browserId is required`. Missing, null or any other non-string `path` becomes
+`""`; string paths are passed through unchanged. Extra arguments are ignored.
+Desktop policy runs first. The host then looks up the persistent session and
+normalizes the path relative to its root; this DTO does not validate paths.
+Results use shared entry/node models with exactly the fields shown below and
+lowercase kinds `file`, `directory`, `symlink`, `other`, `missing`.
+The DTO preserves host enumeration order and duplicates; desktop enumeration
+retains its existing filtering. Session/SFTP/path errors and the custom envelope
+are unchanged. These types do not enable standalone browser execution.
+
 ### Input
 
 ```json

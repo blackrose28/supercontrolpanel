@@ -378,6 +378,14 @@ any string `transferId` unchanged, returns the first exact match, and preserves
 nullable values and lowercase states are unchanged. Desktop transfer execution,
 policy, events and envelopes retain their behavior; no CLI transfer command is added.
 
+Remote-browser list/stat MCP contracts now share `McpRemoteBrowserReadArgs`,
+`McpRemoteBrowserListChildrenResult` and `McpRemoteBrowserStatPathResult`.
+The entry/node models and five lowercase path kinds live in core, reexported
+through the existing desktop model paths. Both tools require a string `browserId`;
+missing or non-string `path` still becomes an empty string before desktop path
+handling. Results keep their existing bare array/object fields. Session ownership,
+SFTP execution, errors and policy remain in the desktop; no CLI browser is added.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

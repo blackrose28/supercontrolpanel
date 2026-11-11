@@ -17,7 +17,8 @@ use crate::{
     mcp::{
         McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
         McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-        McpOpenVpnGetStatusResult, McpScpTransferGetArgs, McpScpTransferGetResult,
+        McpOpenVpnGetStatusResult, McpRemoteBrowserListChildrenResult, McpRemoteBrowserReadArgs,
+        McpRemoteBrowserStatPathResult, McpScpTransferGetArgs, McpScpTransferGetResult,
         McpScpTransferListResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
         McpToolCallEnvelope,
     },
@@ -447,37 +448,19 @@ pub fn call_mcp_tool(
             json!({})
         }
         "remote_browser_list_children" => {
-            let browser_id = args
-                .get("browserId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "browserId is required".to_string())?
-                .to_string();
-            let path = args
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let entries = list_remote_browser_children_action(
-                browser_id,
-                path,
+            let parsed = McpRemoteBrowserReadArgs::from_args(&args)?;
+            let entries: McpRemoteBrowserListChildrenResult = list_remote_browser_children_action(
+                parsed.browser_id.to_string(),
+                parsed.path.to_string(),
                 app.state::<RemoteBrowserStore>(),
             )?;
             json!(entries)
         }
         "remote_browser_stat_path" => {
-            let browser_id = args
-                .get("browserId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "browserId is required".to_string())?
-                .to_string();
-            let path = args
-                .get("path")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let info = stat_remote_browser_path_action(
-                browser_id,
-                path,
+            let parsed = McpRemoteBrowserReadArgs::from_args(&args)?;
+            let info: McpRemoteBrowserStatPathResult = stat_remote_browser_path_action(
+                parsed.browser_id.to_string(),
+                parsed.path.to_string(),
                 app.state::<RemoteBrowserStore>(),
             )?;
             json!(info)

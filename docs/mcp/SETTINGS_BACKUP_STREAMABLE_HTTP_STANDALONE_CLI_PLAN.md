@@ -1494,13 +1494,69 @@ runners, and twelve untested downstream symbols including an unrelated Markdown
 heading. Four of eighteen hunks locate inside symbols; module/model moves force
 file-granular fallback. This is not a clean static coverage or transport E2E verdict.
 
-Next focused increment: inspect remote-browser read operations and their model/
-consumer footprint for another bounded shared argument/result seam; preserve host
-session ownership, errors, paths, policy and envelopes, and avoid extracting SFTP
-execution incidentally. Standard desktop Streamable HTTP is independently actionable
-after checking current official SDK/protocol sources. Coordinated CLI import,
-other operation families, stdio MCP and packaging remain open. The unchanged-host
-cgroup supervision gate is still blocked and must not be retried here.
+### Shared remote-browser read MCP contracts (2026-11-11)
+
+`scp-core::remote_browser` now owns the unchanged Serialize + Clone
+`RemotePathKind`, `RemoteBrowseEntry` and `RemoteBrowseNodeInfo` models; desktop
+model paths reexport them. `RemoteBrowseSession` and `SshEndpoint` remain desktop
+models. `mcp_dto` shares borrowed Serialize-only `McpRemoteBrowserReadArgs` for
+`remote_browser_list_children` and `remote_browser_stat_path`, with result aliases
+`McpRemoteBrowserListChildrenResult` and `McpRemoteBrowserStatPathResult`.
+Desktop DTO/public paths reexport them and the dispatcher uses them.
+
+Both reads retain `.get/.as_str` browser-ID lookup: any string including empty,
+whitespace, Unicode and control text passes unchanged; missing/null/non-string or
+non-object input fails with exactly `browserId is required`. Existing private
+`required_string_arg` is reused. Missing/null/non-string `path` becomes `""`;
+string paths are borrowed unchanged. Extras are ignored. Policy still runs first,
+then desktop session lookup (`remote browser session not found` on absence),
+root-relative path normalization, SFTP creation/enumeration/lstat and existing
+error handling. No execution or store is extracted, and no CLI is enabled.
+
+Results remain bare arrays of exactly name/path/kind and objects of exactly
+path/kind/exists. All five lowercase kinds are preserved. DTOs neither sort,
+filter, deduplicate nor validate kind/exists consistency; existing host directory
+filtering remains. No session/SSH ownership or lifecycle behavior changes; open,
+close, mutation tools and Tauri/CC/UI contracts retain their behavior.
+
+TDD evidence: the shared result fixture first passed against original desktop
+models. Core RED failed on missing module/DTO imports; desktop RED then failed on
+missing reexports and distinct model identities. GREEN covers required errors,
+non-string path fallback, exact text and borrowed pointer identity, serialized
+arguments, all kinds, both existence booleans, fields, empty lists, order and
+duplicates. Both hosts run the shared fixtures. Desktop identity tests pin core,
+model, DTO and public aliases. Refactoring removed redundant identity assertions
+and varied desktop value checks to resolve Ripwire clone findings without acks.
+These tests do not execute SFTP, session lookup/locks, policy dispatch, HTTP,
+Tauri/CC or native UI flows; source inspection preserves those boundaries.
+
+Validation: locked all-feature workspace passes 117 tests plus the credential
+compile-fail doctest; seven existing subprocess fixture tests remain ignored by
+the ordinary runner and are exercised by existing acceptance tests. Locked
+desktop suite passes 152 tests with 17 existing warnings. Strict all-feature,
+all-target workspace Clippy, locked release CLI build, workspace formatting,
+changed desktop/shared-fixture rustfmt and diff whitespace checks pass. Existing
+picker helper/timeout tests pass 12 cases across three configured Playwright
+projects; these exercise helpers, not a native browser/UI flow.
+
+Ripwire sizing before edits: entry impact 33 symbols/13 files, node 24/13 and
+kind 20/3 (combined Rust/TypeScript definitions); resolvable uses empty and no
+existing affected tests modeled. Dispatcher has three direct callers (HTTP,
+resource adapter and Tauri) and eleven downstream symbols, no modeled tests;
+its edit-check reports unchanged contract. Quality-delta reports zero gates,
+one minor ambient dispatcher churn and seven nongating new test/module
+reachability findings; no acks added. Staged test-gate exits 4: six Cargo-exercised
+test files with unknown runners and twelve untested downstream symbols, including
+an unrelated Markdown heading. Two of seventeen hunks locate inside symbols;
+model/module moves force file-granular fallback. This is not clean static
+coverage or transport E2E evidence.
+
+Next focused increment: inspect remote-browser open/close argument/result seams
+and session-model consumers for a bounded shared contract, preserving replacement
+session ownership, allocation, cleanup, errors and policy in the desktop. Standard
+desktop Streamable HTTP remains independently actionable after checking current
+official SDK/protocol sources. Coordinated CLI import, other operation families,
+stdio MCP and packaging remain open. Do not retry the unchanged-host cgroup gate.
 
 Proposed Cargo workspace boundaries:
 

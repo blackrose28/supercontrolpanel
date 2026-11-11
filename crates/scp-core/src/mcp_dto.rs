@@ -101,6 +101,34 @@ pub type McpScpTransferGetResult = crate::scp_transfer::ScpTransferEntry;
 /// Bare transfer array in host store order; no sorting, filtering or deduplication.
 pub type McpScpTransferListResult = Vec<McpScpTransferGetResult>;
 
+/// Shared arguments for `remote_browser_list_children` and `remote_browser_stat_path`.
+/// Hosts retain session lookup and path normalization after this permissive lookup.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpRemoteBrowserReadArgs<'a> {
+    pub browser_id: &'a str,
+    pub path: &'a str,
+}
+
+impl<'a> McpRemoteBrowserReadArgs<'a> {
+    /// Any browser ID string is accepted; absent/non-string paths become empty.
+    pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
+        Ok(Self {
+            browser_id: required_string_arg(args, "browserId")?,
+            path: args
+                .get("path")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(""),
+        })
+    }
+}
+
+/// Bare entries in host enumeration order, without sorting or filtering here.
+pub type McpRemoteBrowserListChildrenResult = Vec<crate::remote_browser::RemoteBrowseEntry>;
+
+/// Bare node information; kind and existence are host-supplied values.
+pub type McpRemoteBrowserStatPathResult = crate::remote_browser::RemoteBrowseNodeInfo;
+
 fn required_string_arg<'a>(args: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
     args.get(key)
         .and_then(serde_json::Value::as_str)

@@ -20,7 +20,8 @@ pub use scp_core::mcp_resources::McpResourceDescriptor;
 pub use scp_core::mcp_dto::{
     McpAppOverviewResult, McpBoundaryGetStatusResult, McpConfigGetPathsResult,
     McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-    McpOpenVpnGetStatusResult, McpScpTransferGetArgs, McpScpTransferGetResult,
+    McpOpenVpnGetStatusResult, McpRemoteBrowserListChildrenResult, McpRemoteBrowserReadArgs,
+    McpRemoteBrowserStatPathResult, McpScpTransferGetArgs, McpScpTransferGetResult,
     McpScpTransferListResult, McpServerGetArgs, McpServerGetResult, McpServersListResult,
     McpToolCallEnvelope,
 };
@@ -202,5 +203,44 @@ mod shared_transfer_identity {
         let dto: super::McpScpTransferGetArgs<'_> = shared;
         let public: crate::mcp::McpScpTransferGetArgs<'_> = dto;
         assert_eq!(public.transfer_id, "id");
+    }
+}
+
+#[cfg(test)]
+mod browser_read_arguments_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_browser_read_args.rs"
+    ));
+}
+#[cfg(test)]
+mod shared_browser_read_identity {
+    #[test]
+    fn desktop_model_and_public_dto_paths_accept_core_browser_reads() {
+        let kind: crate::models::RemotePathKind = scp_core::remote_browser::RemotePathKind::File;
+        let entry: crate::models::RemoteBrowseEntry = scp_core::remote_browser::RemoteBrowseEntry {
+            name: "file".into(),
+            path: "/file".into(),
+            kind,
+        };
+        let entries: super::McpRemoteBrowserListChildrenResult = vec![entry];
+        let public: crate::mcp::McpRemoteBrowserListChildrenResult = entries;
+        let shared: scp_core::mcp_dto::McpRemoteBrowserListChildrenResult = public;
+        assert_eq!(shared[0].name, "file");
+        let node: crate::models::RemoteBrowseNodeInfo =
+            scp_core::remote_browser::RemoteBrowseNodeInfo {
+                path: "/file".into(),
+                kind: shared[0].kind.clone(),
+                exists: true,
+            };
+        let dto: super::McpRemoteBrowserStatPathResult = node;
+        let public: crate::mcp::McpRemoteBrowserStatPathResult = dto;
+        let shared: scp_core::mcp_dto::McpRemoteBrowserStatPathResult = public;
+        assert!(shared.exists);
+        let input = serde_json::json!({"browserId":"id"});
+        let shared = scp_core::mcp_dto::McpRemoteBrowserReadArgs::from_args(&input).unwrap();
+        let dto: super::McpRemoteBrowserReadArgs<'_> = shared;
+        let public: crate::mcp::McpRemoteBrowserReadArgs<'_> = dto;
+        assert_eq!(public.path, "");
     }
 }
