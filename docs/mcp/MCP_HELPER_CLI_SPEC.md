@@ -4,6 +4,10 @@
 
 The helper continues using the six REST compatibility routes, endpoint/token discovery and existing envelope shapes. Standard MCP now adapts the existing registry catalog at `/mcp`; it does not replace or redirect helper routes. The compiled helper `function list` is exercised against the shared router in JSON and SSE test modes. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
+## Slice 5 parity additions
+
+The HTTP catalog adds five tools without changing helper subcommands or discovery. The helper can keep its current commands and envelopes; new target-search/detection/RDP/credential subcommands remain separate work. Standard clients use the shared registry contracts in [Slice 5](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
+
 ## Purpose
 
 `supercontrolpanelhelper` is a planned command-line helper that talks to the already-running SuperControlPanel app through its local MCP endpoint.

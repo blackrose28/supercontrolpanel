@@ -4,6 +4,10 @@
 
 The existing 40-tool catalog and five resources are adapted to standard `/mcp`, with three protected import/Git tools explicitly unavailable. Official-client tests cover all rows, JSON/SSE, both pinned revisions, schemas, safe errors and policy denial. Existing desktop action payloads/runtime ownership are preserved. Lifecycle/events, reviewed parity additions, Config UX and native/end-user-client qualification remain open. See [Slice 3 evidence](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
+## Slice 5 status
+
+Reviewed MCP gaps are implemented: target search, OpenVPN detection, conditional sensitive RDP launch and write-only SSH credential set/clear. The catalog now has 45 operations (42 discoverable with all categories and allow-with-token), with six resources and Slice 4 snapshot invalidations. Config UX, intended-client/native qualification and helper subcommands remain open. See [Slice 5 policy, tests and limitations](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
+
 ## Purpose
 
 Track the remaining gaps before:
@@ -17,12 +21,17 @@ Track the remaining gaps before:
 
 ### Missing read-only/query tools
 
-- [ ] `detect_openvpn_executable`
-- [ ] `boundary_search_targets`
+- [x] `detect_openvpn_executable`
+- [x] `boundary_search_targets`
 
 ### Missing runtime/action tools
 
-- [ ] `server_rdp_start`
+- [x] `server_rdp_start`
+
+### Reviewed SSH credentials
+
+- [x] `server_ssh_password_set` / `server_ssh_password_clear` (write-only, sensitive config mutations)
+- Credential reads remain excluded.
 
 ### Missing lower-level or advanced control
 
@@ -36,15 +45,14 @@ Track the remaining gaps before:
 
 ### Missing transport/polish items
 
-- [ ] Notifications for function status changes
-- [ ] Notifications for SCP transfer changes
+- [x] Notifications for function status changes (snapshot invalidations)
+- [x] Notifications for SCP transfer changes (snapshot invalidations)
 - [ ] Richer approval flow beyond current hard-block behavior
 - [ ] Additional MCP transport/spec polish if desired
 
 ### Product decision gap
 
-- [ ] Decide whether `server_rdp_start` should be exposed through MCP at all
-  - launching an OS-native RDP client may or may not fit the desired MCP safety model
+- [x] Expose `server_rdp_start` as sensitive runtime control with interactive host/destination checks; local client required
 
 ---
 
@@ -104,9 +112,9 @@ Track the remaining gaps before:
 
 ### Finish MCP parity first
 
-1. [ ] `boundary_search_targets`
-2. [ ] `detect_openvpn_executable`
-3. [ ] `server_rdp_start`
+1. [x] `boundary_search_targets`
+2. [x] `detect_openvpn_executable`
+3. [x] `server_rdp_start`
 
 ### Then improve helper CLI parity
 

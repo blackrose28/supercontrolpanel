@@ -4,6 +4,10 @@
 
 All existing standard tools/resources use Slice 1 authorization, validation, backup gate, safe DTOs and output checks through the shared desktop host. Discovery and execution check current policy; sessions confer no authority. Sensitive operations require local `allow-with-token` and their category. Protected config imports and Git remain capability-blocked, including direct calls to hidden names. MCP/CC authority and local launch configuration remain protected. All HTTP routes require bearer auth and reject browser Origin and invalid Host/port. Operational errors omit runtime diagnostics. See [Slice 3 verification](DESKTOP_STREAMABLE_HTTP_SLICE3.md). [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) adds SDK stream revocation on listener replacement, shared worker bounds, pending-work cancellation and policy checks before snapshot invalidations. Accepted desktop handlers continue after disconnect; cancellation is checked at worker handoff. Native runtime qualification remains Slice 6.
 
+## Slice 5 reviewed additions
+
+Target search and OpenVPN detection are read-only queries. RDP is a sensitive `runtime-control` launch with `InteractiveDesktop` capability: Windows/macOS/Linux hosts only, Linux DISPLAY/Wayland presence, Windows destination and a hostname/IP without URL/option syntax. The existing desktop launcher is reused; a successful call acknowledges launch, not an established RDP connection. Installation/desktop activation may still fail safely. SSH password set/clear are sensitive `config-mutation` operations using the existing server lookup, OS keyring namespace and backup gate. Set rejects empty passwords; clear is explicit. No credential read tool exists; results are empty acknowledgements and audits contain no argument values. See [Slice 5](DESKTOP_STREAMABLE_HTTP_SLICE5.md) for tested limits and native qualification exclusions.
+
 ## Security goals
 
 - Keep MCP access local by default

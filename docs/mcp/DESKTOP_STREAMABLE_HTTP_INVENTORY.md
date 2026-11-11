@@ -67,6 +67,19 @@ Current descriptors have no `inputSchema`/`outputSchema`. The table records disp
 - `ConfigPaths` currently contains **only** `appConfigPath`; do not promise a directory inventory.
 - All current successful calls use `ok/message/data/warnings/timestamp`; errors are strings, converted by HTTP to a 400 envelope. Separate protocol/transport/tool/resource errors in the new adapter.
 
+## Slice 5 reviewed parity decisions
+
+The five additions are implemented by the same registry/policy/desktop host as the original 40 tools. [Parity tests](../../src-tauri/src/mcp/parity.rs), [Boundary parser tests](../../src-tauri/src/commands/boundary.rs), [OpenVPN detector tests](../../src-tauri/src/services/config_service.rs) and the expanded [official-client fixtures](../../experiments/mcp-http-slice0/tests/desktop-surface.json) cover their contracts. Native platform execution remains Slice 6; fixture hosts do not launch clients, authenticate against Boundary or write OS keyrings.
+
+| Desktop operation | Shipped MCP operation | Policy / lifetime | Acceptance coverage |
+| --- | --- | --- | --- |
+| `search_boundary_targets` | `boundary_search_targets` | read-only; query; desktop Boundary CLI/auth | `slice5_parity_contracts_are_validated_and_sensitive`, `search_forwards_filter_and_bounds_dedicated_public_results`, both `target_search_*` tests; optional filter/limit, 100-row maximum, safe auth/CLI failure |
+| `detect_openvpn_executable` / shared platform detector | `detect_openvpn_executable` | read-only; query | `detection_distinguishes_missing_from_host_failures`, `locator_distinguishes_absence_failures_and_platform_output`; Windows/Unix locator output, missing/error distinction |
+| `start_server_rdp` | `server_rdp_start` | sensitive runtime-control; InteractiveDesktop; desktop-owned launch | `rdp_requires_supported_interactive_host_and_safe_windows_destination`, `credentials_are_write_only_and_host_errors_are_safe`; platform/display/destination checks, policy denial, safe launcher errors |
+| `set_server_ssh_password`, `clear_server_ssh_password` | `server_ssh_password_set`, `server_ssh_password_clear` | sensitive config-mutation; desktop keyring; mutation | `credentials_are_write_only_and_host_errors_are_safe`, contract test; existing server lookup/namespace/gate, empty acknowledgements, safe missing-server/keyring errors |
+
+`config_get` was reviewed and remains deferred: it is outside Slice 5's selected additions, and the secret-bearing desktop config must not be mirrored. No raw PTY, backup or credential-read tool is added. Helper subcommands remain separate work. See [Slice 5 policy and limits](DESKTOP_STREAMABLE_HTTP_SLICE5.md). The source-baseline candidate table below is retained as historical planning context; this section supersedes its first four rows.
+
 ## Desktop candidates and explicit exclusions
 
 The following table accounts for the other desktop commands registered in `src-tauri/src/main.rs`, plus the known advanced-control candidates. Names in the proposed-tool column are proposals. Acceptance IDs `GAP-*` and `LOCAL-*` are future tests, not existing coverage.

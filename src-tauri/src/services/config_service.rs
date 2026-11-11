@@ -255,53 +255,59 @@ pub fn save_sync_settings_to_disk(
 }
 
 pub fn detect_openvpn_executable_path() -> Option<String> {
+    detect_openvpn_executable_checked().ok().flatten()
+}
+
+/// MCP needs to distinguish an absent executable from locator/filesystem failures.
+/// The existing Option-returning desktop helper keeps its fallback contract.
+pub fn detect_openvpn_executable_checked() -> Result<Option<String>, String> {
     #[cfg(target_os = "windows")]
-    {
-        let candidates = [
+    let (locator, candidates): (&str, &[&str]) = (
+        "where",
+        &[
             r"C:\Program Files\OpenVPN\bin\openvpn.exe",
             r"C:\Program Files\OpenVPN Connect\bin\openvpn.exe",
             r"C:\Program Files (x86)\OpenVPN\bin\openvpn.exe",
-        ];
-        for candidate in candidates {
-            if PathBuf::from(candidate).exists() {
-                return Some(candidate.to_string());
-            }
-        }
-
-        if let Ok(output) = Command::new("where").arg("openvpn").output() {
-            if output.status.success() {
-                let value = String::from_utf8_lossy(&output.stdout);
-                if let Some(line) = value.lines().map(str::trim).find(|line| !line.is_empty()) {
-                    return Some(line.to_string());
-                }
-            }
-        }
-        None
-    }
-
+        ],
+    );
     #[cfg(not(target_os = "windows"))]
-    {
-        if let Ok(output) = Command::new("which").arg("openvpn").output() {
-            if output.status.success() {
-                let value = String::from_utf8_lossy(&output.stdout);
-                if let Some(line) = value.lines().map(str::trim).find(|line| !line.is_empty()) {
-                    return Some(line.to_string());
-                }
-            }
-        }
-
-        let candidates = [
+    let (locator, candidates): (&str, &[&str]) = (
+        "which",
+        &[
             "/usr/sbin/openvpn",
             "/usr/local/sbin/openvpn",
             "/opt/homebrew/sbin/openvpn",
-        ];
-        for candidate in candidates {
-            if PathBuf::from(candidate).exists() {
-                return Some(candidate.to_string());
-            }
-        }
-        None
+        ],
+    );
+    #[cfg(target_os = "windows")]
+    if let Some(path) = common_openvpn_path(candidates)? {
+        return Ok(Some(path));
     }
+
+    let located = match Command::new(locator).arg("openvpn").output() {
+        Ok(output) => openvpn_locator_result(output.status.code(), &output.stdout),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(_) => Err("OpenVPN executable detection failed".into()),
+    };
+    if let Ok(Some(path)) = located {
+        return Ok(Some(path));
+    }
+    if let Some(path) = common_openvpn_path(candidates)? {
+        return Ok(Some(path));
+    }
+    located
+}
+
+fn common_openvpn_path(candidates: &[&str]) -> Result<Option<String>, String> {
+    for candidate in candidates {
+        match fs::metadata(candidate) {
+            Ok(metadata) if metadata.is_file() => return Ok(Some((*candidate).into())),
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err("OpenVPN executable detection failed".into()),
+        }
+    }
+    Ok(None)
 }
 
 pub fn keyring_entry(account: &str) -> Result<Entry, String> {
@@ -531,5 +537,45 @@ mod mcp_policy_settings_tests {
             missing.mcp_allowed_tool_categories,
             default_mcp_allowed_tool_categories()
         );
+    }
+}
+
+fn openvpn_locator_result(status: Option<i32>, stdout: &[u8]) -> Result<Option<String>, String> {
+    if status == Some(1) {
+        return Ok(None);
+    }
+    if status != Some(0) {
+        return Err("OpenVPN executable detection failed".into());
+    }
+    std::str::from_utf8(stdout)
+        .ok()
+        .and_then(|value| value.lines().map(str::trim).find(|line| !line.is_empty()))
+        .map(|line| Some(line.to_owned()))
+        .ok_or_else(|| "OpenVPN executable detection failed".into())
+}
+
+#[cfg(test)]
+mod openvpn_detection_tests {
+    use super::*;
+    #[test]
+    fn locator_distinguishes_absence_failures_and_platform_output() {
+        assert_eq!(
+            openvpn_locator_result(Some(0), b"/usr/sbin/openvpn\n").unwrap(),
+            Some("/usr/sbin/openvpn".into())
+        );
+        assert_eq!(
+            openvpn_locator_result(Some(0), b"C:\\OpenVPN\\openvpn.exe\r\nD:\\other.exe\r\n")
+                .unwrap(),
+            Some(r"C:\OpenVPN\openvpn.exe".into())
+        );
+        assert_eq!(openvpn_locator_result(Some(1), b"").unwrap(), None);
+        for (status, output) in [
+            (Some(2), b"secret".as_slice()),
+            (None, b""),
+            (Some(0), b""),
+            (Some(0), b"\xff"),
+        ] {
+            assert!(openvpn_locator_result(status, output).is_err());
+        }
     }
 }

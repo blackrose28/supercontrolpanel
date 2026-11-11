@@ -70,8 +70,15 @@ pub fn search_boundary_targets(
             stderr
         });
     }
+    parse_boundary_targets(&out.stdout, filter)
+}
+
+fn parse_boundary_targets(
+    output: &[u8],
+    filter: Option<String>,
+) -> Result<Vec<BoundaryTargetSummary>, String> {
     let v: serde_json::Value =
-        serde_json::from_slice(&out.stdout).map_err(|e| format!("invalid JSON: {e}"))?;
+        serde_json::from_slice(output).map_err(|e| format!("invalid JSON: {e}"))?;
     let items = v
         .get("items")
         .and_then(|a| a.as_array())
@@ -133,6 +140,38 @@ pub fn search_boundary_targets(
         });
     }
     Ok(results)
+}
+
+#[cfg(test)]
+mod target_search_tests {
+    use super::*;
+    #[test]
+    fn target_search_matches_name_id_and_description_case_insensitively() {
+        let output = br#"{"items":[{"id":"ttcp_123","name":"Production","type":"tcp","attributes":{"description":"Accounting Database","address":"db.internal"}},{"id":"ttcp_other","name":"Other"},{"name":"no id"},null]}"#;
+        for filter in ["PRODUCTION", "  TTCP_123  ", "accounting", "database"] {
+            let rows = parse_boundary_targets(output, Some(filter.into())).unwrap();
+            assert_eq!(rows.len(), 1, "{filter}");
+            assert_eq!(rows[0].id, "ttcp_123");
+            assert_eq!(rows[0].description, "Accounting Database");
+            assert_eq!(rows[0].address, "db.internal");
+        }
+        assert_eq!(parse_boundary_targets(output, None).unwrap().len(), 2);
+        assert_eq!(
+            parse_boundary_targets(output, Some(" ".into()))
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(parse_boundary_targets(output, Some("absent".into()))
+            .unwrap()
+            .is_empty());
+    }
+    #[test]
+    fn target_search_rejects_malformed_cli_responses() {
+        for output in [b"not json".as_slice(), b"{}", b"{\"items\":null}"] {
+            assert!(parse_boundary_targets(output, None).is_err());
+        }
+    }
 }
 
 fn stop_boundary_automation_session(

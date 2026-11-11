@@ -85,13 +85,14 @@ fn server_schema() -> Value {
     )
 }
 
-pub fn input_schema(op: &Operation) -> Value {
+fn required_arguments(handler: super::contracts::Handler) -> &'static [&'static str] {
     use super::contracts::Handler::*;
-    let mut properties = json!({});
-    let required: &[&str] = match op.handler {
+    match handler {
         FunctionStatusGet => &["functionId"],
         ServerGet | ServerTunnelStart | ServerTunnelStop | ServerSshStart | ServerSshStop
         | RemoteBrowserOpen => &["serverId"],
+        ServerRdpStart | ServerSshPasswordClear => &["serverId"],
+        ServerSshPasswordSet => &["serverId", "password"],
         ServerDelete => &["id"],
         ServerUpsert => &["server"],
         CaddyStart => &["folder"],
@@ -104,14 +105,40 @@ pub fn input_schema(op: &Operation) -> Value {
         }
         ScpTransferGet => &["transferId"],
         ConfigSyncPull | ConfigSyncPush | ConfigGitPull | ConfigGitPush => &["repoRoot"],
-        AppGetOverview | FunctionStatusList | OpenvpnGetStatus | BoundaryGetStatus
-        | ServersList | ConfigGetPaths | OpenvpnStart | OpenvpnStop | BoundaryAuthStart
-        | BoundaryAuthStop | CaddyStop | SyncSettingsGet | ScpTransferList => &[],
-    };
+        BoundarySearchTargets
+        | DetectOpenvpnExecutable
+        | AppGetOverview
+        | FunctionStatusList
+        | OpenvpnGetStatus
+        | BoundaryGetStatus
+        | ServersList
+        | ConfigGetPaths
+        | OpenvpnStart
+        | OpenvpnStop
+        | BoundaryAuthStart
+        | BoundaryAuthStop
+        | CaddyStop
+        | SyncSettingsGet
+        | ScpTransferList => &[],
+    }
+}
+
+pub fn input_schema(op: &Operation) -> Value {
+    use super::contracts::Handler::*;
+    let mut properties = json!({});
+    let required = required_arguments(op.handler);
     for key in required {
         properties[*key] = identifier();
     }
     match op.handler {
+        BoundarySearchTargets => {
+            properties["filter"] = string();
+            properties["limit"] = json!({"type":"integer","minimum":1,"maximum":100});
+        }
+        ServerSshPasswordSet => {
+            properties["password"] =
+                json!({"type":"string","minLength":1,"maxLength":4096,"writeOnly":true});
+        }
         OpenvpnStart => {
             properties["username"] = string();
             properties["password"] = string();
@@ -269,6 +296,12 @@ pub fn output_schema(op: &Operation) -> Value {
         }))
     };
     match op.handler {
+        BoundarySearchTargets => output_array(output_object(json!({
+            "id":output_string(),"name":output_string(),"targetType":output_string(),
+            "description":output_string(),"address":output_string()
+        }))),
+        DetectOpenvpnExecutable => output_object(json!({"path":output_string()})),
+        ServerRdpStart | ServerSshPasswordSet | ServerSshPasswordClear => output_object(json!({})),
         AppGetOverview => output_object(
             json!({"appVersion":output_string(),"activeFunctions":output_number(),"knownFunctionCount":output_number()}),
         ),

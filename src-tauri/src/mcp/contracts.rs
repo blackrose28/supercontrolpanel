@@ -27,7 +27,7 @@ impl OperationError {
         let message = match code {
             ErrorCode::PolicyDenied => "MCP policy denied this operation. Use local desktop settings or controls.",
             ErrorCode::InvalidArguments => "Invalid MCP arguments or protected configuration fields.",
-            ErrorCode::CapabilityUnavailable => "This MCP operation is unavailable until its protected execution path is reviewed. Use local desktop controls.",
+            ErrorCode::CapabilityUnavailable => "This MCP operation is unavailable on this host or requires local setup/review. Check the local desktop, platform/client support and server configuration.",
             ErrorCode::NotFound => "Requested item was not found.",
             ErrorCode::Conflict => "Operation conflicts with current state. Query state before retrying.",
             ErrorCode::Cancelled => "Operation was cancelled. Query state before retrying.",
@@ -52,6 +52,7 @@ impl OperationError {
 #[derive(Debug, Clone, Copy)]
 pub enum Capability {
     Desktop,
+    InteractiveDesktop,
     ProtectedImport,
     ReviewedGit,
 }
@@ -65,6 +66,11 @@ pub enum Lifetime {
 }
 #[derive(Debug, Clone, Copy)]
 pub enum Handler {
+    BoundarySearchTargets,
+    DetectOpenvpnExecutable,
+    ServerRdpStart,
+    ServerSshPasswordSet,
+    ServerSshPasswordClear,
     AppGetOverview,
     FunctionStatusList,
     FunctionStatusGet,
@@ -121,6 +127,56 @@ pub struct Operation {
     pub resource: Option<(&'static str, &'static str, &'static str)>,
 }
 pub static OPERATIONS: &[Operation] = &[
+    Operation {
+        handler: Handler::BoundarySearchTargets,
+        name: "boundary_search_targets",
+        title: "Search Boundary targets (check local Boundary authentication on failure)",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::DetectOpenvpnExecutable,
+        name: "detect_openvpn_executable",
+        title: "Detect OpenVPN executable",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerRdpStart,
+        name: "server_rdp_start",
+        title: "Launch RDP on the interactive desktop (requires an installed client)",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::InteractiveDesktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerSshPasswordSet,
+        name: "server_ssh_password_set",
+        title: "Set SSH password in OS keyring (write-only)",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerSshPasswordClear,
+        name: "server_ssh_password_clear",
+        title: "Clear SSH password from OS keyring",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
     Operation {
         handler: Handler::AppGetOverview,
         name: "app_get_overview",
@@ -469,7 +525,11 @@ pub static OPERATIONS: &[Operation] = &[
         read_only: true,
         capability: Capability::Desktop,
         lifetime: Lifetime::Query,
-        resource: Some(("scp://status/transfers", "SCP transfer status", "file-transfer")),
+        resource: Some((
+            "scp://status/transfers",
+            "SCP transfer status",
+            "file-transfer",
+        )),
     },
     Operation {
         handler: Handler::ScpTransferGet,
@@ -548,7 +608,16 @@ pub fn authorize(
     {
         return Err(OperationError::new(ErrorCode::PolicyDenied));
     }
-    if !matches!(op.capability, Capability::Desktop) {
+    let available = match op.capability {
+        Capability::Desktop => true,
+        Capability::InteractiveDesktop => cfg!(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux"
+        )),
+        Capability::ProtectedImport | Capability::ReviewedGit => false,
+    };
+    if !available {
         return Err(OperationError::new(ErrorCode::CapabilityUnavailable));
     }
     Ok(op)
@@ -679,14 +748,14 @@ mod tests {
         let op = resource_operation("scp://servers/list").unwrap();
         assert_eq!(op.name, "servers_list");
         assert!(authorize(op.name, "allow-with-token", &["file-transfer"]).is_err());
-        assert_eq!(OPERATIONS.len(), 40);
+        assert_eq!(OPERATIONS.len(), 45);
         assert_eq!(
             OPERATIONS
                 .iter()
                 .map(|op| op.name)
                 .collect::<std::collections::HashSet<_>>()
                 .len(),
-            40
+            45
         );
     }
 

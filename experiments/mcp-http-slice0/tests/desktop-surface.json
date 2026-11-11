@@ -464,5 +464,45 @@
     },
     "data": {},
     "unavailable": true
+  },
+  "boundary_search_targets": {
+    "args": {
+      "filter": "database",
+      "limit": 2
+    },
+    "data": [
+      {
+        "id": "ttcp_test",
+        "name": "Production",
+        "targetType": "tcp",
+        "description": "Database",
+        "address": "db.internal"
+      }
+    ]
+  },
+  "detect_openvpn_executable": {
+    "args": {},
+    "data": {
+      "path": "/usr/sbin/openvpn"
+    }
+  },
+  "server_rdp_start": {
+    "args": {
+      "serverId": "test"
+    },
+    "data": {}
+  },
+  "server_ssh_password_set": {
+    "args": {
+      "serverId": "test",
+      "password": "write-only-secret"
+    },
+    "data": {}
+  },
+  "server_ssh_password_clear": {
+    "args": {
+      "serverId": "test"
+    },
+    "data": {}
   }
 }

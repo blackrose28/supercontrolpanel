@@ -4,6 +4,20 @@
 
 All standard tools publish the executable registry input/output schemas. Inputs reject unknown fields and invalid types/bounds. `function_status_list` and `scp://status/functions` retain `{ "statuses": [...] }`; every other tool/resource wraps the existing safe `data` payload as `{ "result": <data> }`, including arrays, null status, and empty mutation results. Structured content and JSON text agree; resources use `application/json`. REST envelopes stay unchanged. Unknown tools/invalid arguments use SDK invalid-params errors; operational failures use safe `isError: true` results; resource failures use SDK resource errors. See [Slice 3 fixtures and limits](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
+## Slice 5 parity schemas
+
+All inputs are closed objects; IDs are 1–256 bytes, ordinary strings at most 4096 bytes, and NUL is rejected. Standard results wrap the following legacy `data` shapes in `{ "result": ... }`:
+
+| Tool | Input | Safe data |
+| --- | --- | --- |
+| `boundary_search_targets` | `{filter?:string, limit?:integer}`; limit 1–100, default 100 | Array of `{id,name,targetType,description,address}`; at most limit rows, empty optional metadata becomes empty strings |
+| `detect_openvpn_executable` | `{}` | `{path:string}`; missing returns `NOT_FOUND`, other detection failures `OPERATION_FAILED` |
+| `server_rdp_start` | `{serverId:string}` | `{}`; launch acknowledgement only |
+| `server_ssh_password_set` | `{serverId:string,password:string}`; password 1–4096 bytes, `writeOnly` | `{}` |
+| `server_ssh_password_clear` | `{serverId:string}` | `{}` |
+
+Search uses existing case-insensitive name, ID and description matching. Authentication/CLI errors are safe tool failures, never an empty success or raw stderr. Check local Boundary authentication and CLI configuration after failure. No pagination/replay or password-read contract is added. [Slice 5 evidence](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
+
 ## Implemented Slice 1 contract
 
 The executable schemas in `src-tauri/src/mcp/validation.rs` and `public_dto.rs`, with [Slice 1 corrections](DESKTOP_STREAMABLE_HTTP_SLICE1.md), describe current legacy `data` payloads. Older examples below are planning context where they differ. Inputs reject unknown fields and invalid types/bounds. Config/settings outputs omit secrets rather than returning password/token fields. Status `message` and transfer title/detail are empty, transfer source/destination are null, and direct SCP result text is a static acknowledgement. `boundaryTokenSource` remains provenance, never a credential. The standard wrappers above apply to the migrated catalog.

@@ -130,9 +130,11 @@ Current implementation highlights:
 - all launches and mutations require `allow-with-token`; `require-ui-approval` blocks them (no approval queue)
 - MCP callers cannot change MCP/CC authority or local launch configuration; sync import and git operations are blocked pending protected staging/review
 
+Slice 5 adds `boundary_search_targets` (optional `filter`, `limit` 1–100), `detect_openvpn_executable`, sensitive `server_rdp_start`, and write-only `server_ssh_password_set` / `server_ssh_password_clear`. RDP requires a supported interactive host, a Windows destination and an installed RDP client. Password operations require `config-mutation` with `allow-with-token`; results never include the password. Search errors require checking local Boundary authentication/CLI setup. These tools share standard and REST policy; helper subcommands remain unchanged. See [Slice 5 contracts and limits](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE5.md).
+
 [Slice 1 compatibility and test record](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE1.md) documents protected fields, stricter inputs, filtered discovery, and reduced remote diagnostics.
 
-Standard `/mcp` adapts all 40 existing tools and five resources. Discovery filters current policy/categories and unavailable capabilities (37 tools with all categories and `allow-with-token`). Config import and Git calls remain blocked pending review. `function_status_list` and its resource retain `{ "statuses": [...] }`; other tools/resources return `{ "result": <safe legacy data> }`. Calls publish input/output schemas and matching structured/text results. See [Slice 3 contracts and verification](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE3.md).
+Standard `/mcp` adapts 45 registered tools and six resources. Discovery filters current policy/categories and unavailable capabilities (42 tools with all categories and `allow-with-token`). Config import and Git calls remain blocked pending review. `function_status_list` and its resource retain `{ "statuses": [...] }`; other tools/resources return `{ "result": <safe legacy data> }`. Calls publish input/output schemas and matching structured/text results. See [Slice 3 contracts and verification](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 Current compatibility HTTP routes:
 

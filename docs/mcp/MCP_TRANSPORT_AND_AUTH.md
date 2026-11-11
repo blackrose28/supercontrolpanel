@@ -6,6 +6,8 @@ One Axum listener serves the SDK at exact `/mcp` and all six REST compatibility 
 
 All routes require bearer auth, reject any Origin, and require Host `127.0.0.1:<port>`, `localhost:<port>`, or `[::1]:<port>`. Native requests omit Origin. Bodies are limited to 1 MiB. This remains a local static-bearer deployment without OAuth discovery or general remote-client claims. Listener status retains `transport: "http"` and `implementationStage: "http-streamable-slice2"`. Config UX and native qualification remain later slices. [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) documents shared worker limits, response/body deadlines, subscription invalidations, cancellation handoff and bounded listener shutdown. The transfer snapshot adds `scp://status/transfers` while preserving the five original resource URIs.
 
+Slice 5 extends the same registry/host to five reviewed parity tools; no routes, settings, SDK versions or command/event payloads change. Both HTTP surfaces retain bearer and category/sensitivity checks. [Slice 5 contracts and qualification limits](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
+
 ## Goal
 
 Provide an MCP connection model that works well when the SuperControlPanel desktop app is already running and an AI agent wants to call into that live app instance.
