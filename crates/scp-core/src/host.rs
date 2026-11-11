@@ -1,7 +1,7 @@
 //! CLI-local runtime ownership. Desktop hosts retain their existing adapters.
 //!
-//! This context owns children and offers synchronous foreground output drainage. Native I/O
-//! and cleanup can block; signals, bounded cancellation, and process-tree supervision remain host work.
+//! This context owns children and offers foreground output drainage and cooperative cancellation.
+//! Native I/O and cleanup can block; signals, deadlines, and process-tree supervision remain host work.
 
 use crate::{
     profile::ProfileOwner,
@@ -12,6 +12,7 @@ use portable_pty::{CommandBuilder, PtySystem};
 use std::{
     io::{self, Read, Write},
     path::Path,
+    sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 use uuid::Uuid;
@@ -30,6 +31,12 @@ pub struct RuntimePty {
     pub reader: Box<dyn Read + Send>,
     id: String,
     monitor: SessionMonitor,
+}
+
+/// Cancellation may discard unread output; it never promises a complete transcript.
+pub enum ForegroundOutcome {
+    Completed(PtyExitPayload),
+    Cancelled,
 }
 
 impl RuntimePty {
@@ -94,14 +101,30 @@ impl ProfileRuntime {
             id: launched.id().to_owned(),
         };
         let result = drain_foreground(self, &mut launched, output);
-        if let Err(primary) = result {
-            cleanup
-                .runtime
-                .close(&cleanup.id)
-                .map_err(|error| format!("{primary}; cleanup failed: {error}"))?;
-            return Err(primary);
+        cleanup.finish(result)
+    }
+
+    /// Drain output on a scoped worker while observing a host-owned cancellation flag.
+    /// Cancellation closes the direct child before joining the worker. No worker is detached:
+    /// blocked reads, writes, flushes and native calls can delay return indefinitely while
+    /// retaining profile ownership. Cancellation discards remaining output and skips flush
+    /// when observed by the worker. A write/flush already in progress may still finish.
+    /// Completed output is fully drained and flushed before exit polling/retirement.
+    /// Set the flag monotonically for this call; do not reset it until the call returns.
+    /// Cancellation cannot interrupt launch. I/O/cleanup errors take precedence over cancellation.
+    pub fn run_foreground_cancellable(
+        &mut self,
+        system: &dyn PtySystem,
+        size: (u16, u16),
+        command: CommandBuilder,
+        output: &mut (dyn Write + Send),
+        cancelled: &AtomicBool,
+    ) -> Result<ForegroundOutcome, String> {
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(ForegroundOutcome::Cancelled);
         }
-        result
+        let launched = self.spawn(system, size.0, size.1, command)?;
+        supervise_foreground(self, launched, output, cancelled)
     }
 
     pub fn write(&self, id: &str, data: &str) -> Result<(), String> {
@@ -123,6 +146,18 @@ impl ProfileRuntime {
 struct ForegroundCleanup<'a> {
     runtime: &'a ProfileRuntime,
     id: String,
+}
+
+impl ForegroundCleanup<'_> {
+    fn finish<T>(self, result: Result<T, String>) -> Result<T, String> {
+        if let Err(primary) = result {
+            self.runtime
+                .close(&self.id)
+                .map_err(|error| format!("{primary}; cleanup failed: {error}"))?;
+            return Err(primary);
+        }
+        result
+    }
 }
 
 impl Drop for ForegroundCleanup<'_> {
@@ -148,4 +183,94 @@ fn drain_foreground(
             SessionPoll::Exited(exit) => return Ok(exit),
         }
     }
+}
+
+fn copy_cancellable(
+    mut reader: Box<dyn Read + Send>,
+    output: &mut (dyn Write + Send),
+    cancelled: &AtomicBool,
+) -> Result<(), String> {
+    let mut buffer = [0; 8192];
+    while !cancelled.load(Ordering::Acquire) {
+        let count = match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(format!("failed to stream pty output: {error}")),
+        };
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        output
+            .write_all(&buffer[..count])
+            .map_err(|error| format!("failed to stream pty output: {error}"))?;
+    }
+    if !cancelled.load(Ordering::Acquire) {
+        output
+            .flush()
+            .map_err(|error| format!("failed to flush pty output: {error}"))?;
+    }
+    Ok(())
+}
+
+fn supervise_foreground(
+    runtime: &ProfileRuntime,
+    launched: RuntimePty,
+    output: &mut (dyn Write + Send),
+    cancelled: &AtomicBool,
+) -> Result<ForegroundOutcome, String> {
+    let RuntimePty {
+        reader,
+        id,
+        monitor,
+    } = launched;
+    std::thread::scope(|scope| {
+        // Close before scope's automatic join if the supervisor unwinds.
+        let cleanup = ForegroundCleanup { runtime, id };
+        let result = (|| {
+            let worker = std::thread::Builder::new()
+                .name("scp-foreground-output".into())
+                .spawn_scoped(scope, move || copy_cancellable(reader, output, cancelled))
+                .map_err(|error| format!("failed to start pty output worker: {error}"))?;
+            join_foreground_output(runtime, &cleanup.id, worker, cancelled)?;
+            loop {
+                if cancelled.load(Ordering::Acquire) {
+                    runtime.close(&cleanup.id)?;
+                    return Ok(ForegroundOutcome::Cancelled);
+                }
+                match monitor.poll(&runtime.sessions)? {
+                    SessionPoll::Running => std::thread::sleep(Duration::from_millis(20)),
+                    SessionPoll::Detached => return Err("foreground session detached".into()),
+                    SessionPoll::Exited(exit) => return Ok(ForegroundOutcome::Completed(exit)),
+                }
+            }
+        })();
+        cleanup.finish(result)
+    })
+}
+
+fn join_foreground_output(
+    runtime: &ProfileRuntime,
+    id: &str,
+    worker: std::thread::ScopedJoinHandle<'_, Result<(), String>>,
+    cancelled: &AtomicBool,
+) -> Result<(), String> {
+    while !cancelled.load(Ordering::Acquire) && !worker.is_finished() {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let closed = if cancelled.load(Ordering::Acquire) {
+        runtime.close(id).map(|_| ())
+    } else {
+        Ok(())
+    };
+    // Join even when close fails. Never release profile ownership around a live worker.
+    let copied = match worker.join() {
+        Ok(result) => result,
+        Err(panic) => std::panic::resume_unwind(panic),
+    };
+    if let Err(primary) = copied {
+        closed.map_err(|error| format!("{primary}; cleanup failed: {error}"))?;
+        return Err(primary);
+    }
+    closed
 }

@@ -583,18 +583,40 @@ fn profile_runtime_failed_launch_retains_lock_and_can_retry() {
 
 #[test]
 fn foreground_failures_reap_before_return_or_unwind_and_report_cleanup_errors() {
-    struct RejectedOutput(bool);
-    impl Write for RejectedOutput {
-        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
-            if self.0 {
-                panic!("output panic fixture");
-            }
-            Err(io::Error::other("output rejected"))
+    assert_foreground_failure_cases(|runtime, pty, output| {
+        runtime
+            .run_foreground(pty, 80, 24, CommandBuilder::new("unused"), output)
+            .map(|_| ())
+    });
+    assert_foreground_failure_cases(|runtime, pty, output| {
+        runtime
+            .run_foreground_cancellable(
+                pty,
+                (80, 24),
+                CommandBuilder::new("unused"),
+                output,
+                &std::sync::atomic::AtomicBool::new(false),
+            )
+            .map(|_| ())
+    });
+}
+
+struct RejectedOutput(bool);
+impl Write for RejectedOutput {
+    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+        if self.0 {
+            panic!("output panic fixture");
         }
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
+        Err(io::Error::other("output rejected"))
     }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+fn assert_foreground_failure_cases(
+    run: impl Fn(&mut ProfileRuntime, &FakePty, &mut RejectedOutput) -> Result<(), String>,
+) {
     let dir = tempfile::tempdir().unwrap();
     let mut runtime = ProfileRuntime::acquire(dir.path()).unwrap();
     for (panic, fail) in [(false, ""), (true, ""), (false, "wait"), (false, "read")] {
@@ -604,13 +626,7 @@ fn foreground_failures_reap_before_return_or_unwind_and_report_cleanup_errors() 
             ..FakePty::default()
         };
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            runtime.run_foreground(
-                &pty,
-                80,
-                24,
-                CommandBuilder::new("unused"),
-                &mut RejectedOutput(panic),
-            )
+            run(&mut runtime, &pty, &mut RejectedOutput(panic))
         }));
         if panic {
             assert!(result.is_err());
@@ -631,4 +647,132 @@ fn foreground_failures_reap_before_return_or_unwind_and_report_cleanup_errors() 
         assert!(calls.contains(&"wait"));
         assert!(ProfileOwner::acquire(dir.path()).is_err());
     }
+}
+
+#[test]
+fn precancel_skips_launch_and_failed_cancellable_spawn_preserves_profile() {
+    use std::sync::atomic::AtomicBool;
+    let dir = tempfile::tempdir().unwrap();
+    let mut runtime = ProfileRuntime::acquire(dir.path()).unwrap();
+    let pty = FakePty {
+        fail: "spawn",
+        ..FakePty::default()
+    };
+    assert!(runtime
+        .run_foreground_cancellable(
+            &pty,
+            (80, 24),
+            CommandBuilder::new("unused"),
+            &mut io::sink(),
+            &AtomicBool::new(false)
+        )
+        .err()
+        .unwrap()
+        .contains("injected spawn"));
+    assert!(!pty.calls().contains(&"kill"));
+    assert!(ProfileOwner::acquire(dir.path()).is_err());
+    let untouched = FakePty::default();
+    assert!(matches!(
+        runtime
+            .run_foreground_cancellable(
+                &untouched,
+                (80, 24),
+                CommandBuilder::new("unused"),
+                &mut io::sink(),
+                &AtomicBool::new(true)
+            )
+            .unwrap(),
+        scp_core::host::ForegroundOutcome::Cancelled
+    ));
+    assert!(untouched.calls().is_empty());
+}
+
+#[test]
+fn cancellation_reaps_child_before_joining_output_worker() {
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut runtime = ProfileRuntime::acquire(dir.path()).unwrap();
+    let pty = FakePty {
+        owned_profile: Some(dir.path().into()),
+        ..FakePty::default()
+    };
+    let cancelled = AtomicBool::new(false);
+    struct ObserveCleanup<'a> {
+        pty: &'a FakePty,
+        cancelled: &'a AtomicBool,
+    }
+    impl Write for ObserveCleanup<'_> {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.cancelled.store(true, Ordering::Release);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !self.pty.calls().contains(&"wait") {
+                assert!(
+                    Instant::now() < deadline,
+                    "child must be reaped before worker join"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert!(self.pty.calls().contains(&"kill"));
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            panic!("cancelled output must not flush")
+        }
+    }
+    assert!(matches!(
+        runtime
+            .run_foreground_cancellable(
+                &pty,
+                (80, 24),
+                CommandBuilder::new("unused"),
+                &mut ObserveCleanup {
+                    pty: &pty,
+                    cancelled: &cancelled
+                },
+                &cancelled
+            )
+            .unwrap(),
+        scp_core::host::ForegroundOutcome::Cancelled
+    ));
+}
+
+#[test]
+fn cancellation_after_output_eof_stops_exit_polling() {
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let mut runtime = ProfileRuntime::acquire(dir.path()).unwrap();
+    let pty = FakePty {
+        owned_profile: Some(dir.path().into()),
+        ..FakePty::default()
+    };
+    let cancelled = AtomicBool::new(false);
+    std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            runtime.run_foreground_cancellable(
+                &pty,
+                (80, 24),
+                CommandBuilder::new("unused"),
+                &mut io::sink(),
+                &cancelled,
+            )
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !pty.calls().contains(&"poll") {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        cancelled.store(true, Ordering::Release);
+        assert!(matches!(
+            worker.join().unwrap().unwrap(),
+            scp_core::host::ForegroundOutcome::Cancelled
+        ));
+    });
+    assert!(pty.calls().contains(&"wait"));
+    assert!(ProfileOwner::acquire(dir.path()).is_err());
 }

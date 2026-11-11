@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous foreground output drainage; cancellable supervision and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; signal handling, bounded platform supervision, operation families and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -407,6 +407,65 @@ explicitly define truncation on cancellation. Then add an operation family after
 supervision contract is established. Native Windows/macOS, descendant trees/elevated
 helpers, keyring supervision, full config/settings extraction, Streamable HTTP, stdio
 MCP, and packaging remain open.
+
+### Scoped foreground cancellation and worker ownership (2026-11-11)
+
+`ProfileRuntime::run_foreground_cancellable` adds cooperative host-requested cancellation
+without changing the synchronous API or any CLI/desktop command. It accepts a PTY system,
+`(cols, rows)`, command, `Write + Send` sink, and borrowed `AtomicBool`. A pre-cancelled call
+returns `ForegroundOutcome::Cancelled` without launching. Otherwise it uses the existing
+private launch boundary, moves only the reader and borrowed sink/flag onto one scoped
+output worker, and checks cancellation/worker completion every 20ms on the calling thread.
+The flag must remain set until return; callers must not reset it during a call.
+
+On observed cancellation, the supervisor attempts direct-child close/kill/wait **before**
+joining the output worker. No worker is detached. The runtime's mutable borrow retains the
+profile lock through launch, child cleanup, worker completion, errors and Rust unwinding.
+Worker panics are joined and resumed on the caller, with cleanup during unwind. A shared
+cleanup-result helper preserves primary errors and appends cleanup errors for both APIs.
+Callbacks and native calls remain outside the registry/status locks. No strong session
+handle, new dependency, CLI command, status mutation or event adapter was introduced.
+
+`Completed(exit)` retains full drain/flush-before-exit behavior, including nonzero exit
+codes. Cancellation explicitly permits unread/buffered output loss and skips flush when
+the worker observes the flag; I/O already underway may still finish. Cancellation returns
+only `Cancelled`, not a complete transcript or a fabricated normal exit. I/O and cleanup
+errors take precedence over cancellation. After output EOF the supervisor still observes
+cancellation while polling the direct child's exit. Completion can win a concurrent flag
+change after the supervisor's last check.
+
+This is not bounded shutdown: cancellation cannot interrupt launch, a blocked read/write/
+flush, or native poll/kill/wait. Closing the direct child normally wakes its PTY reader,
+but a descendant retaining the PTY can still delay the join indefinitely. The profile
+stays owned throughout that delay. A stuck sink must be released by its host; production
+hosts still need an interruptible/bounded output destination and platform supervision
+before claiming deadlines. Abort/forced exit bypasses drop guards. No input forwarding,
+signal handler, descendant-tree/elevated-helper cleanup, or native keyring worker is added.
+
+TDD evidence: real-child tests first failed to compile for the missing API/outcome.
+They validate >128KiB drainage/final marker/flush/nonzero exit, cancelling an idle child,
+subsequent launch/flush errors, and a deliberately blocked sink retaining profile ownership
+until released. The 20s real-child watchdog remains. Fake tests cover pre-cancel without
+platform work, launch failure, cancellation after EOF, kill/wait before worker join, read/
+write errors, worker panic and combined output/cleanup failure. The combined-error test
+exposed and fixed premature guard cleanup hiding the cleanup error. Removing the close
+before worker join makes the ordering test fail; restoring it passes. Existing synchronous
+failure cases now run against both paths through a shared test helper.
+
+Linux validation: 58 workspace tests plus the credential compile-fail doctest pass with
+all features; two ignored fixtures are exercised by subprocess tests. Strict all-target/
+all-feature Clippy, formatting and the locked standalone release build pass. Desktop
+also passes all 103 existing Rust tests (17 existing warnings). Ripwire quality delta has zero gating
+regressions, with new test dead-code/parameter findings and minor churn; no acknowledgments
+were added. Its host-file test gate exits 4 with 75 unmapped impacted symbols, including
+unmodified desktop paths guessed by name; this is not a clean coverage gate or evidence
+of actual desktop dependencies. Executed Cargo suites provide validation evidence.
+
+Next connect cancellation to a concrete foreground operation's host lifecycle, with
+signal/EOF policy and a suitable output destination; choose a narrow operation family
+from existing source rather than exposing arbitrary commands. Keep platform deadline,
+process-tree/elevation and real Windows/macOS/keyring qualification explicit release
+gates. Configuration/settings extraction, Streamable HTTP, stdio MCP and packaging remain.
 
 Proposed Cargo workspace boundaries:
 

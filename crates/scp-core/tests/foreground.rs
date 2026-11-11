@@ -161,3 +161,133 @@ fn foreground_output_errors_and_panics_cleanup_and_allow_another_launch() {
         assert_eq!(exit.exit_code, Some(7));
     });
 }
+
+#[test]
+fn cancellable_foreground_drains_completed_output_and_cancels_a_waiting_child() {
+    with_deadline(|| {
+        use scp_core::host::ForegroundOutcome;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let dir = tempfile::tempdir().unwrap();
+        let mut runtime = ProfileRuntime::acquire(dir.path()).unwrap();
+        let cancelled = AtomicBool::new(false);
+        let mut output = Output {
+            profile: dir.path().into(),
+            bytes: vec![],
+            failure: "",
+            flushed: false,
+        };
+        let result = runtime
+            .run_foreground_cancellable(
+                &*portable_pty::native_pty_system(),
+                (80, 24),
+                command("complete"),
+                &mut output,
+                &cancelled,
+            )
+            .unwrap();
+        let ForegroundOutcome::Completed(exit) = result else {
+            panic!("unexpected cancellation")
+        };
+        assert_eq!(exit.exit_code, Some(7));
+        assert!(output.flushed);
+        assert!(output.bytes.len() > 128 * 1024);
+        assert!(String::from_utf8_lossy(&output.bytes).contains("FINAL-OUTPUT-MARKER"));
+        assert!(runtime.close(&exit.id).unwrap().is_none());
+
+        struct CancelOnOutput<'a>(&'a AtomicBool);
+        impl Write for CancelOnOutput<'_> {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.0.store(true, Ordering::Release);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        assert!(matches!(
+            runtime
+                .run_foreground_cancellable(
+                    &*portable_pty::native_pty_system(),
+                    (80, 24),
+                    command("wait"),
+                    &mut CancelOnOutput(&cancelled),
+                    &cancelled,
+                )
+                .unwrap(),
+            ForegroundOutcome::Cancelled
+        ));
+        cancelled.store(false, Ordering::Release);
+        output.failure = "flush";
+        assert!(runtime
+            .run_foreground_cancellable(
+                &*portable_pty::native_pty_system(),
+                (80, 24),
+                command("complete"),
+                &mut output,
+                &cancelled,
+            )
+            .err()
+            .unwrap()
+            .contains("injected output flush"));
+        assert!(ProfileOwner::acquire(dir.path()).is_err());
+        drop(runtime);
+        assert!(ProfileOwner::acquire(dir.path()).is_ok());
+    });
+}
+
+#[test]
+fn cancellation_joins_blocked_sink_before_releasing_profile() {
+    with_deadline(|| {
+        use scp_core::host::ForegroundOutcome;
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let profile = dir.path().to_owned();
+        let cancelled = AtomicBool::new(false);
+        let (entered, ready) = mpsc::channel();
+        let (release, released) = mpsc::channel();
+        let (finished, completion) = mpsc::channel();
+        struct BlockedSink {
+            entered: mpsc::Sender<()>,
+            released: mpsc::Receiver<()>,
+        }
+        impl Write for BlockedSink {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                self.entered.send(()).unwrap();
+                self.released.recv().unwrap();
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        std::thread::scope(|scope| {
+            let cancellation = &cancelled;
+            scope.spawn(move || {
+                let mut runtime = ProfileRuntime::acquire(&profile).unwrap();
+                let mut sink = BlockedSink { entered, released };
+                let outcome = runtime
+                    .run_foreground_cancellable(
+                        &*portable_pty::native_pty_system(),
+                        (80, 24),
+                        command("wait"),
+                        &mut sink,
+                        cancellation,
+                    )
+                    .unwrap();
+                assert!(matches!(outcome, ForegroundOutcome::Cancelled));
+                drop(runtime);
+                finished.send(()).unwrap();
+            });
+            ready.recv_timeout(Duration::from_secs(5)).unwrap();
+            cancelled.store(true, Ordering::Release);
+            assert!(completion.recv_timeout(Duration::from_millis(150)).is_err());
+            assert!(ProfileOwner::acquire(dir.path()).is_err());
+            release.send(()).unwrap();
+            completion.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        assert!(ProfileOwner::acquire(dir.path()).is_ok());
+    });
+}

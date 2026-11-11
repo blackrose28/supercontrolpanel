@@ -209,9 +209,17 @@ Rust unwinding attempt direct-child cleanup while retaining profile ownership. N
 child exits remain exit payloads, distinct from host I/O errors. This synchronous path
 has no input forwarding or cancellation: reads, output writers, native cleanup, or a
 descendant retaining the PTY can block indefinitely. It starts no background workers.
-Signal handling, bounded shutdown, process-tree/elevated-helper supervision, status/event
-publication, and a CLI-owned operation family remain pending. The CLI preview still
-provides inventory and profile initialization only.
+A separate core-only `run_foreground_cancellable` path observes a host-owned cancellation
+flag while a scoped worker drains output. Cancellation attempts direct-child close before
+joining the worker; every worker finishes before the call returns or unwinds, and profile
+ownership is retained throughout. Completed runs still drain/flush before returning exit.
+Cancellation may discard unread output and skip flush; already-running I/O may finish.
+A blocked sink, descendant-held reader, launch, or native cleanup can still delay return
+indefinitely. This is cooperative cancellation with no hard shutdown deadline. Worker I/O
+errors and panics remain visible after cleanup. The host must keep the flag set until return.
+Signal handling, process-tree/elevated-helper supervision, status/event publication, and a
+CLI-owned operation family remain pending. The CLI preview still provides inventory and
+profile initialization only.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.
