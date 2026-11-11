@@ -45,10 +45,10 @@ Support a policy that can require local UI approval for sensitive or destructive
 
 Current implementation status:
 
-- when policy is `require-ui-approval`, sensitive MCP tools are rejected over HTTP with an explicit error
+- when policy is `require-ui-approval`, sensitive MCP tools are rejected by the shared dispatcher with an explicit error; no approval queue exists
 - switching the policy to `allow-with-token` allows those tools to run with bearer-token auth alone
 
-Recommended candidates:
+Explicit sensitive operations (independent of category and discovery `readOnly`):
 
 - `openvpn_start`
 - `openvpn_stop`
@@ -56,6 +56,9 @@ Recommended candidates:
 - `server_delete`
 - `remote_browser_delete_path`
 - `scp_upload`
+- `scp_download`
+- `scp_start_upload`
+- `scp_start_download`
 - `config_sync_push`
 - `config_git_push`
 
@@ -69,8 +72,40 @@ HTTP and direct Tauri MCP calls, under either configured sensitive-action policy
 Desktop-local settings controls retain their full partial-update schema.
 
 The guard prevents self-escalation through this patch tool; it does not make
-arbitrary runtime/configuration tools safe for mutually untrusted callers. General
-shared execution validation that rejects unknown policy values remains pending.
+arbitrary runtime/configuration tools safe for mutually untrusted callers. Shared
+execution policy does not provide a sandbox or multi-principal isolation.
+
+## Shared execution policy
+
+`scp_core::mcp_policy::validate_mcp_tool_policy` is a pure fail-closed check.
+The host supplies trusted local categories and policy; caller arguments never
+supply this authority. The desktop loads settings once at the dispatcher gate,
+before any action. HTTP calls, direct Tauri MCP calls and all five resource reads
+that delegate to tools use this same gate. Settings-load errors still propagate.
+Discovery endpoints retain their existing output and authentication behavior.
+
+Only the exact 40 existing operation names are accepted, via an explicit execution
+mapping independent of discovery. Policy must be exactly `require-ui-approval` or
+`allow-with-token`. Categories must all be known exact strings: `read-only`,
+`runtime-control`, `config-mutation`, `file-transfer`. One unknown category rejects
+the whole list, even alongside a valid category for a read-only call. Duplicate
+known categories are harmless. The operation's category must be enabled, including
+for sensitive operations under `allow-with-token`. The explicit sensitive list
+above is preserved; other mutating operations are not implicitly reclassified.
+
+The pure validator denies empty category lists and rejects blank policies; it
+performs no trimming/defaulting. Persistence models still preserve unknown and
+empty values. The desktop loader continues its existing normalization of empty
+category lists and blank policies to defaults before this gate. Nonempty unknown
+values fail closed at execution. Policy errors have fixed text, with no supplied
+operation/policy/category values or HTTP-specific context. HTTP error envelopes
+and command/event payload shapes remain unchanged.
+
+Validation alone does not implement handlers, enable CLI operations, authenticate
+callers, enforce runtime ownership/capabilities or isolate callers sharing a token.
+Hosts must supply those boundaries separately. The operation registry with schemas,
+capabilities and handlers remains incomplete. Future discovery additions cannot
+implicitly become authorized executions.
 
 ## Auditability
 

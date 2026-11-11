@@ -115,50 +115,17 @@ fn save_mcp_sync_settings(
     Ok(redact_sync_settings_value(json!(saved)))
 }
 
-fn is_sensitive_tool(tool_name: &str) -> bool {
-    matches!(
+fn enforce_tool_policy(
+    tool_name: &str,
+    load_settings: impl FnOnce() -> Result<crate::services::SyncSettings, String>,
+) -> Result<(), String> {
+    let settings = load_settings()?;
+    scp_core::mcp_policy::validate_mcp_tool_policy(
         tool_name,
-        "openvpn_start"
-            | "openvpn_stop"
-            | "boundary_auth_start"
-            | "server_delete"
-            | "remote_browser_delete_path"
-            | "scp_upload"
-            | "scp_download"
-            | "scp_start_upload"
-            | "scp_start_download"
-            | "config_sync_push"
-            | "config_git_push"
+        &settings.mcp_allowed_tool_categories,
+        &settings.mcp_sensitive_action_policy,
     )
-}
-
-fn tool_category(tool_name: &str) -> Option<String> {
-    list_mcp_tools()
-        .into_iter()
-        .find(|tool| tool.name == tool_name)
-        .map(|tool| tool.category)
-}
-
-fn enforce_tool_policy(app: &AppHandle, tool_name: &str) -> Result<(), String> {
-    let settings = load_sync_settings_from_disk(app, "sync-local.json")?;
-    if let Some(category) = tool_category(tool_name) {
-        if !settings
-            .mcp_allowed_tool_categories
-            .iter()
-            .any(|item| item == &category)
-        {
-            return Err(format!(
-                "MCP tool category is disabled by settings: {category}"
-            ));
-        }
-    }
-    if settings.mcp_sensitive_action_policy == "require-ui-approval" && is_sensitive_tool(tool_name)
-    {
-        return Err(format!(
-            "Sensitive MCP tool requires UI approval and is currently blocked over HTTP: {tool_name}"
-        ));
-    }
-    Ok(())
+    .map_err(|error| error.to_string())
 }
 
 pub use scp_core::mcp_catalog::list_mcp_tools;
@@ -172,7 +139,9 @@ pub fn call_mcp_tool(
     boundary_auth_function_id: &str,
     config_paths: fn(&AppHandle) -> Result<ConfigPaths, String>,
 ) -> Result<McpToolCallEnvelope, String> {
-    enforce_tool_policy(app, tool_name)?;
+    enforce_tool_policy(tool_name, || {
+        load_sync_settings_from_disk(app, "sync-local.json")
+    })?;
     let data = match tool_name {
         "app_get_overview" => {
             let function_store = app.state::<FunctionStore>();
@@ -831,5 +800,70 @@ mod remote_settings_guard {
             .unwrap_err();
             assert_eq!(error, "writer unavailable");
         }
+    }
+}
+
+#[cfg(test)]
+mod execution_policy_gate {
+    use super::*;
+    use crate::services::SyncSettings;
+    use std::cell::Cell;
+
+    #[test]
+    fn dispatcher_gate_rejects_invalid_settings_and_unknown_operations() {
+        for (tool, policy, categories) in [
+            ("servers_list", "future-policy", vec!["read-only"]),
+            (
+                "servers_list",
+                "allow-with-token",
+                vec!["read-only", "future-category"],
+            ),
+            ("future-operation", "allow-with-token", vec!["read-only"]),
+            (
+                "openvpn_start",
+                "require-ui-approval",
+                vec!["runtime-control"],
+            ),
+            ("servers_list", "allow-with-token", vec!["runtime-control"]),
+        ] {
+            let settings = SyncSettings {
+                mcp_sensitive_action_policy: policy.to_owned(),
+                mcp_allowed_tool_categories: categories.into_iter().map(str::to_owned).collect(),
+                ..SyncSettings::default()
+            };
+            assert!(
+                enforce_tool_policy(tool, || Ok(settings)).is_err(),
+                "{tool}: {policy}"
+            );
+        }
+    }
+
+    #[test]
+    fn dispatcher_gate_loads_once_and_preserves_load_errors() {
+        let loads = Cell::new(0);
+        assert_eq!(
+            enforce_tool_policy("servers_list", || {
+                loads.set(loads.get() + 1);
+                Ok(SyncSettings::default())
+            }),
+            Ok(())
+        );
+        assert_eq!(loads.get(), 1);
+        assert_eq!(
+            enforce_tool_policy("servers_list", || Err("settings unavailable".to_owned())),
+            Err("settings unavailable".to_owned())
+        );
+    }
+
+    #[test]
+    fn dispatcher_checks_policy_before_matching_any_action() {
+        // Static ordering check, complemented by the executed gate tests above.
+        // Does not exercise Tauri, HTTP, resources or side effects end to end.
+        let source = include_str!("tools.rs");
+        let body = source.split("pub fn call_mcp_tool(").nth(1).unwrap();
+        let before_dispatch = body.split("let data = match tool_name {").next().unwrap();
+        assert!(before_dispatch.contains("enforce_tool_policy(tool_name, ||"));
+        assert!(before_dispatch.contains("load_sync_settings_from_disk(app, \"sync-local.json\")"));
+        assert!(before_dispatch.contains("})?;"));
     }
 }

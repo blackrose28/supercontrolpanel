@@ -327,8 +327,23 @@ This is still a **repo-local minimal transport**, not a final spec-polished MCP 
 The desktop's existing 40-tool discovery catalog now lives in
 `scp-core::mcp_catalog`, with unchanged names, titles, categories and `readOnly`
 fields. This is discovery metadata only: it does not enable these operations in
-`scpctl` or supply execution authorization. Shared fail-closed execution policy
-validation remains planned.
+`scpctl` or supply execution authorization.
+
+The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
+including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
+Unknown operation names, sensitive-action policies or category entries reject the
+call, including read-only calls. The supported policies are exactly
+`require-ui-approval` and `allow-with-token`; supported categories are exactly
+`read-only`, `runtime-control`, `config-mutation` and `file-transfer`. An enabled
+category is still required under either policy. Sensitivity remains an explicit
+list independent of discovery `readOnly` flags. There is no approval queue:
+`require-ui-approval` blocks sensitive calls with an explicit error. Correct
+unsupported settings locally through the Config page.
+
+Persistence remains permissive. The desktop loader retains its existing defaults
+for empty categories and blank policy; the pure validator itself applies no
+normalization (empty categories deny all, and blank policy rejects). Discovery,
+listener authentication and local desktop actions retain their existing behavior.
 
 `sync_settings_save_partial` accepts a JSON object containing only `repoRoot`,
 `openvpnExecutablePath`, `openvpnOvpnPath`, `boundaryCliPath` and `caddyFolder`.

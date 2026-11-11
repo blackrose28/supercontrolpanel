@@ -126,7 +126,10 @@ The current repo now includes a minimal in-process localhost HTTP listener.
 - token comes from device-local `sync-local.json` settings
 - changing MCP settings through the Config page re-syncs the live runtime
 - non-localhost bind addresses are currently rejected by the backend
-- when sensitive-action policy is `require-ui-approval`, sensitive tool calls are rejected over HTTP until the policy is changed to `allow-with-token`
+- tool execution and resource reads delegated to tools use the shared fail-closed policy gate before actions, including direct Tauri MCP calls
+- unknown operation/policy/category strings reject execution; known category allowlists and explicit sensitivity still apply
+- `require-ui-approval` blocks sensitive tool calls because no approval workflow exists; `allow-with-token` permits them only when their category is enabled
+- policy errors use fixed text without reflecting supplied values; see [the security model](MCP_SECURITY_MODEL.md) for exact values and loader normalization
 
 ### Current tool coverage
 

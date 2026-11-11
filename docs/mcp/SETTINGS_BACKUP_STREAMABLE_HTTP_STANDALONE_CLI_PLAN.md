@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config and device-local settings schemas, desktop MCP discovery metadata/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config and device-local settings schemas, desktop MCP discovery metadata and shared fail-closed execution policy/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -969,6 +969,82 @@ regression coverage. No shared policy implementation has been added yet. Standar
 Streamable HTTP, coordinated CLI import, other operation families, stdio MCP and
 packaging remain independent actionable work; unchanged native supervision gates
 must not trigger blocked successors.
+
+### Shared fail-closed MCP execution policy (2026-11-11)
+
+`scp-core::mcp_policy::validate_mcp_tool_policy` now validates execution separately
+from discovery and the permissive settings schema. Its explicit operation/category
+mapping accepts only the current 40 names. Only exact `require-ui-approval` and
+`allow-with-token` policy strings are supported. All configured category entries
+must be exact known values (`read-only`, `runtime-control`, `config-mutation`,
+`file-transfer`); an unknown entry invalidates the whole list, including read-only
+calls whose own category is enabled. Duplicate known entries are harmless. The
+operation's category must be enabled under both policies. The existing 11 explicitly
+sensitive operations are unchanged; sensitivity is not inferred from discovery
+`readOnly` or category. Approval remains unavailable and sensitive calls under
+`require-ui-approval` fail closed. Typed errors implement Error/Display with fixed
+messages and no reflected operation/policy/category values or HTTP-specific context.
+
+Desktop `enforce_tool_policy` now accepts an injected one-shot settings loader and
+delegates to the shared validator. The production dispatcher invokes it with the
+existing desktop loader before its action match. Thus HTTP, direct Tauri MCP and
+all five resource mappings remain covered. Load failures propagate. The pure
+validator denies empty categories and rejects blank policies without normalization;
+the desktop loader still normalizes empty category lists and blank policies to
+defaults. Unknown/empty persistence values and null patch semantics are unchanged.
+Discovery output, local desktop actions, listener authentication, command/event
+payloads, remote settings guard and CLI behavior remain unchanged. No dependency,
+transport, profile, credential or runtime changes were made. Validation alone does
+not implement handlers, authorize a CLI capability or sandbox shared-token callers.
+
+TDD: the new core target first failed on an absent module. An interim copy of the
+old policy passed characterization but failed three behavioral tests: unknown
+operations, unknown policies and mixed known/unknown categories all returned Ok.
+The fail-closed implementation passes all six core tests. The existing discovery
+JSON fixture checks all 40 category mappings and the exact sensitive list; tests
+cover empty lists, duplicates, case/whitespace mismatches, both policies, read-only
+calls, and fixed error diagnostics. Three new desktop tests first failed on the
+missing injected-loader signature; after adoption they check rejections, one load,
+load errors and static ordering before the action match. These execute the actual
+policy gate without user files/services. The ordering test is a source check, not
+HTTP/Tauri/resource or UI end-to-end coverage. The previous four injected-writer
+remote self-escalation tests remain green.
+
+Linux validation: the locked desktop suite passes 120 tests with 17 existing
+warnings. Locked workspace all-feature tests pass 95 tests plus the credential
+compile-fail doctest; seven ignored subprocess fixtures are exercised by their
+acceptance tests. Strict workspace all-feature/all-target Clippy, workspace fmt,
+changed desktop-file rustfmt, locked release CLI build and diff whitespace check
+pass. Focused policy/gate tests also pass after the error-message refactor. Native
+Windows/macOS remains unqualified; the new policy has no platform-specific code.
+
+Ripwire identifies 12 downstream symbols from the existing gate, 11 from dispatch,
+including HTTP, direct Tauri and resource consumers. Static affected selection does
+not recognize the included/inline tests. Public dispatcher signature is unchanged;
+the private gate changes from AppHandle to injected loader (same arity, so edit-check
+reports unchanged), and the compiler/tests verify its updated caller. An initial
+quality gate flagged the new Display match as a clone of existing credential error
+formatting; separating fixed error messages from Display removes that gate without
+an acknowledgment or changes to credential code. Final quality delta has zero
+gating regressions, two minor existing-symbol findings (dispatcher churn and two
+lines of verbosity), and 12 non-gating new-symbol rows (test/trait reachability and
+one test clone). The staged static test gate exits 4 with 12 untested/unmodeled
+impacts (including one Markdown heading) and two selected test files with unknown
+runners. Both are covered by the executed core test target; inline desktop tests
+are not selected. This is not clean static coverage or end-to-end execution proof.
+
+Next focused increment: decouple the existing five MCP resource descriptors and
+URI-to-tool mapping from Tauri, with exact shared contracts and desktop adoption.
+Inspect `McpResourceDescriptor`, `list_mcp_resources`, `read_mcp_resource` and their
+callers first. Resource metadata categories are not execution categories; every
+resolved resource must still enter the tool dispatcher policy gate. Preserve wire
+output and unknown-URI behavior, and add regression evidence that resource mapping
+cannot bypass unknown-policy/category rejection. This prepares the standard MCP
+adapter without enabling CLI operations or changing the HTTP transport. After that,
+shared operation argument/result schemas and the standard desktop Streamable HTTP
+adapter are actionable. Coordinated CLI import, other operation families, stdio MCP
+and independent packaging also remain; unchanged native supervision gates must not
+trigger blocked successors.
 
 Proposed Cargo workspace boundaries:
 
