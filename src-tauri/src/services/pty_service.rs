@@ -161,6 +161,7 @@ pub fn open_pty_with_command_builder(
     on_session_exit: fn(&AppHandle, &FunctionStore, &str, Option<i32>, &str) -> Result<(), String>,
     forced_session_id: Option<&str>,
 ) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let pty_system = native_pty_system();
     let pair = pty_system
         .openpty(PtySize {

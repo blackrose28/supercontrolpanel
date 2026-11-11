@@ -7,6 +7,7 @@ use cc::{get_cc_status, init_cc_connection, sync_cc_status_from_settings};
 use tauri::Manager;
 
 mod app_state;
+mod settings_backup;
 mod mcp;
 mod models;
 mod server_mgmt;
@@ -95,6 +96,7 @@ fn main() {
         .manage(McpRuntimeState::default())
         .manage(CcRuntimeState::default())
         .setup(|app| {
+            settings_backup::desktop::recover_startup(app.handle())?;
             // Populate the in-memory keyring cache from the OS credential
             // store ONCE so Linux users get at most one unlock prompt.
             let server_ids: Vec<String> = server_mgmt::load_servers(app.handle())
@@ -119,6 +121,11 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            settings_backup::desktop::export_settings_backup,
+            settings_backup::desktop::preview_settings_backup,
+            settings_backup::desktop::import_settings_backup,
+            settings_backup::desktop::discard_settings_backup_preview,
+            settings_backup::desktop::cancel_settings_backup_work,
             open_pty,
             write_pty,
             resize_pty,

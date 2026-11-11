@@ -44,9 +44,6 @@ src-tauri/gen/
 # Docker Linux build output
 dist-linux/
 
-# Gitnexus
-.gitnexus
-
 # Playwright
 /test-results/
 /playwright-report/

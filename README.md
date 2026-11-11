@@ -218,6 +218,14 @@ Pre-MCP refactor planning docs live under `docs/refactor/`:
       - Use a private Git repo as the source of truth for config.
       - Optionally place the repo clone inside a cloud-synced folder (Google Drive/OneDrive/Dropbox) so Git handles history/merging and the cloud service provides backup and multi-device availability.
 
+### Encrypted settings backup
+
+Config → **Export settings** creates a passphrase-encrypted `.scpbak` containing all three settings files and the app's known OS-keyring credentials, including per-server SSH passwords. Locked/unreadable credentials abort a full export. The passphrase must match its confirmation and cannot be recovered.
+
+**Import settings** authenticates the backup and shows a redacted preview before confirmed replacement of selected sections. Destination paths are preserved by default, with optional remapping. Portable imports rotate MCP access and require CC re-enrollment; MCP and CC remain disabled. Stop sessions/transfers and close remote browsers first; disable MCP/CC and restart if CC has been running. Active work is never terminated automatically.
+
+External certificate/key/OVPN/SSH-identity/Caddy files are referenced, not bundled. Boundary app tokens and telemetry queue keys remain encrypted in the archive but cannot be restored until their compatibility can be validated; the destination telemetry key stays intact, while a changed Boundary controller/auth identity clears the old app token for fresh login. Restore uses an encrypted crash-recovery journal. If recovery blocks startup, keep the journal/key, unlock the OS credential store and restart. See [backup scope, format and recovery](docs/mcp/SETTINGS_BACKUP.md) for details and platform qualification limits.
+
 ### Servers page (SSH / Boundary / SCP)
 
 - Each server record includes:
@@ -277,3 +285,29 @@ Pre-MCP refactor planning docs live under `docs/refactor/`:
 2. Persist per-server terminal history between app launches.
 3. Add richer error handling and diagnostics for Boundary/SSH/SCP flows.
 4. Harden security (permission scoping, safer command construction, audit logging).
+
+## Code intelligence
+
+Use [Ripwire](https://github.com/redhat-et/ripwire) for local code navigation and impact analysis. It is a development tool, separate from the application runtime and npm dependencies.
+
+Install the official prebuilt release on Linux or macOS (see [platform requirements](https://github.com/redhat-et/ripwire/blob/main/INSTALL.md)):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/redhat-et/ripwire/main/scripts/install.sh -o /tmp/ripwire-install.sh
+# Review the downloaded script before running it.
+RIPWIRE_REPO=redhat-et/ripwire bash /tmp/ripwire-install.sh
+export PATH="$HOME/.local/bin:$PATH"
+ripwire --version
+```
+
+The installer verifies the release checksum and activates skills for detected coding agents. Re-run it to update. The CLI works without MCP setup or advisory hooks. Windows contributors can run it from a Linux environment such as WSL.
+
+From this repository:
+
+```bash
+ripwire . --for="server SSH session lifecycle" --legend=compact
+ripwire . --impact="start_server_ssh" --legend=compact
+ripwire . --uses="start_server_ssh" --legend=compact
+```
+
+Ripwire builds an incremental cache outside the repository automatically; no committed index or manual indexing step is needed. Follow AGENTS.md for impact review and the required TDD workflow.

@@ -99,6 +99,7 @@ pub fn sync_mcp_runtime_from_settings(
     settings: &SyncSettings,
     now_ms: fn() -> u64,
 ) -> Result<McpRuntimeStatus, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     stop_listener(state)?;
 
     {

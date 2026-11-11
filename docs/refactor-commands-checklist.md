@@ -265,4 +265,4 @@ Actions:
 - [x] Remove unused imports from main.rs
 - [x] Verify `wc -l src/main.rs` is ~100-150 lines
 - [x] Verify total `wc -l src/commands/*.rs` + `src/main.rs` ≈ original 2615 lines (no code lost)
-- [x] Run `npx gitnexus analyze` to refresh the index
+- [ ] Verify code navigation with `ripwire . --for="command dispatch" --legend=compact`

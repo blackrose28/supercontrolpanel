@@ -1356,3 +1356,19 @@ body {
         max-height: 85vh;
     }
 }
+
+#settings-backup-dialog {
+  width: min(760px, 90vw);
+  max-height: 85vh;
+  overflow: auto;
+  background: var(--bg, #141b27);
+  color: var(--text, #e6edf3);
+  border: 1px solid #566377;
+  border-radius: 10px;
+  padding: 24px;
+}
+#settings-backup-dialog::backdrop { background: #0009; }
+#backup-options { margin: 16px 0; }
+#backup-options label { display: block; margin: 8px 0; }
+#backup-preview { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow: auto; }
+#settings-backup-dialog [hidden] { display: none; }

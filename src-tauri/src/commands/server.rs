@@ -28,6 +28,7 @@ pub(crate) fn upsert_server_action(
     mut server: Server,
     browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<Vec<Server>, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let mut list = load_servers(&app)?;
     if server.id.is_empty() {
         server.id = new_server_id();
@@ -56,6 +57,7 @@ pub(crate) fn delete_server_action(
     id: String,
     browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<Vec<Server>, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     close_remote_browser_sessions_for_server(&id, &browser_store)?;
     let _ = keyring_set_or_delete(&keyring_server_ssh_password_account(&id), "");
     let mut list = load_servers(&app)?;
@@ -79,12 +81,14 @@ pub fn set_server_ssh_password(
     server_id: String,
     password: String,
 ) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let _ = load_server_by_id(&app, &server_id)?;
     keyring_set_or_delete(&keyring_server_ssh_password_account(&server_id), &password)
 }
 
 #[tauri::command]
 pub fn clear_server_ssh_password(app: AppHandle, server_id: String) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let _ = load_server_by_id(&app, &server_id)?;
     keyring_set_or_delete(&keyring_server_ssh_password_account(&server_id), "")
 }
@@ -98,6 +102,7 @@ pub(crate) fn start_server_tunnel_action(
     function_store: State<'_, FunctionStore>,
     browser_store: State<'_, RemoteBrowserStore>,
 ) -> Result<StartFunctionResult, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     start_server_tunnel_service(
         server_id,
         cols,
@@ -273,6 +278,7 @@ pub(crate) fn start_server_ssh_action(
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
 ) -> Result<StartFunctionResult, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     start_server_ssh_service(
         server_id,
         cols,
@@ -398,6 +404,7 @@ pub(crate) fn restart_server_ssh_action(server_id: String, app: AppHandle) -> Re
 
 #[tauri::command]
 pub fn start_server_rdp(app: AppHandle, server_id: String) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     #[cfg(target_os = "windows")]
     {
         start_server_rdp_service(&app, server_id, CREATE_NO_WINDOW)

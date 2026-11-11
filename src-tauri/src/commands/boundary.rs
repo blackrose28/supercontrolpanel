@@ -208,6 +208,7 @@ pub(crate) fn start_boundary_auth_action(
     function_store: State<'_, FunctionStore>,
     automation_store: State<'_, BoundaryAutomationStore>,
 ) -> Result<StartFunctionResult, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let cfg = load_app_config_from_disk(&app)?;
     let plan = prepare_boundary_auth_start(
         &cfg,

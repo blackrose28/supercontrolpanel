@@ -264,9 +264,9 @@ Use incremental extraction with a **facade-first** strategy: keep current entry 
   - Transfer start/progress/finalize/resume
   - Admin UI: devices/logs/pty/transfers/telemetry views
 
-## GitNexus requirements for implementation phase
+## Code intelligence requirements for implementation phase
 Before editing each symbol in implementation:
-1. Run `gitnexus_impact({target: "<symbol>", direction: "upstream"})` and report blast radius.
-2. If risk is HIGH/CRITICAL, pause and confirm before proceeding.
-3. Before commit, run `gitnexus_detect_changes()` to verify only expected scope changed.
-4. Ensure all d=1 dependents are updated where applicable.
+1. Run `ripwire . --impact="<symbol>" --legend=compact` and `ripwire . --uses="<symbol>" --legend=compact`; report callers, affected paths, and risk.
+2. Warn before high-risk edits and verify dynamic contracts in source and tests.
+3. Before commit, review `git diff` and `ripwire . --quality-delta --legend=compact` for unexpected scope or quality changes.
+4. Ensure direct dependents are updated where applicable and run the relevant tests.

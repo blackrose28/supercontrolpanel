@@ -156,6 +156,7 @@ pub fn cc_scp_upload_service(
     follow_symlinks: bool,
     verify_checksum: bool,
 ) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let local_path = validate_local_upload_source(&local_path).map_err(|err| err.into_string())?;
     let remote_path =
         normalize_remote_transfer_path(&remote_path, None, "invalid_target_path", false)
@@ -322,6 +323,7 @@ pub fn cc_start_scp_upload_service(
         &str,
     ) -> Result<(), String>,
 ) -> Result<StartScpResult, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let local_path = validate_local_upload_source(&local_path).map_err(|err| err.into_string())?;
     let remote_path =
         normalize_remote_transfer_path(&remote_path, None, "invalid_target_path", false)
@@ -391,6 +393,7 @@ pub fn cc_scp_download_service(
     follow_symlinks: bool,
     verify_checksum: bool,
 ) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let remote_path =
         normalize_remote_transfer_path(&remote_path, None, "invalid_source_path", false)
             .map_err(|err| err.into_string())?;
@@ -465,6 +468,7 @@ pub fn cc_start_scp_download_service(
         &str,
     ) -> Result<(), String>,
 ) -> Result<StartScpResult, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let remote_path =
         normalize_remote_transfer_path(&remote_path, None, "invalid_source_path", false)
             .map_err(|err| err.into_string())?;
