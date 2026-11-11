@@ -346,6 +346,11 @@ Get keeps its existing permissive string lookup and errors; list returns a bare
 array in store iteration order, and get returns a bare status object. Optional
 status fields still serialize as null. These shared types add no CLI status command.
 
+The overview result also uses a shared `McpAppOverviewResult`: `appVersion`,
+`activeFunctions` (stored statuses with a session ID) and `knownFunctionCount`
+(all stored statuses). Desktop counting and ignored-argument behavior are unchanged;
+the schema example now matches those existing fields. No CLI overview command is added.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

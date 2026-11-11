@@ -39,3 +39,13 @@ pub type McpFunctionStatusGetResult = crate::runtime::FunctionStatus;
 
 /// Bare array in host-supplied iteration order; no sorting or filtering.
 pub type McpFunctionStatusListResult = Vec<McpFunctionStatusGetResult>;
+
+/// Bare `app_get_overview` result; hosts supply version and store-derived counts.
+/// Active functions count statuses with any session ID, independently of state.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpAppOverviewResult {
+    pub app_version: String,
+    pub active_functions: usize,
+    pub known_function_count: usize,
+}

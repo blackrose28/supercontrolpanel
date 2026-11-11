@@ -1218,6 +1218,67 @@ open. No transport/auth/profile/runtime/credential/dependency changes or new CLI
 capabilities ship here. Native supervision/keyring/elevation gates remain unchanged;
 do not retry the cgroup spike on this unchanged host.
 
+### Shared app-overview MCP result contract (2026-11-11)
+
+`scp-core::mcp_dto::McpAppOverviewResult` now carries the existing bare
+`app_get_overview` result: `appVersion: String`, `activeFunctions: usize` and
+`knownFunctionCount: usize`. It derives Serialize only, with camelCase and all
+three fields always present; no defaults, Deserialize, validation or count
+normalization was added. Desktop DTO/public paths re-export the shared type and
+the dispatcher uses it in place of an inline JSON object. Version still comes
+from desktop package metadata. Counts still come from the locked FunctionStore:
+active means `session_id.is_some()` (even empty IDs or non-running states), and
+known means every stored status. All arguments, including non-objects, remain
+ignored; no empty-argument parser/schema restriction was introduced. Policy runs
+first; locking, poison errors and envelope construction remain unchanged.
+
+The helper's `status` command sends `{}` and prints the custom envelope without
+reading individual overview fields. HTTP and direct Tauri paths use the same
+dispatcher; no resource maps to overview. `MCP_TOOL_SCHEMAS.md` had a stale example
+with `mcpEnabled`, `activeFunctionCount`, `activeSessionCount` and `functions`;
+it now documents the actual three fields. This corrects documentation drift,
+not a production wire change. No CLI overview command, transport, dependency,
+authorization, runtime, profile or credential behavior was added.
+
+TDD: the exact fixture first passes against the old JSON expression. Core and
+desktop RED then fail on the missing shared result type. GREEN passes two shared
+contracts in core and the same two included desktop contracts plus a public-path
+identity test. Tests preserve exact fields, Unicode/control text, empty version,
+zero counts and the full host usize range. A deliberately inconsistent count pair
+proves the DTO does not impose relationships on host-supplied values. Refactoring
+replaces repetitive identity-test value construction with a compile-time identity
+function signature that proves all three public paths are the same type. These
+are synthetic wire/type contracts; they do not execute the actual handler,
+counting expression, HTTP/Tauri integration or UI flows.
+
+Validation: locked workspace all-feature suite passes 107 tests plus the credential
+compile-fail doctest (seven ignored subprocess fixtures are exercised by acceptance
+tests). Locked desktop suite passes 139 tests with 17 existing warnings. Strict
+workspace all-feature/all-target Clippy, locked release CLI build, workspace and
+changed/shared-file formatting, and diff whitespace checks pass. Native
+Windows/macOS qualification remains open; no platform-specific code changed.
+
+Ripwire dispatcher impact still reports three direct callers (HTTP, resource,
+Tauri) and 11 downstream symbols, with zero modeled affected tests. Edit-check
+reports its signature unchanged. Quality delta after refactoring has zero gating
+findings/acknowledgments, one minor ambient dispatcher churn finding and five
+non-gating new test/module reachability findings. Included desktop tests and
+synthetic serialization contracts do not establish handler coverage. The staged
+test gate exits 4: it selects the three new contract/fixture/target files and the
+existing function-status contract, all exercised by workspace tests, but cannot
+infer their runners. Its 12 untested paths include the 11 downstream dispatcher
+symbols and an unrelated SETTINGS_BACKUP Markdown heading. This is not a clean
+static coverage verdict or transport/UI E2E proof.
+
+Next focused slice: inspect the `openvpn_get_status` / `boundary_get_status`
+read-only result family (existing bare status-or-null lookup) and preserve its
+ignored arguments, missing-status null and runtime result semantics in shared
+DTO aliases/fixtures with desktop adoption. Alternatively, standard desktop
+Streamable HTTP is independently actionable after checking current official
+SDK/protocol sources. Other operation contracts, coordinated CLI import, stdio
+MCP and packaging remain open. Do not retry the cgroup spike on this unchanged
+host or claim stronger supervision/keyring/elevation guarantees.
+
 Proposed Cargo workspace boundaries:
 
 ```text

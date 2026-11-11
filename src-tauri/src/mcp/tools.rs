@@ -15,8 +15,8 @@ use crate::commands::{
 };
 use crate::{
     mcp::{
-        McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-        McpToolCallEnvelope,
+        McpAppOverviewResult, McpFunctionStatusGetArgs, McpFunctionStatusGetResult,
+        McpFunctionStatusListResult, McpToolCallEnvelope,
     },
     server_mgmt::{load_servers, Server},
     services::{
@@ -156,10 +156,10 @@ pub fn call_mcp_tool(
                 .values()
                 .filter(|status| status.session_id.is_some())
                 .count();
-            json!({
-                "appVersion": app.package_info().version.to_string(),
-                "activeFunctions": active_functions,
-                "knownFunctionCount": statuses.len(),
+            json!(McpAppOverviewResult {
+                app_version: app.package_info().version.to_string(),
+                active_functions,
+                known_function_count: statuses.len(),
             })
         }
         "function_status_list" => {

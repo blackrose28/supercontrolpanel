@@ -18,8 +18,8 @@ pub use scp_core::mcp_catalog::McpToolDescriptor;
 pub use scp_core::mcp_resources::McpResourceDescriptor;
 
 pub use scp_core::mcp_dto::{
-    McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
-    McpToolCallEnvelope,
+    McpAppOverviewResult, McpFunctionStatusGetArgs, McpFunctionStatusGetResult,
+    McpFunctionStatusListResult, McpToolCallEnvelope,
 };
 
 #[cfg(test)]
@@ -77,5 +77,22 @@ mod shared_function_status_identity {
         let dto: super::McpFunctionStatusListResult = vec![shared];
         let public: crate::mcp::McpFunctionStatusListResult = dto;
         let _: scp_core::mcp_dto::McpFunctionStatusListResult = public;
+    }
+}
+
+#[cfg(test)]
+mod app_overview_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_app_overview.rs"
+    ));
+}
+
+#[cfg(test)]
+mod shared_app_overview_identity {
+    #[test]
+    fn desktop_public_paths_accept_the_core_overview_without_conversion() {
+        let _: fn(scp_core::mcp_dto::McpAppOverviewResult) -> crate::mcp::McpAppOverviewResult =
+            std::convert::identity::<super::McpAppOverviewResult>;
     }
 }

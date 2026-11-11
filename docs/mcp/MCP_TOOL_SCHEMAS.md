@@ -108,12 +108,20 @@ The result shape is:
 ```json
 {
   "appVersion": "0.1.0",
-  "mcpEnabled": true,
-  "activeFunctionCount": 2,
-  "activeSessionCount": 2,
-  "functions": []
+  "activeFunctions": 2,
+  "knownFunctionCount": 3
 }
 ```
+
+The existing custom dispatcher ignores all arguments, including non-object values.
+`activeFunctions` counts stored statuses with a non-null session ID (including an
+empty string), regardless of state. `knownFunctionCount` counts all stored statuses;
+this is not a count of PTYs or a filtered list of visible UI cards. The version
+comes from desktop package metadata. All three fields are always present. The
+Serialize-only `scp-core::mcp_dto::McpAppOverviewResult` carries the result; hosts
+retain count/version construction and policy enforcement. The older example's
+`mcpEnabled`, `activeFunctionCount`, `activeSessionCount` and `functions` fields
+were documentation drift, not fields removed from production.
 
 ## `function_status_list`
 
