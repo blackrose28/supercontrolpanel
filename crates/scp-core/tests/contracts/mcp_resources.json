@@ -1,0 +1,27 @@
+[
+  {
+    "uri": "scp://status/functions",
+    "title": "Function statuses",
+    "category": "status"
+  },
+  {
+    "uri": "scp://status/openvpn",
+    "title": "OpenVPN status",
+    "category": "status"
+  },
+  {
+    "uri": "scp://status/boundary",
+    "title": "Boundary status",
+    "category": "status"
+  },
+  {
+    "uri": "scp://servers/list",
+    "title": "Servers list",
+    "category": "inventory"
+  },
+  {
+    "uri": "scp://config/paths",
+    "title": "Config paths",
+    "category": "config"
+  }
+]

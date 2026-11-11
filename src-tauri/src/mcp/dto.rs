@@ -15,13 +15,7 @@ pub struct McpRuntimeStatus {
 
 pub use scp_core::mcp_catalog::McpToolDescriptor;
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct McpResourceDescriptor {
-    pub uri: String,
-    pub title: String,
-    pub category: String,
-}
+pub use scp_core::mcp_resources::McpResourceDescriptor;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

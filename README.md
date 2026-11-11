@@ -329,6 +329,13 @@ The desktop's existing 40-tool discovery catalog now lives in
 fields. This is discovery metadata only: it does not enable these operations in
 `scpctl` or supply execution authorization.
 
+The five resource descriptors and exact URI-to-tool mappings now live in
+`scp-core::mcp_resources`. Discovery order, fields and desktop resource-read
+responses are unchanged. Resource labels (`status`, `inventory`, `config`) are
+metadata; reads still use the tool dispatcher's execution policy. Unknown URIs
+retain the existing error including the supplied URI. This extraction does not
+expose resources in `scpctl` or add a standard MCP transport.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the

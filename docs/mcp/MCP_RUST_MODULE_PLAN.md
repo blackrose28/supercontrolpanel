@@ -406,3 +406,22 @@ This structure should make it easier to test:
 - `docs/mcp/MCP_TOOL_SCHEMAS.md`
 - `docs/mcp/MCP_HELPER_CLI_SPEC.md`
 - `docs/mcp/MCP_FIRST_REFACTOR_SLICE.md`
+
+## Shared resource boundary (implemented 2026-11-11)
+
+`scp-core::mcp_resources` owns `McpResourceDescriptor` (Serialize/Clone with
+camelCase fields), `list_mcp_resources` and `resolve_mcp_resource`. The desktop
+re-exports the descriptor through `mcp::dto` and list through `mcp::resources`;
+existing public paths/signatures remain available. The resolver accepts only the
+five exact existing URIs and returns `Option<&'static str>` for their no-argument
+tool names. It does not normalize, read files, load settings or execute operations.
+Unknown-URI error formatting remains desktop-owned, including the supplied URI.
+
+Desktop `read_mcp_resource` delegates through a private injected-dispatch seam,
+passing an empty JSON object to `call_mcp_tool`. Successful envelopes and errors
+pass through unchanged. Every resolved operation therefore retains the shared
+execution-policy gate and desktop handler. The labels `status`, `inventory` and
+`config` are resource metadata, not execution categories or authorization. All
+five mapped tools require enabled `read-only` execution policy. Neither resource
+discovery nor resolution enables a standalone host capability. Authentication,
+transport, runtime handlers and result envelopes remain host-owned.

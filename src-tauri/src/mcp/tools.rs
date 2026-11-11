@@ -867,3 +867,44 @@ mod execution_policy_gate {
         assert!(before_dispatch.contains("})?;"));
     }
 }
+
+#[cfg(test)]
+mod resource_policy_gate {
+    use super::enforce_tool_policy;
+    use crate::services::SyncSettings;
+
+    #[test]
+    fn resolved_resources_still_reject_invalid_execution_settings() {
+        for resource in scp_core::mcp_resources::list_mcp_resources() {
+            let tool = scp_core::mcp_resources::resolve_mcp_resource(&resource.uri).unwrap();
+            for policy in ["require-ui-approval", "allow-with-token"] {
+                let settings = SyncSettings {
+                    mcp_sensitive_action_policy: policy.to_owned(),
+                    mcp_allowed_tool_categories: vec!["read-only".to_owned()],
+                    ..SyncSettings::default()
+                };
+                assert_eq!(enforce_tool_policy(tool, || Ok(settings.clone())), Ok(()));
+                let invalid_policy = SyncSettings {
+                    mcp_sensitive_action_policy: "future-policy".to_owned(),
+                    ..settings.clone()
+                };
+                assert!(enforce_tool_policy(tool, || Ok(invalid_policy)).is_err());
+                for category in [resource.category.as_str(), "future-category"] {
+                    let invalid_category = SyncSettings {
+                        mcp_allowed_tool_categories: vec![
+                            "read-only".to_owned(),
+                            category.to_owned(),
+                        ],
+                        ..settings.clone()
+                    };
+                    assert!(enforce_tool_policy(tool, || Ok(invalid_category)).is_err());
+                }
+                let disabled = SyncSettings {
+                    mcp_allowed_tool_categories: vec!["runtime-control".to_owned()],
+                    ..settings
+                };
+                assert!(enforce_tool_policy(tool, || Ok(disabled)).is_err());
+            }
+        }
+    }
+}

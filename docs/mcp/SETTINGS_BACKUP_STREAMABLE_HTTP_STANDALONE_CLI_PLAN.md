@@ -1046,6 +1046,69 @@ adapter are actionable. Coordinated CLI import, other operation families, stdio 
 and independent packaging also remain; unchanged native supervision gates must not
 trigger blocked successors.
 
+### Shared MCP resource catalog and resolver (2026-11-11)
+
+Extracted the five existing descriptors and exact URI-to-tool mappings into
+`scp-core::mcp_resources`. `McpResourceDescriptor` retains its owned String fields,
+Serialize/Clone and camelCase contract; listing preserves all names, categories,
+order and values. Desktop DTO/list paths re-export the shared items. The pure
+resolver returns `Option<&'static str>`, accepting only exact URIs with no trimming,
+case folding, query/fragment interpretation or fallback. It has no execution or
+settings access. Resource categories (`status`, `inventory`, `config`) are metadata,
+not execution-policy categories.
+
+The unchanged public desktop resource reader now uses a private injected-dispatch
+adapter and the shared resolver. Known resources invoke `call_mcp_tool` once with
+an empty JSON object; envelopes and dispatcher errors propagate unchanged. Unknown
+resources do not invoke dispatch and retain `unknown MCP resource: {uri}`, including
+the unmodified supplied URI. All five operations still pass the existing policy
+gate, requiring enabled `read-only`. Unknown policies and any unknown category
+entry reject them. No CLI resource exposure, transport, dependency, credential,
+profile, runtime or command/event contract change is included.
+
+TDD: the core contract target first failed on the absent shared module; desktop
+tests failed on the absent module/dispatch seam (also revealing a test-import
+collision corrected during wiring). Four shared tests now cover exact discovery
+JSON, owned clone behavior, all five mappings and unknown/near-match URIs; the same
+contract runs through desktop re-exports. Desktop adapter tests execute all five
+mappings with empty arguments, one invocation, unchanged success envelopes and
+errors, plus unknown-URI no-dispatch/error preservation. A separate test resolves
+all five resources then executes the actual dispatcher policy gate with both
+policies, unknown policy/category settings, resource labels used as categories and
+disabled read-only. Production adapter-to-dispatcher wiring is a source check,
+complemented by the existing policy-before-action source check. These are not
+HTTP/Tauri/UI end-to-end or handler execution tests. No user files, keyring,
+listener or installed external executable is used by the new tests.
+
+Linux validation: locked desktop tests pass 128 tests (17 existing warnings);
+locked workspace all-feature tests pass 99 tests plus the credential compile-fail
+doctest, with seven ignored subprocess fixtures exercised by acceptance tests.
+Strict workspace all-feature/all-target Clippy, workspace/changed-file formatting,
+locked release CLI build and diff whitespace checks pass. Native Windows/macOS
+remains unqualified; this extraction has no platform-specific code.
+
+Ripwire's pre-edit impact identified 13 downstream symbols for listing, 11 for
+reading and 14 for the descriptor, including HTTP and direct Tauri consumers.
+Edit-check reports the public reader unchanged, and moved list/type as new symbols;
+re-exports and compiler/tests verify compatibility. Static affected selection found
+no tests. The staged test gate exits 4: 12 untested/unmodeled impacts (including a
+Markdown heading), two selected core files with unknown runners, both executed by
+the core target. Inline/included desktop coverage is not selected. Quality delta
+has zero preexisting/gating regressions, no acknowledgments and 11 non-gating new
+test/module reachability findings. Initial duplicate test checks and existing-module
+verbosity findings were resolved by keeping resource gate tests together in their
+own module, using one focused source-wiring assertion, and separating wire and
+ownership checks. This is not a claim of clean static coverage or transport E2E.
+
+Next focused increment: shared operation argument/result schemas with desktop
+adoption and exact wire contracts, beginning with the existing MCP tool response
+envelope and a small read-only operation family after inspecting source/callers.
+Keep runtime execution, transport/auth and CLI enablement separate. Standard desktop
+Streamable HTTP, coordinated CLI import, other operation families, stdio MCP and
+independent packaging remain actionable. Native supervision/keyring/elevation gates
+are unchanged; do not repeat the cgroup spike or spawn blocked successors while
+independent work remains.
+
 Proposed Cargo workspace boundaries:
 
 ```text
