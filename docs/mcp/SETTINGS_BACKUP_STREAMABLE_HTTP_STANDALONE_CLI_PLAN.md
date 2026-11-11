@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace and read-only inventory CLI; runtime extraction and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, read-only inventory CLI, and local profile identity/ownership foundation; runtime extraction and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -62,13 +62,50 @@ strict workspace Clippy, formatting, and a standalone release build. Ripwire qua
 reported no gating regressions; its nine new dead-code findings are the test functions,
 which Cargo successfully executed. Native Windows/macOS checks remain required.
 
-This establishes an initial dependency/build seam, not full runtime parity. Next extract
-profile initialization, a per-profile credential namespace and runtime-owner lock before
-adding any credential access, writes, or long-running commands. Then extract runtime
+This establishes an initial dependency/build seam, not full runtime parity. The next
+increment below adds profile initialization, a per-profile credential namespace and
+runtime-owner lock before any credential access, configuration writes, or long-running commands. Then extract runtime
 stores/events and one operation family with foreground child cleanup. SDK interoperability,
 desktop Streamable HTTP, stdio MCP, settings commands, shell completion, and release
 packaging remain open. The inventory preview deliberately has no `status` command: it
 does not yet own runtime sessions and cannot report another process's memory.
+
+### CLI profile identity and ownership increment (2026-11-11)
+
+`scp-core::profile::ProfileOwner::acquire` now creates/validates versioned local
+`profile.json` metadata under an exclusive, nonblocking OS file lock. A random UUID v4
+namespace is generated once per profile for future credential service/cache keys.
+Metadata is published through a private temporary file without overwriting an existing
+identity. Malformed/unsupported metadata fails closed; initialization never reads the
+keyring or desktop settings. New Unix directories/files use owner-only permissions;
+Windows inherits directory ACLs. Existing directory permissions are not changed.
+
+`scpctl profile init [--json] [--config-dir DIR]` exposes this foundation. It returns
+the stable `credentialNamespace`, or exit 1 with an actionable ownership conflict.
+The guard owns `runtime-owner.lock` until dropped; future runtime/config writers must
+hold it for their entire lifetime. The file remains on disk and must not be unlinked.
+Kernel ownership releases on normal exit or forced process termination, avoiding stale
+PID-file recovery. Read-only inventory does not acquire the lock or initialize metadata.
+The file-lock API requires Rust 1.89+. This is per-profile coordination, not host-wide
+VPN isolation, and does not introduce desktop/CLI shared profiles.
+
+TDD evidence: the profile integration test initially failed to compile because the
+module was absent; the CLI initialization test failed with unknown subcommand/exit 2.
+The implemented tests cover stable/distinct identities, invalid metadata preservation,
+private Unix permissions, competing subprocess ownership, release on EOF/forced exit,
+CLI output/errors, idempotency, and read-only inventory during ownership. Linux checks
+passed: 7 CLI tests, 8 core integration tests (plus the ignored fixture exercised by the
+ownership test), all 101 desktop tests, strict workspace Clippy, formatting, and a locked
+standalone release build. Ripwire quality delta has zero gating regressions; its seven
+new dead-code findings are Cargo test functions. Its test gate reports a Markdown heading
+as untested and does not model all subprocess coverage; actual Cargo results are the
+verification evidence. The desktop's ignored local lockfile needed offline refresh after
+the core dependency change. Native Windows/macOS lock behavior still needs testing.
+
+Next: extract namespace-aware secret-store/cache adapters and runtime stores/events,
+then one operation family with foreground child cleanup. Settings import must retain
+the target identity and never copy the archive's namespace. No keyring/cache isolation
+or runtime cleanup is claimed until those adapters and their integration tests exist.
 
 Proposed Cargo workspace boundaries:
 

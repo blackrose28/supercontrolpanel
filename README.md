@@ -117,19 +117,21 @@ npm run helper:run -- openvpn status
 
 ## Standalone CLI preview
 
-The separate `scpctl` binary runs with the desktop closed and HTTP disabled. This first
-increment supports read-only server inventory; runtime commands and stdio MCP are still
+The separate `scpctl` binary runs with the desktop closed and HTTP disabled. This preview
+supports read-only server inventory and local profile initialization; runtime commands and stdio MCP are still
 planned. The helper above continues to control desktop-owned sessions.
 
 ```bash
 cargo run -p scp-cli -- server list
 cargo run -p scp-cli -- --config-dir /path/to/cli-profile server list --json
+cargo run -p scp-cli -- --config-dir /path/to/cli-profile profile init --json
 cargo build --locked --release -p scp-cli
 cargo test --locked --workspace
 ```
 
 The binary is built in `target/release/` (`scpctl.exe` on Windows). This workspace builds
-without Node.js, Tauri, GTK, WebKit, or desktop assets; it needs only a Rust toolchain.
+without Node.js, Tauri, GTK, WebKit, or desktop assets; it needs Rust 1.89 or newer
+(for standard-library file locking).
 The desktop remains a separate Cargo package under `src-tauri` with its existing commands.
 
 By default, inventory comes from `servers.json` under a separate CLI directory:
@@ -147,6 +149,24 @@ this preview. A missing inventory returns an empty list; unreadable or malformed
 is an error. `--json` produces a server array on stdout; errors always go to stderr.
 Exit codes are `0` for success, `1` for an operation failure, and `2` for invalid arguments.
 Run `scpctl --help` or `scpctl --version` for usage/version information.
+
+`scpctl profile init` creates the selected directory and a versioned `profile.json` with
+a random, stable credential namespace for future keyring/cache isolation. It does not
+access credentials. Repeating initialization preserves the identity; malformed or
+unsupported metadata returns an error without replacing it. Keep this identity local to
+the profile; future settings imports must preserve it rather than copy the source identity.
+Use a separate CLI directory, not the desktop's config directory. On Unix, newly created
+profile directories and metadata/lock files restrict access to their owner; existing
+directory permissions are preserved. Windows uses inherited directory permissions.
+
+Initialization takes an exclusive OS file lock on `runtime-owner.lock` and releases it
+when the command exits. A competing owner fails immediately (exit 1); choose another
+profile or stop the current owner. The lock file remains on disk: **do not delete it**
+to clear ownership. OS locks release on process exit, including forced termination.
+Future runtime and config writers must retain the core ownership guard for their full
+lifetime. Inventory listing stays read-only and can run while a profile is owned.
+This lock coordinates this CLI profile only; it does not isolate host VPN routes or
+external Boundary state. Runtime/child cleanup and keyring/cache adapters remain planned.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.

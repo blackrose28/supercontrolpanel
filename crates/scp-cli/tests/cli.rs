@@ -124,3 +124,67 @@ fn help_and_version_are_available_without_a_profile() {
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("scpctl "));
 }
+
+#[test]
+fn profile_init_creates_only_local_identity_and_is_idempotent() {
+    let temp = tempfile::tempdir().unwrap();
+    let profile = temp.path().join("new-profile");
+    let args = [
+        "--config-dir",
+        profile.to_str().unwrap(),
+        "profile",
+        "init",
+        "--json",
+    ];
+    let output = cli(&args);
+    assert!(output.status.success(), "{output:?}");
+    assert!(output.stderr.is_empty());
+    let value: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert!(value["credentialNamespace"]
+        .as_str()
+        .unwrap()
+        .starts_with("supercontrolpanel-cli-"));
+    let again = cli(&args);
+    assert!(again.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&again.stdout).unwrap(),
+        value
+    );
+    assert_eq!(fs::read_dir(&profile).unwrap().count(), 2);
+    fs::write(profile.join("profile.json"), "invalid-private-metadata").unwrap();
+    let invalid = cli(&args);
+    assert_eq!(invalid.status.code(), Some(1));
+    assert!(invalid.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&invalid.stderr).contains("invalid-private-metadata"));
+}
+
+#[test]
+fn profile_init_reports_owner_conflict_but_inventory_stays_read_only() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = scp_core::profile::ProfileOwner::acquire(temp.path()).unwrap();
+    let before = fs::read(temp.path().join("profile.json")).unwrap();
+    let output = cli(&[
+        "--config-dir",
+        temp.path().to_str().unwrap(),
+        "profile",
+        "init",
+        "--json",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("already owned"));
+    let inventory = cli(&[
+        "--config-dir",
+        temp.path().to_str().unwrap(),
+        "server",
+        "list",
+        "--json",
+    ]);
+    assert!(inventory.status.success());
+    assert_eq!(
+        serde_json::from_slice::<Value>(&inventory.stdout).unwrap(),
+        json!([])
+    );
+    assert_eq!(fs::read(temp.path().join("profile.json")).unwrap(), before);
+    drop(owner);
+}
