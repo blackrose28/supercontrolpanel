@@ -2,7 +2,7 @@ use serde_json::Value;
 use tauri::{AppHandle, State};
 
 use crate::mcp::{
-    call_mcp_tool, list_mcp_resources, list_mcp_tools, mcp_runtime_status, read_mcp_resource,
+    allowed_mcp_resources, allowed_mcp_tools, call_mcp_tool, mcp_runtime_status, read_mcp_resource,
     stop_mcp_runtime, sync_mcp_runtime_from_settings, McpResourceDescriptor, McpRuntimeState,
     McpRuntimeStatus, McpToolCallEnvelope, McpToolDescriptor,
 };
@@ -40,13 +40,13 @@ pub fn mcp_stop_runtime(mcp_state: State<'_, McpRuntimeState>) -> Result<McpRunt
 }
 
 #[tauri::command]
-pub fn mcp_list_tools_command() -> Result<Vec<McpToolDescriptor>, String> {
-    Ok(list_mcp_tools())
+pub fn mcp_list_tools_command(app: AppHandle) -> Result<Vec<McpToolDescriptor>, String> {
+    allowed_mcp_tools(&app)
 }
 
 #[tauri::command]
-pub fn mcp_list_resources_command() -> Result<Vec<McpResourceDescriptor>, String> {
-    Ok(list_mcp_resources())
+pub fn mcp_list_resources_command(app: AppHandle) -> Result<Vec<McpResourceDescriptor>, String> {
+    allowed_mcp_resources(&app)
 }
 
 #[tauri::command]

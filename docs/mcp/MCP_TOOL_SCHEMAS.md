@@ -1,5 +1,9 @@
 # SuperControlPanel MCP Tool Schemas
 
+## Implemented Slice 1 contract
+
+The executable schemas in `src-tauri/src/mcp/validation.rs` and `public_dto.rs`, with [Slice 1 corrections](DESKTOP_STREAMABLE_HTTP_SLICE1.md), describe current legacy `data` payloads. Older examples below are planning context where they differ. Inputs reject unknown fields and invalid types/bounds. Config/settings outputs omit secrets rather than returning password/token fields. Status `message` and transfer title/detail are empty, transfer source/destination are null, and direct SCP result text is a static acknowledgement. `boundaryTokenSource` remains provenance, never a credential. Full standard MCP result wrappers are a later adapter concern.
+
 ## Purpose
 
 This document defines concrete MCP tool input and output shapes for the planned SuperControlPanel MCP server.
@@ -36,7 +40,7 @@ All tools should prefer a consistent result shape:
 {
   "functionId": "boundary-auth",
   "state": "running",
-  "message": "Boundary login in progress",
+  "message": "",
   "boundaryTokenSource": "app",
   "sessionId": "abc123",
   "updatedAtMs": 0

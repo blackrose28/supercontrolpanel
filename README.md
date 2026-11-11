@@ -125,8 +125,12 @@ Current implementation highlights:
 - bearer-token protected
 - localhost-only bind enforcement
 - configurable from the Config page
-- read-only, runtime-control, config-mutation, remote-browser, SCP, config-sync, and git tool coverage
-- sensitive tools can be blocked unless MCP policy is switched to `allow-with-token`
+- one operation registry and fail-closed policy shared by legacy HTTP, resources, and Tauri MCP calls
+- validated arguments, safe public config/status DTOs, and credential-free audit/error responses
+- all launches and mutations require `allow-with-token`; `require-ui-approval` blocks them (no approval queue)
+- MCP callers cannot change MCP/CC authority or local launch configuration; sync import and git operations are blocked pending protected staging/review
+
+[Slice 1 compatibility and test record](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE1.md) documents protected fields, stricter inputs, filtered discovery, and reduced remote diagnostics.
 
 Current HTTP routes:
 

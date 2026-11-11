@@ -14,7 +14,10 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::{
-    mcp::{call_mcp_tool, list_mcp_resources, list_mcp_tools, read_mcp_resource, McpRuntimeStatus},
+    mcp::{
+        allowed_mcp_resources, allowed_mcp_tools, call_mcp_tool, read_mcp_resource,
+        McpRuntimeStatus,
+    },
     services::{config_file_path, ConfigPaths, SyncSettings},
 };
 
@@ -298,16 +301,21 @@ fn handle_http_connection(
     match (request.method.as_str(), request.path.as_str()) {
         ("GET", "/health") | ("GET", "/mcp/status") => {
             let state = app.state::<McpRuntimeState>();
-            let payload =
-                serde_json::to_value(mcp_runtime_status(&state)?).map_err(|e| e.to_string())?;
+            let mut status = mcp_runtime_status(&state)?;
+            status.last_error = status
+                .last_error
+                .map(|_| "MCP listener failed; inspect local desktop diagnostics.".into());
+            let payload = serde_json::to_value(status).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
         }
         ("GET", "/mcp/tools") => {
-            let payload = serde_json::to_value(list_mcp_tools()).map_err(|e| e.to_string())?;
+            let payload =
+                serde_json::to_value(allowed_mcp_tools(app)?).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
         }
         ("GET", "/mcp/resources") => {
-            let payload = serde_json::to_value(list_mcp_resources()).map_err(|e| e.to_string())?;
+            let payload =
+                serde_json::to_value(allowed_mcp_resources(app)?).map_err(|e| e.to_string())?;
             write_json_response(stream, 200, payload)
         }
         ("POST", "/mcp/tools/call") => {
@@ -412,39 +420,7 @@ fn is_authorized(request: &SimpleHttpRequest, token: &str) -> bool {
 }
 
 fn audit_mcp_call(kind: &str, name: &str, args: &Value) {
-    eprintln!(
-        "[MCP audit] kind={kind} name={name} args={}",
-        summarize_args(args)
-    );
-}
-
-fn summarize_args(args: &Value) -> String {
-    let mut value = args.clone();
-    redact_sensitive_fields(&mut value);
-    serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
-}
-
-fn redact_sensitive_fields(value: &mut Value) {
-    match value {
-        Value::Object(map) => {
-            for (key, entry) in map.iter_mut() {
-                if matches!(
-                    key.as_str(),
-                    "password" | "otpSecret" | "oidcPassword" | "oidcOtpSecret" | "mcpAuthToken"
-                ) {
-                    *entry = Value::String("[redacted]".to_string());
-                } else {
-                    redact_sensitive_fields(entry);
-                }
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                redact_sensitive_fields(item);
-            }
-        }
-        _ => {}
-    }
+    eprintln!("{}", super::contracts::audit_summary(kind, name, args));
 }
 
 fn read_http_request(stream: &mut TcpStream) -> Result<SimpleHttpRequest, String> {
@@ -565,10 +541,57 @@ fn write_error_envelope(
         status,
         json!({
             "ok": false,
-            "message": message,
+            "message": safe_http_error(message),
             "data": {},
             "warnings": [],
             "timestamp": now_ms(),
         }),
     )
+}
+
+fn safe_http_error(message: &str) -> String {
+    use super::contracts::{ErrorCode, OperationError};
+    for code in [
+        ErrorCode::PolicyDenied,
+        ErrorCode::InvalidArguments,
+        ErrorCode::CapabilityUnavailable,
+        ErrorCode::NotFound,
+        ErrorCode::Conflict,
+        ErrorCode::Cancelled,
+        ErrorCode::Timeout,
+        ErrorCode::OperationFailed,
+    ] {
+        let safe = OperationError::new(code).legacy_message();
+        if message == safe {
+            return safe;
+        }
+    }
+    match message {
+        "Unauthorized" | "Not found" | "toolName is required" | "uri is required" => message.into(),
+        _ => OperationError::new(ErrorCode::OperationFailed).legacy_message(),
+    }
+}
+
+#[cfg(test)]
+mod slice1_tests {
+    use super::*;
+    #[test]
+    fn legacy_http_errors_do_not_echo_runtime_or_parser_secrets() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+        write_error_envelope(&mut server, 400, "keyring error: unlabelled-secret", || 123).unwrap();
+        drop(server);
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        assert!(!response.contains("unlabelled-secret"));
+        let envelope: Value =
+            serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(envelope["ok"], false);
+        assert_eq!(envelope["timestamp"], 123);
+        assert!(envelope["message"]
+            .as_str()
+            .unwrap()
+            .contains("OPERATION_FAILED"));
+    }
 }

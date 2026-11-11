@@ -2,69 +2,27 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::commands::{
-    close_remote_browser_action, config_git_pull_action, config_git_push_action,
-    create_remote_browser_directory_action, delete_remote_browser_path_action,
-    delete_server_action, get_app_config_action, list_remote_browser_children_action,
-    open_remote_browser_action, save_app_config_action, save_sync_settings_action,
+    close_remote_browser_action, create_remote_browser_directory_action,
+    delete_remote_browser_path_action, delete_server_action, get_app_config_action,
+    list_remote_browser_children_action, open_remote_browser_action, save_app_config_action,
     scp_download_action, scp_upload_action, start_boundary_auth_action, start_caddy_action,
     start_openvpn_manual_action, start_scp_download_action, start_scp_upload_action,
     start_server_ssh_action, start_server_tunnel_action, stat_remote_browser_path_action,
     stop_boundary_auth_action, stop_caddy_action, stop_openvpn_action, stop_server_ssh_action,
-    stop_server_tunnel_action, sync_config_pull_action, sync_config_push_action,
-    upsert_server_action,
+    stop_server_tunnel_action, sync_config_push_action, upsert_server_action,
 };
 use crate::{
     mcp::{McpToolCallEnvelope, McpToolDescriptor},
     server_mgmt::{load_servers, Server},
     services::{
         get_scp_transfer_entry, list_scp_transfer_entries, load_sync_settings_from_disk,
-        ConfigPaths, SyncSettingsPatch,
+        save_sync_settings_to_disk, ConfigPaths,
     },
     stores::{
         BoundaryAutomationStore, FunctionStore, OpenVpnAdminStore, RemoteBrowserStore,
         ScpTransferStore, SessionStore,
     },
 };
-
-fn redact_app_config_value(value: Value) -> Value {
-    let mut value = value;
-    if let Some(openvpn) = value.get_mut("openvpn").and_then(Value::as_object_mut) {
-        openvpn.insert(
-            "password".to_string(),
-            Value::String("[redacted]".to_string()),
-        );
-        openvpn.insert(
-            "otpSecret".to_string(),
-            Value::String("[redacted]".to_string()),
-        );
-    }
-    if let Some(boundary) = value.get_mut("boundary").and_then(Value::as_object_mut) {
-        boundary.insert(
-            "password".to_string(),
-            Value::String("[redacted]".to_string()),
-        );
-        boundary.insert(
-            "oidcPassword".to_string(),
-            Value::String("[redacted]".to_string()),
-        );
-        boundary.insert(
-            "oidcOtpSecret".to_string(),
-            Value::String("[redacted]".to_string()),
-        );
-    }
-    value
-}
-
-fn redact_sync_settings_value(value: Value) -> Value {
-    let mut value = value;
-    if let Some(settings) = value.as_object_mut() {
-        settings.insert(
-            "mcpAuthToken".to_string(),
-            Value::String("[redacted]".to_string()),
-        );
-    }
-    value
-}
 
 fn merge_json_value(target: &mut Value, patch: &Value) {
     match (target, patch) {
@@ -84,295 +42,39 @@ fn merge_json_value(target: &mut Value, patch: &Value) {
     }
 }
 
-fn is_sensitive_tool(tool_name: &str) -> bool {
-    matches!(
-        tool_name,
-        "openvpn_start"
-            | "openvpn_stop"
-            | "boundary_auth_start"
-            | "server_delete"
-            | "remote_browser_delete_path"
-            | "scp_upload"
-            | "scp_download"
-            | "scp_start_upload"
-            | "scp_start_download"
-            | "config_sync_push"
-            | "config_git_push"
-    )
-}
-
-fn tool_category(tool_name: &str) -> Option<String> {
-    list_mcp_tools()
-        .into_iter()
-        .find(|tool| tool.name == tool_name)
-        .map(|tool| tool.category)
-}
-
-fn enforce_tool_policy(app: &AppHandle, tool_name: &str) -> Result<(), String> {
-    let settings = load_sync_settings_from_disk(app, "sync-local.json")?;
-    if let Some(category) = tool_category(tool_name) {
-        if !settings
-            .mcp_allowed_tool_categories
-            .iter()
-            .any(|item| item == &category)
-        {
-            return Err(format!(
-                "MCP tool category is disabled by settings: {category}"
-            ));
-        }
-    }
-    if settings.mcp_sensitive_action_policy == "require-ui-approval" && is_sensitive_tool(tool_name)
-    {
-        return Err(format!(
-            "Sensitive MCP tool requires UI approval and is currently blocked over HTTP: {tool_name}"
-        ));
-    }
-    Ok(())
-}
-
 pub fn list_mcp_tools() -> Vec<McpToolDescriptor> {
-    vec![
-        McpToolDescriptor {
-            name: "app_get_overview".to_string(),
-            title: "App overview".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "function_status_list".to_string(),
-            title: "List function statuses".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "function_status_get".to_string(),
-            title: "Get one function status".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "openvpn_get_status".to_string(),
-            title: "OpenVPN status".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "boundary_get_status".to_string(),
-            title: "Boundary status".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "servers_list".to_string(),
-            title: "List servers".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "server_get".to_string(),
-            title: "Get server".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "config_get_paths".to_string(),
-            title: "Get config paths".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "openvpn_start".to_string(),
-            title: "Start OpenVPN".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "openvpn_stop".to_string(),
-            title: "Stop OpenVPN".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "boundary_auth_start".to_string(),
-            title: "Start Boundary auth".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "boundary_auth_stop".to_string(),
-            title: "Stop Boundary auth".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "server_tunnel_start".to_string(),
-            title: "Start server tunnel".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "server_tunnel_stop".to_string(),
-            title: "Stop server tunnel".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "server_ssh_start".to_string(),
-            title: "Start server SSH".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "server_ssh_stop".to_string(),
-            title: "Stop server SSH".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "caddy_start".to_string(),
-            title: "Start Caddy".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "caddy_stop".to_string(),
-            title: "Stop Caddy".to_string(),
-            category: "runtime-control".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "server_upsert".to_string(),
-            title: "Create or update server".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "server_delete".to_string(),
-            title: "Delete server".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "config_save".to_string(),
-            title: "Save full app config".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "config_save_partial".to_string(),
-            title: "Patch app config".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "sync_settings_get".to_string(),
-            title: "Get device-local sync settings".to_string(),
-            category: "read-only".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "sync_settings_save_partial".to_string(),
-            title: "Patch device-local sync settings".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "remote_browser_open".to_string(),
-            title: "Open remote browser session".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "remote_browser_close".to_string(),
-            title: "Close remote browser session".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "remote_browser_list_children".to_string(),
-            title: "List remote browser children".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "remote_browser_stat_path".to_string(),
-            title: "Stat remote browser path".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "remote_browser_create_directory".to_string(),
-            title: "Create remote directory".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "remote_browser_delete_path".to_string(),
-            title: "Delete remote path".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "scp_upload".to_string(),
-            title: "Run SCP upload".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "scp_download".to_string(),
-            title: "Run SCP download".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "scp_start_upload".to_string(),
-            title: "Start PTY-backed SCP upload".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "scp_start_download".to_string(),
-            title: "Start PTY-backed SCP download".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "scp_transfer_list".to_string(),
-            title: "List SCP transfers".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "scp_transfer_get".to_string(),
-            title: "Get one SCP transfer".to_string(),
-            category: "file-transfer".to_string(),
-            read_only: true,
-        },
-        McpToolDescriptor {
-            name: "config_sync_pull".to_string(),
-            title: "Pull synced config from repo".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "config_sync_push".to_string(),
-            title: "Push synced config to repo".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "config_git_pull".to_string(),
-            title: "Run git pull for config repo".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-        McpToolDescriptor {
-            name: "config_git_push".to_string(),
-            title: "Run git add/commit/push for config repo".to_string(),
-            category: "config-mutation".to_string(),
-            read_only: false,
-        },
-    ]
+    super::contracts::OPERATIONS
+        .iter()
+        .map(|op| McpToolDescriptor {
+            name: op.name.into(),
+            title: op.title.into(),
+            category: op.category.into(),
+            read_only: op.read_only,
+        })
+        .collect()
+}
+
+pub fn allowed_mcp_tools(app: &AppHandle) -> Result<Vec<McpToolDescriptor>, String> {
+    let settings = load_sync_settings_from_disk(app, "sync-local.json").map_err(|_| {
+        super::contracts::OperationError::new(super::contracts::ErrorCode::OperationFailed)
+            .legacy_message()
+    })?;
+    let categories: Vec<_> = settings
+        .mcp_allowed_tool_categories
+        .iter()
+        .map(String::as_str)
+        .collect();
+    Ok(list_mcp_tools()
+        .into_iter()
+        .filter(|op| {
+            super::contracts::authorize(
+                &op.name,
+                &settings.mcp_sensitive_action_policy,
+                &categories,
+            )
+            .is_ok()
+        })
+        .collect())
 }
 
 pub fn call_mcp_tool(
@@ -384,9 +86,52 @@ pub fn call_mcp_tool(
     boundary_auth_function_id: &str,
     config_paths: fn(&AppHandle) -> Result<ConfigPaths, String>,
 ) -> Result<McpToolCallEnvelope, String> {
-    enforce_tool_policy(app, tool_name)?;
-    let data = match tool_name {
-        "app_get_overview" => {
+    // Preserve the existing backup/recovery lease through validation and mutation.
+    let _guard = crate::settings_backup::gate::enter().map_err(|_| {
+        super::contracts::OperationError::new(super::contracts::ErrorCode::Conflict)
+            .legacy_message()
+    })?;
+    let settings = load_sync_settings_from_disk(app, "sync-local.json").map_err(|_| {
+        super::contracts::OperationError::new(super::contracts::ErrorCode::OperationFailed)
+            .legacy_message()
+    })?;
+    let categories: Vec<_> = settings
+        .mcp_allowed_tool_categories
+        .iter()
+        .map(String::as_str)
+        .collect();
+    super::contracts::execute(
+        tool_name,
+        &settings.mcp_sensitive_action_policy,
+        &categories,
+        &args,
+        |op| {
+            dispatch_mcp_tool(
+                app,
+                op,
+                args.clone(),
+                now_ms,
+                openvpn_function_id,
+                boundary_auth_function_id,
+                config_paths,
+            )
+        },
+    )
+    .map_err(|err| err.legacy_message())
+}
+
+fn dispatch_mcp_tool(
+    app: &AppHandle,
+    operation: &super::contracts::Operation,
+    args: Value,
+    now_ms: fn() -> u64,
+    openvpn_function_id: &str,
+    boundary_auth_function_id: &str,
+    config_paths: fn(&AppHandle) -> Result<ConfigPaths, String>,
+) -> Result<McpToolCallEnvelope, String> {
+    let mut data = match operation.handler {
+        // Exhaustive matching makes adding an advertised operation require a host decision.
+        super::contracts::Handler::AppGetOverview => {
             let function_store = app.state::<FunctionStore>();
             let statuses = function_store
                 .statuses
@@ -402,15 +147,18 @@ pub fn call_mcp_tool(
                 "knownFunctionCount": statuses.len(),
             })
         }
-        "function_status_list" => {
+        super::contracts::Handler::FunctionStatusList => {
             let function_store = app.state::<FunctionStore>();
             let statuses = function_store
                 .statuses
                 .lock()
                 .map_err(|_| "function status lock poisoned".to_string())?;
-            json!(statuses.values().cloned().collect::<Vec<_>>())
+            json!(statuses
+                .values()
+                .map(super::public_dto::SafeFunctionStatus::from)
+                .collect::<Vec<_>>())
         }
-        "function_status_get" => {
+        super::contracts::Handler::FunctionStatusGet => {
             let function_id = args
                 .get("functionId")
                 .and_then(Value::as_str)
@@ -424,26 +172,30 @@ pub fn call_mcp_tool(
                 .get(function_id)
                 .cloned()
                 .ok_or_else(|| "function status not found".to_string())?;
-            json!(status)
+            json!(super::public_dto::SafeFunctionStatus::from(&status))
         }
-        "openvpn_get_status" => {
+        super::contracts::Handler::OpenvpnGetStatus => {
             let function_store = app.state::<FunctionStore>();
             let statuses = function_store
                 .statuses
                 .lock()
                 .map_err(|_| "function status lock poisoned".to_string())?;
-            json!(statuses.get(openvpn_function_id).cloned())
+            json!(statuses
+                .get(openvpn_function_id)
+                .map(super::public_dto::SafeFunctionStatus::from))
         }
-        "boundary_get_status" => {
+        super::contracts::Handler::BoundaryGetStatus => {
             let function_store = app.state::<FunctionStore>();
             let statuses = function_store
                 .statuses
                 .lock()
                 .map_err(|_| "function status lock poisoned".to_string())?;
-            json!(statuses.get(boundary_auth_function_id).cloned())
+            json!(statuses
+                .get(boundary_auth_function_id)
+                .map(super::public_dto::SafeFunctionStatus::from))
         }
-        "servers_list" => json!(load_servers(app)?),
-        "server_get" => {
+        super::contracts::Handler::ServersList => json!(load_servers(app)?),
+        super::contracts::Handler::ServerGet => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -454,8 +206,8 @@ pub fn call_mcp_tool(
                 .ok_or_else(|| "server not found".to_string())?;
             json!(server)
         }
-        "config_get_paths" => json!(config_paths(app)?),
-        "openvpn_start" => {
+        super::contracts::Handler::ConfigGetPaths => json!(config_paths(app)?),
+        super::contracts::Handler::OpenvpnStart => {
             let username = args
                 .get("username")
                 .and_then(Value::as_str)
@@ -477,7 +229,7 @@ pub fn call_mcp_tool(
             )?;
             json!(result)
         }
-        "openvpn_stop" => {
+        super::contracts::Handler::OpenvpnStop => {
             stop_openvpn_action(
                 app.clone(),
                 app.state::<SessionStore>(),
@@ -486,7 +238,7 @@ pub fn call_mcp_tool(
             )?;
             json!({})
         }
-        "boundary_auth_start" => {
+        super::contracts::Handler::BoundaryAuthStart => {
             let cols = args.get("cols").and_then(Value::as_u64).unwrap_or(120) as u16;
             let rows = args.get("rows").and_then(Value::as_u64).unwrap_or(36) as u16;
             let result = start_boundary_auth_action(
@@ -499,7 +251,7 @@ pub fn call_mcp_tool(
             )?;
             json!(result)
         }
-        "boundary_auth_stop" => {
+        super::contracts::Handler::BoundaryAuthStop => {
             stop_boundary_auth_action(
                 app.clone(),
                 app.state::<SessionStore>(),
@@ -508,7 +260,7 @@ pub fn call_mcp_tool(
             )?;
             json!({})
         }
-        "server_tunnel_start" => {
+        super::contracts::Handler::ServerTunnelStart => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -527,7 +279,7 @@ pub fn call_mcp_tool(
             )?;
             json!(result)
         }
-        "server_tunnel_stop" => {
+        super::contracts::Handler::ServerTunnelStop => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -542,7 +294,7 @@ pub fn call_mcp_tool(
             )?;
             json!({})
         }
-        "server_ssh_start" => {
+        super::contracts::Handler::ServerSshStart => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -561,7 +313,7 @@ pub fn call_mcp_tool(
             )?;
             json!(result)
         }
-        "server_ssh_stop" => {
+        super::contracts::Handler::ServerSshStop => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -575,7 +327,7 @@ pub fn call_mcp_tool(
             )?;
             json!({})
         }
-        "caddy_start" => {
+        super::contracts::Handler::CaddyStart => {
             let folder = args
                 .get("folder")
                 .and_then(Value::as_str)
@@ -593,7 +345,7 @@ pub fn call_mcp_tool(
             )?;
             json!(result)
         }
-        "caddy_stop" => {
+        super::contracts::Handler::CaddyStop => {
             stop_caddy_action(
                 app.clone(),
                 app.state::<SessionStore>(),
@@ -601,7 +353,7 @@ pub fn call_mcp_tool(
             )?;
             json!({})
         }
-        "server_upsert" => {
+        super::contracts::Handler::ServerUpsert => {
             let server_value = args
                 .get("server")
                 .cloned()
@@ -612,7 +364,7 @@ pub fn call_mcp_tool(
                 upsert_server_action(app.clone(), server, app.state::<RemoteBrowserStore>())?;
             json!(servers)
         }
-        "server_delete" => {
+        super::contracts::Handler::ServerDelete => {
             let id = args
                 .get("id")
                 .and_then(Value::as_str)
@@ -621,17 +373,20 @@ pub fn call_mcp_tool(
             let servers = delete_server_action(app.clone(), id, app.state::<RemoteBrowserStore>())?;
             json!(servers)
         }
-        "config_save" => {
+        super::contracts::Handler::ConfigSave => {
             let config_value = args
                 .get("config")
                 .cloned()
                 .ok_or_else(|| "config is required".to_string())?;
             let config =
                 serde_json::from_value(config_value).map_err(|e| format!("invalid config: {e}"))?;
+            let current = get_app_config_action(app.clone())?;
+            super::validation::protect_config_replacement(&json!(current), &json!(config))
+                .map_err(|err| err.legacy_message())?;
             let saved = save_app_config_action(app.clone(), config)?;
-            redact_app_config_value(json!(saved))
+            json!(super::public_dto::SafeAppConfig::from(&saved))
         }
-        "config_save_partial" => {
+        super::contracts::Handler::ConfigSavePartial => {
             let patch = args
                 .get("patch")
                 .cloned()
@@ -643,27 +398,27 @@ pub fn call_mcp_tool(
             let merged = serde_json::from_value(current_value)
                 .map_err(|e| format!("invalid merged config: {e}"))?;
             let saved = save_app_config_action(app.clone(), merged)?;
-            redact_app_config_value(json!(saved))
+            json!(super::public_dto::SafeAppConfig::from(&saved))
         }
-        "sync_settings_get" => {
+        super::contracts::Handler::SyncSettingsGet => {
             let settings = load_sync_settings_from_disk(app, "sync-local.json")?;
-            redact_sync_settings_value(json!(settings))
+            json!(super::public_dto::SafeSyncSettings::from(&settings))
         }
-        "sync_settings_save_partial" => {
+        super::contracts::Handler::SyncSettingsSavePartial => {
             let patch_value = args
                 .get("patch")
                 .cloned()
                 .ok_or_else(|| "patch is required".to_string())?;
-            let patch: SyncSettingsPatch = serde_json::from_value(patch_value)
-                .map_err(|e| format!("invalid sync settings patch: {e}"))?;
-            let saved = save_sync_settings_action(
-                app.clone(),
-                patch,
-                app.state::<crate::mcp::McpRuntimeState>(),
-            )?;
-            redact_sync_settings_value(json!(saved))
+            let mut saved = load_sync_settings_from_disk(app, "sync-local.json")?;
+            // The public patch cannot reconfigure the listener or activate CC.
+            // Do not call the local settings action: it restarts the listener, including this worker.
+            if let Some(repo_root) = patch_value.get("repoRoot").and_then(Value::as_str) {
+                saved.repo_root = repo_root.into();
+            }
+            save_sync_settings_to_disk(app, &saved, "sync-local.json")?;
+            json!(super::public_dto::SafeSyncSettings::from(&saved))
         }
-        "remote_browser_open" => {
+        super::contracts::Handler::RemoteBrowserOpen => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -677,7 +432,7 @@ pub fn call_mcp_tool(
             )?;
             json!(session)
         }
-        "remote_browser_close" => {
+        super::contracts::Handler::RemoteBrowserClose => {
             let browser_id = args
                 .get("browserId")
                 .and_then(Value::as_str)
@@ -686,7 +441,7 @@ pub fn call_mcp_tool(
             close_remote_browser_action(browser_id, app.state::<RemoteBrowserStore>())?;
             json!({})
         }
-        "remote_browser_list_children" => {
+        super::contracts::Handler::RemoteBrowserListChildren => {
             let browser_id = args
                 .get("browserId")
                 .and_then(Value::as_str)
@@ -704,7 +459,7 @@ pub fn call_mcp_tool(
             )?;
             json!(entries)
         }
-        "remote_browser_stat_path" => {
+        super::contracts::Handler::RemoteBrowserStatPath => {
             let browser_id = args
                 .get("browserId")
                 .and_then(Value::as_str)
@@ -722,7 +477,7 @@ pub fn call_mcp_tool(
             )?;
             json!(info)
         }
-        "remote_browser_create_directory" => {
+        super::contracts::Handler::RemoteBrowserCreateDirectory => {
             let browser_id = args
                 .get("browserId")
                 .and_then(Value::as_str)
@@ -740,7 +495,7 @@ pub fn call_mcp_tool(
             )?;
             json!({})
         }
-        "remote_browser_delete_path" => {
+        super::contracts::Handler::RemoteBrowserDeletePath => {
             let browser_id = args
                 .get("browserId")
                 .and_then(Value::as_str)
@@ -760,7 +515,7 @@ pub fn call_mcp_tool(
             )?;
             json!({})
         }
-        "scp_upload" => {
+        super::contracts::Handler::ScpUpload => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -777,7 +532,7 @@ pub fn call_mcp_tool(
                 .ok_or_else(|| "remotePath is required".to_string())?
                 .to_string();
             let recursive = args.get("recursive").and_then(Value::as_bool);
-            let result = scp_upload_action(
+            let _result = scp_upload_action(
                 app.clone(),
                 server_id,
                 local_path,
@@ -785,9 +540,9 @@ pub fn call_mcp_tool(
                 recursive,
                 app.state::<ScpTransferStore>(),
             )?;
-            json!({ "result": result })
+            json!({ "result": "Operation completed; inspect the local desktop for details." })
         }
-        "scp_download" => {
+        super::contracts::Handler::ScpDownload => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -804,7 +559,7 @@ pub fn call_mcp_tool(
                 .ok_or_else(|| "localPath is required".to_string())?
                 .to_string();
             let recursive = args.get("recursive").and_then(Value::as_bool);
-            let result = scp_download_action(
+            let _result = scp_download_action(
                 app.clone(),
                 server_id,
                 remote_path,
@@ -812,9 +567,9 @@ pub fn call_mcp_tool(
                 recursive,
                 app.state::<ScpTransferStore>(),
             )?;
-            json!({ "result": result })
+            json!({ "result": "Operation completed; inspect the local desktop for details." })
         }
-        "scp_start_upload" => {
+        super::contracts::Handler::ScpStartUpload => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -842,7 +597,7 @@ pub fn call_mcp_tool(
             )?;
             json!({ "sessionId": session_id })
         }
-        "scp_start_download" => {
+        super::contracts::Handler::ScpStartDownload => {
             let server_id = args
                 .get("serverId")
                 .and_then(Value::as_str)
@@ -870,29 +625,26 @@ pub fn call_mcp_tool(
             )?;
             json!({ "sessionId": session_id })
         }
-        "scp_transfer_list" => {
+        super::contracts::Handler::ScpTransferList => {
             let entries = list_scp_transfer_entries(&app.state::<ScpTransferStore>())?;
-            json!(entries)
+            json!(entries
+                .iter()
+                .map(super::public_dto::SafeTransfer::from)
+                .collect::<Vec<_>>())
         }
-        "scp_transfer_get" => {
+        super::contracts::Handler::ScpTransferGet => {
             let transfer_id = args
                 .get("transferId")
                 .and_then(Value::as_str)
                 .ok_or_else(|| "transferId is required".to_string())?;
             let entry = get_scp_transfer_entry(&app.state::<ScpTransferStore>(), transfer_id)?
                 .ok_or_else(|| "transfer not found".to_string())?;
-            json!(entry)
+            json!(super::public_dto::SafeTransfer::from(&entry))
         }
-        "config_sync_pull" => {
-            let repo_root = args
-                .get("repoRoot")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "repoRoot is required".to_string())?
-                .to_string();
-            sync_config_pull_action(app.clone(), repo_root)?;
-            json!({})
+        super::contracts::Handler::ConfigSyncPull => {
+            return Err("MCP capability unavailable".into())
         }
-        "config_sync_push" => {
+        super::contracts::Handler::ConfigSyncPush => {
             let repo_root = args
                 .get("repoRoot")
                 .and_then(Value::as_str)
@@ -901,32 +653,133 @@ pub fn call_mcp_tool(
             sync_config_push_action(app.clone(), repo_root)?;
             json!({})
         }
-        "config_git_pull" => {
-            let repo_root = args
-                .get("repoRoot")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "repoRoot is required".to_string())?
-                .to_string();
-            let result = config_git_pull_action(repo_root)?;
-            json!({ "result": result })
-        }
-        "config_git_push" => {
-            let repo_root = args
-                .get("repoRoot")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "repoRoot is required".to_string())?
-                .to_string();
-            let result = config_git_push_action(repo_root)?;
-            json!({ "result": result })
-        }
-        _ => return Err(format!("unknown MCP tool: {tool_name}")),
+        super::contracts::Handler::ConfigGitPull => return Err("MCP capability unavailable".into()),
+        super::contracts::Handler::ConfigGitPush => return Err("MCP capability unavailable".into()),
     };
 
+    super::contracts::redact_fields(&mut data);
+    if !super::validation::conforms(&super::validation::output_schema(operation), &data) {
+        return Err("MCP host returned an invalid public result".into());
+    }
     Ok(McpToolCallEnvelope {
         ok: true,
-        message: format!("{tool_name} completed"),
+        message: "MCP operation completed".into(),
         data,
         warnings: vec!["Minimal localhost HTTP transport is enabled; full MCP spec compatibility is still in progress.".to_string()],
         timestamp: now_ms(),
     })
+}
+
+#[cfg(test)]
+mod slice1_tests {
+    use super::*;
+
+    #[test]
+    fn every_launch_and_mutation_is_sensitive() {
+        for name in [
+            "openvpn_start",
+            "openvpn_stop",
+            "boundary_auth_start",
+            "boundary_auth_stop",
+            "server_tunnel_start",
+            "server_tunnel_stop",
+            "server_ssh_start",
+            "server_ssh_stop",
+            "caddy_start",
+            "caddy_stop",
+            "server_upsert",
+            "server_delete",
+            "config_save",
+            "config_save_partial",
+            "sync_settings_save_partial",
+            "remote_browser_open",
+            "remote_browser_close",
+            "remote_browser_create_directory",
+            "remote_browser_delete_path",
+            "scp_upload",
+            "scp_download",
+            "scp_start_upload",
+            "scp_start_download",
+            "config_sync_pull",
+            "config_sync_push",
+            "config_git_pull",
+            "config_git_push",
+        ] {
+            assert!(
+                !super::super::contracts::operation(name).unwrap().read_only,
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_outputs_are_allowlists_and_drop_future_secret_fields() {
+        let settings = json!(
+            serde_json::from_value::<super::super::public_dto::SafeSyncSettings>(
+                json!({"repoRoot":"repo", "futureSecret":"leak", "ccAgentToken":"cc-secret"})
+            )
+            .unwrap()
+        );
+        assert!(settings.get("futureSecret").is_none());
+        let config = json!(serde_json::from_value::<super::super::public_dto::SafeAppConfig>(json!({"app":{"defaultTerminalCols":100,"defaultTerminalRows":30},"futureSecret":"leak", "openvpn":{"password":"secret"}})).unwrap());
+        assert!(config.get("futureSecret").is_none());
+        assert!(!config.to_string().contains("secret"));
+    }
+
+    #[test]
+    fn desktop_conversions_exclude_credentials_and_remote_diagnostics() {
+        use super::super::public_dto::*;
+        let mut config = crate::services::default_app_config();
+        config.openvpn.password = "sentinel-secret".into();
+        config.openvpn.otp_secret = "sentinel-secret".into();
+        config.openvpn.extra_args = "sentinel-secret".into();
+        config.boundary.password = "sentinel-secret".into();
+        config.boundary.oidc_password = "sentinel-secret".into();
+        config.boundary.oidc_otp_secret = "sentinel-secret".into();
+        assert!(!json!(SafeAppConfig::from(&config))
+            .to_string()
+            .contains("sentinel-secret"));
+        let status = crate::models::FunctionStatus {
+            function_id: "boundary-auth".into(),
+            state: "running".into(),
+            message: "sentinel-secret".into(),
+            boundary_token_source: Some("app".into()),
+            session_id: Some("session".into()),
+            updated_at_ms: 123,
+        };
+        let mut value = json!(SafeFunctionStatus::from(&status));
+        super::super::contracts::redact_fields(&mut value);
+        assert!(!value.to_string().contains("sentinel-secret"));
+        assert_eq!(value["boundaryTokenSource"], "app");
+        assert_eq!(value["sessionId"], "session");
+        assert_eq!(value["updatedAtMs"], 123);
+        let entry = crate::models::ScpTransferEntry {
+            id: "transfer".into(),
+            title: "sentinel-secret".into(),
+            detail: "sentinel-secret".into(),
+            state: crate::models::ScpTransferState::Error,
+            created_at_ms: 1,
+            updated_at_ms: 2,
+            progress_percent: Some(50),
+            source: Some("sentinel-secret".into()),
+            destination: Some("sentinel-secret".into()),
+            session_id: Some("session".into()),
+        };
+        let value = json!(SafeTransfer::from(&entry));
+        assert!(!value.to_string().contains("sentinel-secret"));
+        assert_eq!(value["progressPercent"], 50);
+        assert_eq!(value["state"], "error");
+    }
+
+    #[test]
+    fn local_settings_never_expose_cc_credentials() {
+        let mut settings = crate::services::SyncSettings::default();
+        settings.repo_root = "repo".into();
+        settings.cc_agent_token = "cc-secret".into();
+        settings.mcp_auth_token = "mcp-secret".into();
+        let value = json!(super::super::public_dto::SafeSyncSettings::from(&settings));
+        assert!(!value.to_string().contains("cc-secret"));
+        assert!(!value.to_string().contains("mcp-secret"));
+        assert_eq!(value["repoRoot"], "repo");
+    }
 }

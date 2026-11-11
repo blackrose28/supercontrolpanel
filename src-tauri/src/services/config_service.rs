@@ -223,8 +223,12 @@ pub fn load_sync_settings_from_disk(
     }
     let raw =
         fs::read_to_string(&path).map_err(|e| format!("failed to read sync settings: {e}"))?;
+    decode_sync_settings(&raw)
+}
+
+fn decode_sync_settings(raw: &str) -> Result<SyncSettings, String> {
     let mut settings: SyncSettings =
-        serde_json::from_str(&raw).map_err(|e| format!("invalid sync settings format: {e}"))?;
+        serde_json::from_str(raw).map_err(|e| format!("invalid sync settings format: {e}"))?;
     if settings.mcp_auth_token.trim().is_empty() {
         settings.mcp_auth_token = generate_mcp_auth_token();
     }
@@ -233,12 +237,6 @@ pub fn load_sync_settings_from_disk(
     }
     if settings.mcp_port == 0 {
         settings.mcp_port = default_mcp_port();
-    }
-    if settings.mcp_allowed_tool_categories.is_empty() {
-        settings.mcp_allowed_tool_categories = default_mcp_allowed_tool_categories();
-    }
-    if settings.mcp_sensitive_action_policy.trim().is_empty() {
-        settings.mcp_sensitive_action_policy = default_mcp_sensitive_action_policy();
     }
     Ok(settings)
 }
@@ -513,5 +511,25 @@ mod tests {
         let json = r#"{"ccServerUrl":"http://example.com"}"#;
         let patch: SyncSettingsPatch = serde_json::from_str(json).expect("should deserialize");
         assert!(patch.first_run_completed.is_none());
+    }
+}
+
+#[cfg(test)]
+mod mcp_policy_settings_tests {
+    use super::*;
+    #[test]
+    fn explicit_empty_policy_and_categories_are_not_replaced_by_permissions() {
+        let settings = decode_sync_settings(
+            r#"{"mcpSensitiveActionPolicy":"","mcpAllowedToolCategories":[]}"#,
+        )
+        .unwrap();
+        assert!(settings.mcp_allowed_tool_categories.is_empty());
+        assert!(settings.mcp_sensitive_action_policy.is_empty());
+        let missing: SyncSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.mcp_sensitive_action_policy, "require-ui-approval");
+        assert_eq!(
+            missing.mcp_allowed_tool_categories,
+            default_mcp_allowed_tool_categories()
+        );
     }
 }

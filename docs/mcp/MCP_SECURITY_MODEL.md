@@ -29,6 +29,10 @@ The MCP layer should never return these values by default:
 
 Config-reading tools should return redacted summaries.
 
+## Current Slice 1 boundary
+
+The [Slice 1 contract and evidence](DESKTOP_STREAMABLE_HTTP_SLICE1.md) is authoritative for the shipped legacy MCP paths. The registry and schemas enforce policy before host dispatch. MCP/CC authority and local launch settings are protected; unsafe sync imports and git actions are unavailable remotely. Discovery is filtered by the same policy as calls and resources. Unknown policy/category values fail closed. Explicit empty categories grant no access.
+
 ## Tool sensitivity levels
 
 Recommended levels:
@@ -48,16 +52,7 @@ Current implementation status:
 - when policy is `require-ui-approval`, sensitive MCP tools are rejected over HTTP with an explicit error
 - switching the policy to `allow-with-token` allows those tools to run with bearer-token auth alone
 
-Recommended candidates:
-
-- `openvpn_start`
-- `openvpn_stop`
-- `boundary_auth_start`
-- `server_delete`
-- `remote_browser_delete_path`
-- `scp_upload`
-- `config_sync_push`
-- `config_git_push`
+All launches, stops, config/server writes, remote-browser open/close/mkdir/delete, transfers, and shared-config push are sensitive. Browser list/stat and transfer/status reads are read-only within their own categories. MCP callers cannot change this classification or their policy.
 
 ## Auditability
 
@@ -66,12 +61,12 @@ Log MCP activity with:
 - timestamp
 - tool name
 - caller/session id if available
-- arguments summary with redaction
+- no argument values (including nested values or apparently harmless fields)
 - result status
 
 Current implementation status:
 
-- MCP HTTP tool/resource calls are logged to stderr with redacted argument summaries
+- MCP HTTP tool/resource calls log only a fixed call kind and a registry-resolved operation name to stderr; unknown names are replaced with `unknown`
 
 ## Safe defaults for responses
 
@@ -81,8 +76,9 @@ Current implementation status:
 
 Current implementation status:
 
-- config-related MCP outputs redact keyring-backed secrets
-- sync-settings MCP outputs redact the MCP auth token
+- dedicated public config/settings DTOs omit keyring secrets and MCP/CC tokens
+- status messages, raw transfer diagnostics/paths, and command result text are suppressed remotely
+- schema checks and recursive secret-field redaction guard public results; runtime/parser errors become safe classified messages
 - HTTP transport errors return a standardized JSON envelope with `ok`, `message`, `data`, `warnings`, and `timestamp`
 
 ## Future hardening ideas

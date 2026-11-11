@@ -1,0 +1,785 @@
+use super::validation::validate_arguments;
+use serde::Serialize;
+use serde_json::{json, Value};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ErrorCode {
+    PolicyDenied,
+    InvalidArguments,
+    CapabilityUnavailable,
+    NotFound,
+    Conflict,
+    Cancelled,
+    Timeout,
+    OperationFailed,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationError {
+    pub code: ErrorCode,
+    pub message: &'static str,
+    pub retryable: bool,
+}
+impl OperationError {
+    pub fn new(code: ErrorCode) -> Self {
+        let message = match code {
+            ErrorCode::PolicyDenied => "MCP policy denied this operation. Use local desktop settings or controls.",
+            ErrorCode::InvalidArguments => "Invalid MCP arguments or protected configuration fields.",
+            ErrorCode::CapabilityUnavailable => "This MCP operation is unavailable until its protected execution path is reviewed. Use local desktop controls.",
+            ErrorCode::NotFound => "Requested item was not found.",
+            ErrorCode::Conflict => "Operation conflicts with current state. Query state before retrying.",
+            ErrorCode::Cancelled => "Operation was cancelled. Query state before retrying.",
+            ErrorCode::Timeout => "Operation timed out. Query state before retrying.",
+            ErrorCode::OperationFailed => "Operation failed. Inspect the local desktop for details; query state before retrying.",
+        };
+        Self {
+            code,
+            message,
+            retryable: false,
+        }
+    }
+    pub fn legacy_message(&self) -> String {
+        format!(
+            "{}: {}",
+            serde_json::to_value(self.code).unwrap().as_str().unwrap(),
+            self.message
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Capability {
+    Desktop,
+    ProtectedImport,
+    ReviewedGit,
+}
+#[derive(Debug, Clone, Copy)]
+pub enum Lifetime {
+    Query,
+    Request,
+    DesktopOwned,
+    Stop,
+    Mutation,
+}
+#[derive(Debug, Clone, Copy)]
+pub enum Handler {
+    AppGetOverview,
+    FunctionStatusList,
+    FunctionStatusGet,
+    OpenvpnGetStatus,
+    BoundaryGetStatus,
+    ServersList,
+    ServerGet,
+    ConfigGetPaths,
+    OpenvpnStart,
+    OpenvpnStop,
+    BoundaryAuthStart,
+    BoundaryAuthStop,
+    ServerTunnelStart,
+    ServerTunnelStop,
+    ServerSshStart,
+    ServerSshStop,
+    CaddyStart,
+    CaddyStop,
+    ServerUpsert,
+    ServerDelete,
+    ConfigSave,
+    ConfigSavePartial,
+    SyncSettingsGet,
+    SyncSettingsSavePartial,
+    RemoteBrowserOpen,
+    RemoteBrowserClose,
+    RemoteBrowserListChildren,
+    RemoteBrowserStatPath,
+    RemoteBrowserCreateDirectory,
+    RemoteBrowserDeletePath,
+    ScpUpload,
+    ScpDownload,
+    ScpStartUpload,
+    ScpStartDownload,
+    ScpTransferList,
+    ScpTransferGet,
+    ConfigSyncPull,
+    ConfigSyncPush,
+    ConfigGitPull,
+    ConfigGitPush,
+}
+
+#[derive(Debug)]
+pub struct Operation {
+    pub handler: Handler,
+    pub name: &'static str,
+    pub title: &'static str,
+    pub category: &'static str,
+    pub read_only: bool,
+    pub capability: Capability,
+    #[allow(dead_code)] // Transport ownership enforcement is implemented in the lifecycle slice.
+    pub lifetime: Lifetime,
+    // URI, legacy resource title/category. Authorization always uses the operation category.
+    pub resource: Option<(&'static str, &'static str, &'static str)>,
+}
+pub static OPERATIONS: &[Operation] = &[
+    Operation {
+        handler: Handler::AppGetOverview,
+        name: "app_get_overview",
+        title: "App overview",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::FunctionStatusList,
+        name: "function_status_list",
+        title: "List function statuses",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: Some(("scp://status/functions", "Function statuses", "status")),
+    },
+    Operation {
+        handler: Handler::FunctionStatusGet,
+        name: "function_status_get",
+        title: "Get one function status",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::OpenvpnGetStatus,
+        name: "openvpn_get_status",
+        title: "OpenVPN status",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: Some(("scp://status/openvpn", "OpenVPN status", "status")),
+    },
+    Operation {
+        handler: Handler::BoundaryGetStatus,
+        name: "boundary_get_status",
+        title: "Boundary status",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: Some(("scp://status/boundary", "Boundary status", "status")),
+    },
+    Operation {
+        handler: Handler::ServersList,
+        name: "servers_list",
+        title: "List servers",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: Some(("scp://servers/list", "Servers list", "inventory")),
+    },
+    Operation {
+        handler: Handler::ServerGet,
+        name: "server_get",
+        title: "Get server",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ConfigGetPaths,
+        name: "config_get_paths",
+        title: "Get config paths",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: Some(("scp://config/paths", "Config paths", "config")),
+    },
+    Operation {
+        handler: Handler::OpenvpnStart,
+        name: "openvpn_start",
+        title: "Start OpenVPN",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::OpenvpnStop,
+        name: "openvpn_stop",
+        title: "Stop OpenVPN",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Stop,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::BoundaryAuthStart,
+        name: "boundary_auth_start",
+        title: "Start Boundary auth",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::BoundaryAuthStop,
+        name: "boundary_auth_stop",
+        title: "Stop Boundary auth",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Stop,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerTunnelStart,
+        name: "server_tunnel_start",
+        title: "Start server tunnel",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerTunnelStop,
+        name: "server_tunnel_stop",
+        title: "Stop server tunnel",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Stop,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerSshStart,
+        name: "server_ssh_start",
+        title: "Start server SSH",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerSshStop,
+        name: "server_ssh_stop",
+        title: "Stop server SSH",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Stop,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::CaddyStart,
+        name: "caddy_start",
+        title: "Start Caddy",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::CaddyStop,
+        name: "caddy_stop",
+        title: "Stop Caddy",
+        category: "runtime-control",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Stop,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerUpsert,
+        name: "server_upsert",
+        title: "Create or update server",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ServerDelete,
+        name: "server_delete",
+        title: "Delete server",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ConfigSave,
+        name: "config_save",
+        title: "Save full app config",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ConfigSavePartial,
+        name: "config_save_partial",
+        title: "Patch app config",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::SyncSettingsGet,
+        name: "sync_settings_get",
+        title: "Get device-local sync settings",
+        category: "read-only",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::SyncSettingsSavePartial,
+        name: "sync_settings_save_partial",
+        title: "Patch device-local sync settings",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::RemoteBrowserOpen,
+        name: "remote_browser_open",
+        title: "Open remote browser session",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::RemoteBrowserClose,
+        name: "remote_browser_close",
+        title: "Close remote browser session",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Stop,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::RemoteBrowserListChildren,
+        name: "remote_browser_list_children",
+        title: "List remote browser children",
+        category: "file-transfer",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::RemoteBrowserStatPath,
+        name: "remote_browser_stat_path",
+        title: "Stat remote browser path",
+        category: "file-transfer",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::RemoteBrowserCreateDirectory,
+        name: "remote_browser_create_directory",
+        title: "Create remote directory",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Request,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::RemoteBrowserDeletePath,
+        name: "remote_browser_delete_path",
+        title: "Delete remote path",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Request,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ScpUpload,
+        name: "scp_upload",
+        title: "Run SCP upload",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Request,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ScpDownload,
+        name: "scp_download",
+        title: "Run SCP download",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Request,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ScpStartUpload,
+        name: "scp_start_upload",
+        title: "Start PTY-backed SCP upload",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ScpStartDownload,
+        name: "scp_start_download",
+        title: "Start PTY-backed SCP download",
+        category: "file-transfer",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::DesktopOwned,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ScpTransferList,
+        name: "scp_transfer_list",
+        title: "List SCP transfers",
+        category: "file-transfer",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ScpTransferGet,
+        name: "scp_transfer_get",
+        title: "Get one SCP transfer",
+        category: "file-transfer",
+        read_only: true,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Query,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ConfigSyncPull,
+        name: "config_sync_pull",
+        title: "Pull synced config from repo",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::ProtectedImport,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ConfigSyncPush,
+        name: "config_sync_push",
+        title: "Push synced config to repo",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::Desktop,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ConfigGitPull,
+        name: "config_git_pull",
+        title: "Run git pull for config repo",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::ReviewedGit,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+    Operation {
+        handler: Handler::ConfigGitPush,
+        name: "config_git_push",
+        title: "Run git add/commit/push for config repo",
+        category: "config-mutation",
+        read_only: false,
+        capability: Capability::ReviewedGit,
+        lifetime: Lifetime::Mutation,
+        resource: None,
+    },
+];
+pub fn operation(name: &str) -> Option<&'static Operation> {
+    OPERATIONS.iter().find(|op| op.name == name)
+}
+pub fn resource_operation(uri: &str) -> Option<&'static Operation> {
+    OPERATIONS
+        .iter()
+        .find(|op| op.resource.is_some_and(|resource| resource.0 == uri))
+}
+pub fn authorize(
+    name: &str,
+    policy: &str,
+    categories: &[&str],
+) -> Result<&'static Operation, OperationError> {
+    let op = operation(name).ok_or_else(|| OperationError::new(ErrorCode::NotFound))?;
+    if !matches!(policy, "allow-with-token" | "require-ui-approval")
+        || categories.iter().any(|c| {
+            !matches!(
+                *c,
+                "read-only" | "runtime-control" | "config-mutation" | "file-transfer"
+            )
+        })
+        || !categories.contains(&op.category)
+        || (policy == "require-ui-approval" && !op.read_only)
+    {
+        return Err(OperationError::new(ErrorCode::PolicyDenied));
+    }
+    if !matches!(op.capability, Capability::Desktop) {
+        return Err(OperationError::new(ErrorCode::CapabilityUnavailable));
+    }
+    Ok(op)
+}
+
+/// Authorize and validate before the trusted host can touch stores or invoke actions.
+pub fn execute<T>(
+    name: &str,
+    policy: &str,
+    categories: &[&str],
+    args: &Value,
+    host: impl FnOnce(&Operation) -> Result<T, String>,
+) -> Result<T, OperationError> {
+    let op = authorize(name, policy, categories)?;
+    validate_arguments(op, args)?;
+    host(op).map_err(classify_host_error)
+}
+
+fn classify_host_error(message: String) -> OperationError {
+    for code in [
+        ErrorCode::PolicyDenied,
+        ErrorCode::InvalidArguments,
+        ErrorCode::CapabilityUnavailable,
+        ErrorCode::NotFound,
+        ErrorCode::Conflict,
+        ErrorCode::Cancelled,
+        ErrorCode::Timeout,
+    ] {
+        if message == OperationError::new(code).legacy_message() {
+            return OperationError::new(code);
+        }
+    }
+    let code = match message.as_str() {
+        "function status not found" | "server not found" | "transfer not found" => {
+            ErrorCode::NotFound
+        }
+        _ => ErrorCode::OperationFailed,
+    };
+    OperationError::new(code)
+}
+
+/// Audit metadata only: even innocuous-looking argument values can carry credentials.
+pub fn audit_summary(kind: &str, name: &str, _args: &Value) -> String {
+    let name = operation(name)
+        .map(|op| op.name)
+        .or_else(|| resource_operation(name).map(|op| op.name))
+        .unwrap_or("unknown");
+    let kind = if kind == "resource.read" {
+        "resource.read"
+    } else {
+        "tool.call"
+    };
+    format!("[MCP audit] kind={kind} name={name}")
+}
+
+pub fn redact_fields(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (key, value) in map {
+                let key: String = key
+                    .chars()
+                    .filter(|c| c.is_ascii_alphanumeric())
+                    .flat_map(char::to_lowercase)
+                    .collect();
+                if key != "boundarytokensource"
+                    && [
+                        "password",
+                        "secret",
+                        "token",
+                        "authorization",
+                        "cookie",
+                        "credential",
+                    ]
+                    .iter()
+                    .any(|part| key.contains(part))
+                {
+                    *value = json!("[redacted]");
+                } else {
+                    redact_fields(value);
+                }
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                redact_fields(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const CATEGORIES: &[&str] = &[
+        "read-only",
+        "runtime-control",
+        "config-mutation",
+        "file-transfer",
+    ];
+
+    #[test]
+    fn policy_fails_closed_and_resources_share_authorization() {
+        for policy in ["", "ALLOW", "allow-with-tokne"] {
+            assert_eq!(
+                authorize("function_status_list", policy, CATEGORIES)
+                    .unwrap_err()
+                    .code,
+                ErrorCode::PolicyDenied
+            );
+        }
+        assert!(authorize(
+            "function_status_list",
+            "allow-with-token",
+            &["bogus", "read-only"]
+        )
+        .is_err());
+        assert!(authorize("unknown", "allow-with-token", CATEGORIES).is_err());
+        assert!(authorize("servers_list", "allow-with-token", &[]).is_err());
+        for op in OPERATIONS {
+            assert_eq!(
+                authorize(op.name, "require-ui-approval", CATEGORIES).is_ok(),
+                op.read_only && matches!(op.capability, Capability::Desktop),
+                "{}",
+                op.name
+            );
+        }
+        let op = resource_operation("scp://servers/list").unwrap();
+        assert_eq!(op.name, "servers_list");
+        assert!(authorize(op.name, "allow-with-token", &["file-transfer"]).is_err());
+        assert_eq!(OPERATIONS.len(), 40);
+        assert_eq!(
+            OPERATIONS
+                .iter()
+                .map(|op| op.name)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            40
+        );
+    }
+
+    #[test]
+    fn protected_or_invalid_mutations_never_reach_host() {
+        let cases = [
+            (
+                "sync_settings_save_partial",
+                json!({"patch":{"mcpEnabled":true,"repoRoot":"ok"}}),
+            ),
+            (
+                "sync_settings_save_partial",
+                json!({"patch":{"ccAgentToken":"secret"}}),
+            ),
+            (
+                "sync_settings_save_partial",
+                json!({"patch":{"firstRunCompleted":true}}),
+            ),
+            (
+                "sync_settings_save_partial",
+                json!({"patch":{"boundaryCliPath":"evil"}}),
+            ),
+            ("sync_settings_save_partial", json!({"patch":{"typo":true}})),
+            (
+                "config_save_partial",
+                json!({"patch":{"boundary":{"cliPath":"evil"}}}),
+            ),
+            (
+                "config_save_partial",
+                json!({"patch":{"openvpn":{"extraArgs":"--script evil"}}}),
+            ),
+            (
+                "config_save_partial",
+                json!({"patch":{"cc":{"enabled":true}}}),
+            ),
+            ("config_save_partial", json!({"patch":null})),
+            ("server_tunnel_start", json!({"serverId":"x","cols":65536})),
+            ("server_tunnel_start", json!({"serverId":"x","rows":"bad"})),
+            (
+                "remote_browser_delete_path",
+                json!({"browserId":"x","path":"/","recursive":"yes"}),
+            ),
+            ("config_git_pull", json!({"repoRoot":"repo"})),
+            ("config_git_push", json!({"repoRoot":"repo"})),
+            ("config_sync_pull", json!({"repoRoot":"repo"})),
+        ];
+        for (name, args) in cases {
+            let mut called = false;
+            assert!(
+                execute(name, "allow-with-token", CATEGORIES, &args, |_| {
+                    called = true;
+                    Ok(())
+                })
+                .is_err(),
+                "{name}"
+            );
+            assert!(!called, "denied call reached host: {name}");
+        }
+        execute(
+            "config_save_partial",
+            "allow-with-token",
+            CATEGORIES,
+            &json!({"patch":{"app":{"defaultTerminalCols":100}}}),
+            |_| Ok(()),
+        )
+        .unwrap();
+        execute(
+            "sync_settings_save_partial",
+            "allow-with-token",
+            CATEGORIES,
+            &json!({"patch":{"repoRoot":"repo"}}),
+            |_| Ok(()),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn no_untrusted_text_in_errors_or_audit() {
+        let secret = "unlabelled-secret-123";
+        assert!(!audit_summary("tool.call", secret, &json!({"innocent":secret})).contains(secret));
+        let err = execute::<()>(
+            "function_status_list",
+            "allow-with-token",
+            CATEGORIES,
+            &json!({}),
+            |_| Err(secret.into()),
+        )
+        .unwrap_err();
+        assert_eq!(err.code, ErrorCode::OperationFailed);
+        assert!(!serde_json::to_string(&err).unwrap().contains(secret));
+        let mut value = json!({"items":[{"Authorization":secret,"cc_agent_token":secret,"password":secret}],"safe":1});
+        redact_fields(&mut value);
+        assert!(!value.to_string().contains(secret));
+        assert_eq!(value["safe"], 1);
+    }
+}

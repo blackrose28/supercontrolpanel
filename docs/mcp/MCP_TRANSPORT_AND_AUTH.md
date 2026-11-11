@@ -134,11 +134,15 @@ The current repo now includes a minimal in-process localhost HTTP listener.
 - runtime-control tools: OpenVPN start/stop, Boundary auth start/stop, server tunnel start/stop, server SSH start/stop, Caddy start/stop
 - mutation tools: server upsert/delete, full/partial app-config save, device-local sync-settings get/patch
 - remote-browser and SCP tools: open/close/list/stat/mkdir/delete remote browser sessions plus direct and PTY-backed SCP upload/download starts and SCP transfer history lookup
-- config-sync and git tools: sync config pull/push plus git pull/push for the configured repo root
+- config-sync: shared config push remains available under sensitive policy; sync pull and git pull/push are unavailable remotely pending protected import/git review
 
 ### Important note
 
 This is a **minimal localhost HTTP transport** for the current implementation phase. It is intentionally simpler than a full spec-complete MCP transport and should be treated as the repo's current working transport layer, not the final polish state.
+
+### Slice 1 policy corrections
+
+Discovery, tool calls, resources, and Tauri MCP adapters share the registry's fail-closed policy. Every launch/mutation is sensitive. MCP cannot edit listener/policy/CC identity or local launch settings. Only `repoRoot` is accepted in a device-local MCP settings patch. See [the complete Slice 1 contract](DESKTOP_STREAMABLE_HTTP_SLICE1.md) for protected fields, omitted diagnostics/secrets, stricter argument validation, and test evidence. Local desktop administration retains its authority.
 
 ### Current error behavior
 

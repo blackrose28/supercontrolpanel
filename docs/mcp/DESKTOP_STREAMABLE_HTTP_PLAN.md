@@ -1,6 +1,8 @@
 # Desktop MCP over Streamable HTTP
 
-Status: proposed implementation; Slice 0 inventory and isolated SDK/client HTTP feasibility verified on Linux. Native platform and integrated application qualification remain open.
+Status: Slice 1 policy and safe contracts implemented on legacy adapters; standard HTTP implementation remains planned. Slice 0 inventory and isolated SDK/client HTTP feasibility verified on Linux. Native platform and integrated application qualification remain open.
+
+[Slice 1 implementation, compatibility corrections, and TDD evidence](DESKTOP_STREAMABLE_HTTP_SLICE1.md).
 Source assessment: 2026-11-11, repository baseline `e120a2bd6`.
 Extracted from Work 2 in [the combined roadmap](SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md).
 
