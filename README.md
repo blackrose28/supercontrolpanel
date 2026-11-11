@@ -324,6 +324,12 @@ Current HTTP routes:
 
 This is still a **repo-local minimal transport**, not a final spec-polished MCP server.
 
+The desktop's existing 40-tool discovery catalog now lives in
+`scp-core::mcp_catalog`, with unchanged names, titles, categories and `readOnly`
+fields. This is discovery metadata only: it does not enable these operations in
+`scpctl` or supply execution authorization. Shared fail-closed policy validation
+and protection against remote policy changes remain planned.
+
 Detailed design docs live under `docs/mcp/`:
 
 - `docs/mcp/MCP_IMPLEMENTATION_PLAN.md`

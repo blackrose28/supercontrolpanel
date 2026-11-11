@@ -1,0 +1,242 @@
+[
+  {
+    "name": "app_get_overview",
+    "title": "App overview",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "function_status_list",
+    "title": "List function statuses",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "function_status_get",
+    "title": "Get one function status",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "openvpn_get_status",
+    "title": "OpenVPN status",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "boundary_get_status",
+    "title": "Boundary status",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "servers_list",
+    "title": "List servers",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "server_get",
+    "title": "Get server",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "config_get_paths",
+    "title": "Get config paths",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "openvpn_start",
+    "title": "Start OpenVPN",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "openvpn_stop",
+    "title": "Stop OpenVPN",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "boundary_auth_start",
+    "title": "Start Boundary auth",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "boundary_auth_stop",
+    "title": "Stop Boundary auth",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "server_tunnel_start",
+    "title": "Start server tunnel",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "server_tunnel_stop",
+    "title": "Stop server tunnel",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "server_ssh_start",
+    "title": "Start server SSH",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "server_ssh_stop",
+    "title": "Stop server SSH",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "caddy_start",
+    "title": "Start Caddy",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "caddy_stop",
+    "title": "Stop Caddy",
+    "category": "runtime-control",
+    "readOnly": false
+  },
+  {
+    "name": "server_upsert",
+    "title": "Create or update server",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "server_delete",
+    "title": "Delete server",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "config_save",
+    "title": "Save full app config",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "config_save_partial",
+    "title": "Patch app config",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "sync_settings_get",
+    "title": "Get device-local sync settings",
+    "category": "read-only",
+    "readOnly": true
+  },
+  {
+    "name": "sync_settings_save_partial",
+    "title": "Patch device-local sync settings",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "remote_browser_open",
+    "title": "Open remote browser session",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "remote_browser_close",
+    "title": "Close remote browser session",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "remote_browser_list_children",
+    "title": "List remote browser children",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "remote_browser_stat_path",
+    "title": "Stat remote browser path",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "remote_browser_create_directory",
+    "title": "Create remote directory",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "remote_browser_delete_path",
+    "title": "Delete remote path",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "scp_upload",
+    "title": "Run SCP upload",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "scp_download",
+    "title": "Run SCP download",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "scp_start_upload",
+    "title": "Start PTY-backed SCP upload",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "scp_start_download",
+    "title": "Start PTY-backed SCP download",
+    "category": "file-transfer",
+    "readOnly": false
+  },
+  {
+    "name": "scp_transfer_list",
+    "title": "List SCP transfers",
+    "category": "file-transfer",
+    "readOnly": true
+  },
+  {
+    "name": "scp_transfer_get",
+    "title": "Get one SCP transfer",
+    "category": "file-transfer",
+    "readOnly": true
+  },
+  {
+    "name": "config_sync_pull",
+    "title": "Pull synced config from repo",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "config_sync_push",
+    "title": "Push synced config to repo",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "config_git_pull",
+    "title": "Run git pull for config repo",
+    "category": "config-mutation",
+    "readOnly": false
+  },
+  {
+    "name": "config_git_push",
+    "title": "Run git add/commit/push for config repo",
+    "category": "config-mutation",
+    "readOnly": false
+  }
+]

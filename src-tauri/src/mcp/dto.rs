@@ -13,14 +13,7 @@ pub struct McpRuntimeStatus {
     pub last_started_at_ms: Option<u64>,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct McpToolDescriptor {
-    pub name: String,
-    pub title: String,
-    pub category: String,
-    pub read_only: bool,
-}
+pub use scp_core::mcp_catalog::McpToolDescriptor;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]

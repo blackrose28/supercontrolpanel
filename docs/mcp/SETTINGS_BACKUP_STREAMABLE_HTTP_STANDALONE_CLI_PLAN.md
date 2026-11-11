@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config and device-local settings schemas/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config and device-local settings schemas, desktop MCP discovery metadata/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -856,16 +856,63 @@ non-gating new reachability rows are executed tests and their test modules. No q
 acknowledgments were added. Native Windows/macOS execution remains unqualified;
 the extracted definitions contain no platform-specific branches.
 
-Next focused slice: characterize the existing MCP operation metadata/policy boundary
-and establish a shared registry/policy seam with fail-closed validation. Start with
-`src-tauri/src/mcp/tools.rs` (`list_mcp_tools`, `is_sensitive_tool`, `tool_category`,
-`enforce_tool_policy`) and the descriptors/HTTP caller, using Ripwire before reads.
-Keep names/categories/read-only/sensitivity aligned with actual dispatch; unknown
-policy values and unknown operation names must not grant authority. Preserve the
-permissive persistence schema above and validate at the execution boundary. Inspect
-local policy changes carefully: remote `config_set_sync_settings` must not be able to
-escalate its own authorization. Scope the next increment from source and tests; do
-not add transports or expose device-local tokens while extracting metadata/policy.
+### Shared MCP discovery catalog (2026-11-11)
+
+`scp-core::mcp_catalog` now owns the unchanged `McpToolDescriptor` and
+`list_mcp_tools`. Desktop `mcp/dto.rs` and `mcp/tools.rs` explicitly re-export them
+at the original paths. All 40 names, titles, categories, read-only flags, ordering,
+serialization and owned/Clone semantics are preserved. No dependency, dispatcher,
+policy, sensitivity, resource, command/event or transport behavior changed; no CLI
+command, token or settings output was added. This discovery catalog is not an
+execution allowlist or a completed operation registry: argument/result schemas,
+capabilities, sensitivity and handlers still need separate characterization.
+
+TDD: two common contracts first passed against the original desktop catalog. The
+new core integration target then failed with an unresolved shared module; after
+the exact extraction, it passed. A desktop adoption test failed with distinct-type
+mismatches before re-exports and passes after them. The same JSON fixture checks
+all descriptors and wire fields in both hosts; tests also cover unique names,
+Clone and independently owned calls. A desktop source-based boundary test compares
+advertised names to literal dispatcher arms. It does not execute actions or prove
+policy, dynamic dispatch, handler behavior or schema correctness.
+
+Linux validation: locked workspace all-feature tests pass 89 tests plus the
+credential compile-fail doctest; seven ignored subprocess fixtures are exercised
+by their tests. The locked desktop suite passes 113 tests with 17 existing warnings.
+Strict all-feature/all-target workspace Clippy, workspace fmt, diff whitespace checks
+and a locked standalone release build pass. Production source comparison confirms
+the moved definitions are unchanged. Existing unrelated desktop formatting remains
+untouched. Native Windows/macOS execution remains unqualified; these definitions
+contain no platform-specific branches.
+
+Ripwire identifies HTTP discovery, the desktop discovery command and category lookup
+as direct callers; the original catalog reaches 15 symbols. Test selection now finds
+the common contract, but after staging the full static test gate exits 4 with 13
+untested/unmodeled impacts (including one Markdown heading) and two selected test
+files. It does not fully model re-exports/include-based tests. This is not clean
+static coverage. Executed suites provide regression evidence. Quality delta has zero
+gating/preexisting regressions, six new test/module reachability rows, and one
+non-gating verbosity row for the exact 244-line moved catalog. No acknowledgments
+were added; preserving the characterized representation avoids mixing a rewrite
+with extraction.
+
+Next focused slice: establish shared fail-closed execution policy separately from
+the permissive persistence schema. Inspect `is_sensitive_tool`, `tool_category`,
+`enforce_tool_policy` and their callers with Ripwire. Unknown operation names and
+unknown policy strings must not authorize execution; do not copy today's unknown
+category bypass or unknown-policy permissiveness. Characterize sensitivity explicitly
+without treating `readOnly` or category as a substitute. Keep discovery output stable.
+
+The actual desktop operation for local patches is `sync_settings_save_partial`
+(not `config_set_sync_settings`). Its dispatcher deserializes `SyncSettingsPatch`
+and calls `save_sync_settings_action`, which can change allowed categories, sensitive
+policy, token, listener and CC settings. It is not in today's sensitive list. Tests
+must prevent a remote caller from escalating its own authorization through this path
+before shared execution policy is adopted. Desktop-local settings changes must stay
+available. Also inspect resource calls that delegate into tool dispatch and the direct
+Tauri MCP command; do not assume the HTTP entry point is the only consumer. Scope a
+reviewable policy increment from source/tests rather than adding a transport here.
+
 Coordinated CLI settings import, standard desktop Streamable HTTP, stdio MCP, other
 operation families and independent packaging remain actionable. Native supervision
 and actual Caddy/keyring/elevation qualification stay gated rather than blocking
