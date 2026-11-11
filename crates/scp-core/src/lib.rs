@@ -1,6 +1,7 @@
 //! Host-independent SuperControlPanel operations.
 
 pub mod credentials;
+pub mod host;
 pub mod profile;
 pub mod runtime;
 pub mod servers;

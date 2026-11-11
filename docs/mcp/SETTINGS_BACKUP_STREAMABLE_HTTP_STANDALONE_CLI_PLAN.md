@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling; host runtime supervision and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context; foreground supervision and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -308,11 +308,52 @@ No CLI runtime command or status view was added. Native child polling/kill/wait 
 block; descendant-tree cleanup, elevated Windows helpers, bounded shutdown/cancellation,
 signals, and native Windows/macOS qualification remain open.
 
-Next build the host runtime context/lifecycle and supervision boundary, including the
-publication/reuse rule, before a foreground operation family. Keep profile ownership
-alive throughout runtime cleanup and keep native keyring calls behind host supervision.
-Full config extraction, settings commands/import, Streamable HTTP, stdio MCP, and
-packaging remain pending.
+The next increment below establishes a CLI-local runtime context with private session
+ownership and no session-ID reuse. Foreground supervision and publication adapters remain
+next; keep native keyring calls behind host supervision.
+
+### Profile-owned runtime context (2026-11-11)
+
+`scp-core::host::ProfileRuntime` acquires the CLI profile owner and keeps its session
+store private. Its field drop order releases all strong child ownership before releasing
+the OS profile lock. Hosts receive only a reader, an immutable ID accessor, and a private
+weak monitor through `RuntimePty`; they cannot retain strong session handles, supply a
+forced ID, or mutate the registry through this API. Runtime drop still attempts the
+existing direct-child cleanup even if the host retains the reader/monitor.
+
+Launches require mutable runtime access. Each runtime gets a random UUID nonce and each
+launch reserves a checked, monotonically increasing counter before platform work, including
+failed launches. IDs cannot repeat within that runtime; random nonces separate subsequent
+owners and independent profiles. Counter exhaustion fails before native work. This avoids
+ID reuse in the new context without changing desktop IDs, events, or command signatures.
+It does not order output against exit, fence queued desktop events, or implement a host
+event sink. `write`, `close`, and launch-bound `poll` delegate to the tested session core;
+close and wait-error payloads retain their existing contracts. A monitor from a previous
+runtime detaches when passed to the new runtime.
+
+TDD evidence: three runtime integration tests first failed on the absent host module.
+They cover exclusive ownership, lock retention throughout platform calls and final-child
+cleanup, reader/monitor lifetime, stable profile identity after cleanup, fresh launch IDs
+within/across owners, stale monitors, repeated close, missing-session input, launch failure
+and retry, and wait-error retirement. A deliberate early-unlock mutation (placing the
+owner before the session store) fails deterministically during cleanup polling; restoring
+the intended drop order passes. Linux validation passed all 50 workspace all-feature tests
+plus the compile-fail doctest (one ignored subprocess fixture is exercised by its ownership
+test), strict workspace all-feature/all-target Clippy, formatting, and a locked standalone
+release build, and all 103 desktop Rust tests (17 existing warnings). Ripwire quality
+delta has zero gating regressions; it lists six new API/test dead-code entries and two
+minor test-fixture churn findings. The static test gate still exits 4 with 97 unmapped
+impacted symbols, including existing desktop paths: this is not a clean coverage gate.
+Executed Cargo suites supply the validation evidence; no acknowledgments were added.
+
+This is an ownership boundary, not a foreground runner. It starts no reader/poll threads,
+performs no secret access, and adds no CLI runtime/status command. Native poll/kill/wait
+can still block and cleanup remains direct-child best effort. Descendant trees, elevated
+Windows helper supervision, signal/cancellation handling, native Windows/macOS tests,
+credential supervision, and event ordering remain open. Next implement a focused host
+foreground lifecycle with real-child tests, then an operation family once its supervision
+contract is established. Full config extraction, settings commands/import, Streamable
+HTTP, stdio MCP, and packaging remain pending.
 
 Proposed Cargo workspace boundaries:
 

@@ -3,6 +3,7 @@ use portable_pty::{
     SlavePty,
 };
 use scp_core::sessions::{spawn_pty, SessionPoll, SessionStore};
+use scp_core::{host::ProfileRuntime, profile::ProfileOwner};
 use std::{
     io::{self, Read, Write},
     sync::{Arc, Barrier, Mutex},
@@ -21,12 +22,19 @@ struct FakePty {
     barrier: Option<Arc<Barrier>>,
     registry: Option<std::sync::Weak<SessionStore>>,
     poll_gate: Option<Arc<(Barrier, Barrier)>>,
+    owned_profile: Option<std::path::PathBuf>,
 }
 impl FakePty {
     fn calls(&self) -> Vec<&'static str> {
         self.trace.lock().unwrap().calls.clone()
     }
     fn record(&self, call: &'static str) -> anyhow::Result<()> {
+        if let Some(path) = &self.owned_profile {
+            assert!(
+                ProfileOwner::acquire(path).is_err(),
+                "profile must stay owned during {call}"
+            );
+        }
         if let Some(store) = self.registry.as_ref().and_then(std::sync::Weak::upgrade) {
             assert!(
                 !matches!(
@@ -461,4 +469,105 @@ fn replacement_during_poll_keeps_its_child_and_watchers() {
     assert_eq!(receiver.recv().unwrap(), "replacement");
     store.close("same").unwrap();
     assert!(receiver.recv().is_err());
+}
+
+#[test]
+fn profile_runtime_retains_ownership_through_final_child_cleanup() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut runtime = ProfileRuntime::acquire(temp.path()).unwrap();
+    let namespace = runtime.credential_namespace().to_string();
+    assert!(ProfileRuntime::acquire(temp.path()).is_err());
+    let pty = FakePty {
+        owned_profile: Some(temp.path().to_path_buf()),
+        ..FakePty::default()
+    };
+    let launched = runtime
+        .spawn(&pty, 80, 24, CommandBuilder::new("unused"))
+        .unwrap();
+    runtime.write(launched.id(), "hello").unwrap();
+    assert!(matches!(
+        runtime.poll(&launched).unwrap(),
+        SessionPoll::Running
+    ));
+    drop(runtime);
+    assert!(pty.calls().ends_with(&["poll", "kill", "wait"]));
+    // Keeping a reader/weak monitor cannot extend either child or profile ownership.
+    let replacement = ProfileRuntime::acquire(temp.path()).unwrap();
+    assert_eq!(replacement.credential_namespace(), namespace);
+    assert!(matches!(
+        replacement.poll(&launched).unwrap(),
+        SessionPoll::Detached
+    ));
+    assert!(temp.path().join("runtime-owner.lock").exists());
+}
+
+#[test]
+fn profile_runtime_allocates_fresh_ids_and_preserves_close_contract() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut runtime = ProfileRuntime::acquire(temp.path()).unwrap();
+    let pty = FakePty::default();
+    let first = runtime
+        .spawn(&pty, 80, 24, CommandBuilder::new("unused"))
+        .unwrap();
+    let exit = runtime.close(first.id()).unwrap().unwrap();
+    assert_eq!(exit.id, first.id());
+    assert_eq!(exit.reason, "closed_by_command");
+    assert!(runtime.close(first.id()).unwrap().is_none());
+    assert!(runtime
+        .write(first.id(), "late")
+        .unwrap_err()
+        .contains("session not found"));
+    let second = runtime
+        .spawn(&pty, 80, 24, CommandBuilder::new("unused"))
+        .unwrap();
+    assert_ne!(first.id(), second.id());
+    let calls = pty.calls();
+    assert!(matches!(
+        runtime.poll(&first).unwrap(),
+        SessionPoll::Detached
+    ));
+    assert_eq!(pty.calls(), calls);
+    drop(runtime);
+    let mut next_runtime = ProfileRuntime::acquire(temp.path()).unwrap();
+    let third = next_runtime
+        .spawn(&pty, 80, 24, CommandBuilder::new("unused"))
+        .unwrap();
+    assert_ne!(second.id(), third.id());
+    assert!(matches!(
+        next_runtime.poll(&second).unwrap(),
+        SessionPoll::Detached
+    ));
+}
+
+#[test]
+fn profile_runtime_failed_launch_retains_lock_and_can_retry() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut runtime = ProfileRuntime::acquire(temp.path()).unwrap();
+    let failing = FakePty {
+        fail: "spawn",
+        ..FakePty::default()
+    };
+    assert!(runtime
+        .spawn(&failing, 80, 24, CommandBuilder::new("unused"))
+        .err()
+        .unwrap()
+        .starts_with("failed to spawn"));
+    assert!(ProfileOwner::acquire(temp.path()).is_err());
+    let pty = FakePty {
+        fail: "poll",
+        ..FakePty::default()
+    };
+    let launched = runtime
+        .spawn(&pty, 80, 24, CommandBuilder::new("unused"))
+        .unwrap();
+    let SessionPoll::Exited(exit) = runtime.poll(&launched).unwrap() else {
+        panic!("expected exit")
+    };
+    assert_eq!(exit.reason, "wait_error: injected poll");
+    assert!(matches!(
+        runtime.poll(&launched).unwrap(),
+        SessionPoll::Detached
+    ));
+    drop(runtime);
+    assert!(ProfileOwner::acquire(temp.path()).is_ok());
 }

@@ -163,7 +163,7 @@ Initialization takes an exclusive OS file lock on `runtime-owner.lock` and relea
 when the command exits. A competing owner fails immediately (exit 1); choose another
 profile or stop the current owner. The lock file remains on disk: **do not delete it**
 to clear ownership. OS locks release on process exit, including forced termination.
-Future runtime and config writers must retain the core ownership guard for their full
+Runtime and config writers must retain the core ownership guard for their full
 lifetime. Inventory listing stays read-only and can run while a profile is owned.
 This lock coordinates this CLI profile only; it does not isolate host VPN routes or
 external Boundary state. Guard drop explicitly unlocks even if a concurrent subprocess
@@ -198,8 +198,13 @@ another child that reuses its ID or clear that replacement's watchers. Weak moni
 not keep children alive after the store is dropped. Desktop retains reader/polling
 threads, events, telemetry, and session-ID generation. Host event delivery still uses
 existing IDs; full lifecycle/publication ordering remains part of runtime supervision.
+The core also provides a CLI-local `ProfileRuntime` that owns a private session store
+and retains the profile lock until direct-child cleanup finishes. It allocates a fresh
+session ID for every launch, using a per-runtime random nonce and a non-wrapping counter;
+callers cannot inject or reuse IDs through this context. Returned readers and weak
+monitors do not retain child/profile ownership. It is not wired to CLI commands yet.
 This is not full process-tree or elevated-helper supervision: cancellation, bounded
-shutdown, runtime context, and a CLI-owned operation family remain pending. The CLI
+shutdown, reader/event orchestration, and a CLI-owned operation family remain pending. The CLI
 preview still provides inventory and profile initialization only.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
