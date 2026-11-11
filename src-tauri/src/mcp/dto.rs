@@ -17,7 +17,10 @@ pub use scp_core::mcp_catalog::McpToolDescriptor;
 
 pub use scp_core::mcp_resources::McpResourceDescriptor;
 
-pub use scp_core::mcp_dto::McpToolCallEnvelope;
+pub use scp_core::mcp_dto::{
+    McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
+    McpToolCallEnvelope,
+};
 
 #[cfg(test)]
 mod envelope_contract {
@@ -41,5 +44,38 @@ mod shared_envelope_identity {
         let dto: super::McpToolCallEnvelope = shared;
         let public: crate::mcp::McpToolCallEnvelope = dto;
         let _: scp_core::mcp_dto::McpToolCallEnvelope = public;
+    }
+}
+
+#[cfg(test)]
+mod function_status_contract {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../crates/scp-core/tests/contracts/mcp_function_status.rs"
+    ));
+}
+
+#[cfg(test)]
+mod shared_function_status_identity {
+    #[test]
+    fn desktop_paths_accept_shared_arguments_and_runtime_results_without_conversion() {
+        let input = serde_json::json!({"functionId":"boundary-auth"});
+        let args = scp_core::mcp_dto::McpFunctionStatusGetArgs::from_args(&input).unwrap();
+        let dto: super::McpFunctionStatusGetArgs<'_> = args;
+        let _: crate::mcp::McpFunctionStatusGetArgs<'_> = dto;
+        let runtime = crate::models::FunctionStatus {
+            function_id: String::new(),
+            state: String::new(),
+            message: String::new(),
+            boundary_token_source: None,
+            session_id: None,
+            updated_at_ms: 0,
+        };
+        let dto: super::McpFunctionStatusGetResult = runtime;
+        let public: crate::mcp::McpFunctionStatusGetResult = dto;
+        let shared: scp_core::mcp_dto::McpFunctionStatusGetResult = public;
+        let dto: super::McpFunctionStatusListResult = vec![shared];
+        let public: crate::mcp::McpFunctionStatusListResult = dto;
+        let _: scp_core::mcp_dto::McpFunctionStatusListResult = public;
     }
 }

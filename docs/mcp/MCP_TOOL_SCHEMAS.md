@@ -123,15 +123,18 @@ The result shape is:
 {}
 ```
 
+The custom dispatcher ignores arguments for this operation, including non-objects.
+
 ### Output `data`
 
 ```json
-{
-  "items": []
-}
+[]
 ```
 
-Where `items` is an array of `FunctionStatus`.
+A bare array of `FunctionStatus` objects, not an `items` wrapper. The shared
+`scp-core::mcp_dto::McpFunctionStatusListResult` aliases a vector of the existing
+runtime status type. Store iteration order is retained; no sorting/filtering is
+introduced and no stable order is promised.
 
 ## `function_status_get`
 
@@ -143,15 +146,30 @@ Where `items` is an array of `FunctionStatus`.
 }
 ```
 
+`McpFunctionStatusGetArgs::from_args` preserves the custom dispatcher's existing
+lookup: missing, null, non-string values and non-object inputs return
+`functionId is required`. Any string is accepted without trimming, including empty
+strings and control characters; extra fields are ignored. An absent store entry
+returns `function status not found`. Policy runs before argument parsing.
+
 ### Output `data`
 
 ```json
 {
-  "item": {}
+  "functionId": "boundary-auth",
+  "state": "idle",
+  "message": "",
+  "boundaryTokenSource": null,
+  "sessionId": null,
+  "updatedAtMs": 0
 }
 ```
 
-Where `item` is a `FunctionStatus`.
+A bare `FunctionStatus`, not an `item` wrapper. The shared
+`McpFunctionStatusGetResult` aliases the existing runtime type. All six fields
+serialize, including null optional fields, and string values and the full u64
+timestamp are retained. These Serialize-only argument/result contracts add no
+execution handler, CLI operation or generated standard MCP JSON Schema.
 
 ## `openvpn_get_status`
 

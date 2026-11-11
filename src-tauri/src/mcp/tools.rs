@@ -14,7 +14,10 @@ use crate::commands::{
     upsert_server_action,
 };
 use crate::{
-    mcp::McpToolCallEnvelope,
+    mcp::{
+        McpFunctionStatusGetArgs, McpFunctionStatusGetResult, McpFunctionStatusListResult,
+        McpToolCallEnvelope,
+    },
     server_mgmt::{load_servers, Server},
     services::{
         get_scp_transfer_entry, list_scp_transfer_entries, load_sync_settings_from_disk,
@@ -165,20 +168,18 @@ pub fn call_mcp_tool(
                 .statuses
                 .lock()
                 .map_err(|_| "function status lock poisoned".to_string())?;
-            json!(statuses.values().cloned().collect::<Vec<_>>())
+            let result: McpFunctionStatusListResult = statuses.values().cloned().collect();
+            json!(result)
         }
         "function_status_get" => {
-            let function_id = args
-                .get("functionId")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "functionId is required".to_string())?;
+            let args = McpFunctionStatusGetArgs::from_args(&args)?;
             let function_store = app.state::<FunctionStore>();
             let statuses = function_store
                 .statuses
                 .lock()
                 .map_err(|_| "function status lock poisoned".to_string())?;
-            let status = statuses
-                .get(function_id)
+            let status: McpFunctionStatusGetResult = statuses
+                .get(args.function_id)
                 .cloned()
                 .ok_or_else(|| "function status not found".to_string())?;
             json!(status)

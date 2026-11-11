@@ -1156,6 +1156,68 @@ requires current official SDK/protocol sources). Coordinated CLI import, other
 operation families, stdio MCP and packaging also remain actionable. Existing native
 supervision/keyring/elevation gates are unchanged; do not repeat the cgroup spike.
 
+### Shared function-status MCP contracts (2026-11-11)
+
+`scp-core::mcp_dto` now supplies the borrowed, Serialize-only
+`McpFunctionStatusGetArgs` and its `from_args(&Value)` parser. This is the existing
+custom dispatcher lookup moved verbatim: a string `functionId` is required; missing,
+null, wrong-type and non-object inputs all return `functionId is required`.
+Empty/whitespace/control/Unicode strings remain accepted without normalization;
+extra fields remain ignored. No Deserialize, defaults or ID validation was added.
+
+`McpFunctionStatusGetResult` aliases the existing shared runtime `FunctionStatus`;
+`McpFunctionStatusListResult` aliases its vector. Desktop DTO/public paths re-export
+all three and the two dispatcher branches adopt them. The list still ignores all
+arguments and serializes the cloned store values in HashMap iteration order with
+no stable-order guarantee. Get still returns `function status not found` for an
+absent key. Policy still runs first, and locking, poisoned-lock errors, lookup,
+status transitions and envelope construction remain desktop-owned and unchanged.
+Bare object/array results retain all six fields, null options, strings and full u64
+timestamps. The schema document's stale `item`/`items` wrappers are corrected to the
+actual implementation; no wire wrapper was removed from production.
+
+TDD: result fixtures first pass against the existing runtime type. Core then fails
+on missing shared types, and the desktop contract/identity target also fails on
+missing types. GREEN initially runs four core contracts and five desktop tests;
+refactoring consolidates duplicate fixture loading without dropping assertions.
+The final three contracts run in core and desktop, plus a desktop identity test
+proves runtime/core/desktop result types and argument re-exports assign without
+conversion. Synthetic tests cover the exact bare result fixture, explicit nulls,
+empty lists/strings, supplied list order/duplicates, optional values, arbitrary
+state text, Unicode/control characters, u64 max and every missing/wrong-type input.
+They do not execute HTTP/Tauri handlers or establish UI/transport E2E coverage.
+
+Validation: locked workspace all-feature suite passes 105 tests plus the credential
+compile-fail doctest (seven ignored subprocess fixtures are exercised by acceptance
+tests); locked desktop suite passes 136 tests with 17 existing warnings. Strict
+workspace all-feature/all-target Clippy, locked release CLI build, workspace and
+changed/shared-file formatting, and diff whitespace checks pass. Windows/macOS
+native qualification remains open; no platform-specific code changes here.
+
+Ripwire pre-edit dispatcher impact reports three direct callers (HTTP, resource,
+Tauri) and 11 downstream symbols; affected selection finds no modeled tests.
+Edit-check preserves its signature and reports the parser as new. Quality delta
+has zero gating findings/acknowledgments, one minor ambient churn finding on the
+dispatcher and six non-gating new test/module reachability findings. A duplicate
+fixture-loading finding was resolved by sharing the fixture in one contract test.
+Static selection does not model the included desktop tests; compiler and suites
+provide the concrete checks, not a claim of complete static or E2E coverage.
+The staged test gate exits 4: three selected contract/fixture/target files have
+unknown runners (all exercised by the core target), and 12 modeled untested paths
+include the 11 downstream dispatcher symbols and an unrelated SETTINGS_BACKUP
+Markdown heading. Full desktop tests do not establish transport E2E coverage for
+those paths; this is not a clean static coverage verdict.
+
+Next focused slice: choose another small read-only argument/result family (for
+example `app_get_overview`), inspect its handlers/consumers, then extract/adopt
+contracts with shared and desktop fixtures. Do not add CLI handlers incidentally.
+Standard desktop Streamable HTTP is independently actionable after contract work;
+choose the SDK/protocol from current official sources before implementation.
+Coordinated CLI import, other operation contracts, stdio MCP and packaging remain
+open. No transport/auth/profile/runtime/credential/dependency changes or new CLI
+capabilities ship here. Native supervision/keyring/elevation gates remain unchanged;
+do not retry the cgroup spike on this unchanged host.
+
 Proposed Cargo workspace boundaries:
 
 ```text

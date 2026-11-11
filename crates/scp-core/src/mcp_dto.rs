@@ -14,3 +14,28 @@ pub struct McpToolCallEnvelope {
     pub warnings: Vec<String>,
     pub timestamp: u64,
 }
+
+/// Existing `function_status_get` arguments; intentionally no trimming or ID validation.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct McpFunctionStatusGetArgs<'a> {
+    pub function_id: &'a str,
+}
+
+impl<'a> McpFunctionStatusGetArgs<'a> {
+    /// Match the custom dispatcher's permissive string lookup, including its error.
+    /// Extra fields are ignored. Non-object, missing and non-string values fail alike.
+    pub fn from_args(args: &'a serde_json::Value) -> Result<Self, String> {
+        let function_id = args
+            .get("functionId")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "functionId is required".to_string())?;
+        Ok(Self { function_id })
+    }
+}
+
+/// Bare status object, with the runtime model's exact fields and null semantics.
+pub type McpFunctionStatusGetResult = crate::runtime::FunctionStatus;
+
+/// Bare array in host-supplied iteration order; no sorting or filtering.
+pub type McpFunctionStatusListResult = Vec<McpFunctionStatusGetResult>;

@@ -341,6 +341,11 @@ re-exported through the existing desktop paths. Its five serialized fields and
 opaque `data` are unchanged; desktop dispatch still supplies messages, warnings
 and timestamps. This shared DTO does not add CLI operations or standard MCP results.
 
+Function-status get/list argument and result contracts also live in `mcp_dto`.
+Get keeps its existing permissive string lookup and errors; list returns a bare
+array in store iteration order, and get returns a bare status object. Optional
+status fields still serialize as null. These shared types add no CLI status command.
+
 The desktop dispatcher now uses `scp-core::mcp_policy` before every tool action,
 including HTTP, direct Tauri MCP calls and resource reads delegated to tools.
 Unknown operation names, sensitive-action policies or category entries reject the
