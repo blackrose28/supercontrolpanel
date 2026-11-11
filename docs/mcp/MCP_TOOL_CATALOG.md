@@ -1,8 +1,8 @@
 # SuperControlPanel MCP Tool Catalog
 
-## Implemented standard subset (Slice 2)
+## Existing surface migration (Slice 3)
 
-At `/mcp`, only `function_status_list` and `scp://status/functions` are advertised, subject to current read-only policy. Their shared payload is `{ "statuses": [...] }`; each item uses the Slice 1 safe DTO. This does not migrate the rest of the 40-operation REST catalog. See [Slice 2](DESKTOP_STREAMABLE_HTTP_SLICE2.md).
+Standard `/mcp` adapts all 40 registry operations and five fixed resources. Discovery uses current category, sensitive-action and capability policy: at most 37 tools are visible; `config_sync_pull`, `config_git_pull` and `config_git_push` remain unavailable. No new parity operations are added. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md) and the [per-operation test matrix](DESKTOP_STREAMABLE_HTTP_INVENTORY.md).
 
 ## Purpose
 

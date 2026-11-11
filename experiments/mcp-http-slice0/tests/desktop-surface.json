@@ -1,0 +1,467 @@
+{
+  "app_get_overview": {
+    "args": {},
+    "data": {
+      "appVersion": "1.3.3",
+      "activeFunctions": 1,
+      "knownFunctionCount": 1
+    }
+  },
+  "function_status_list": {
+    "args": {},
+    "data": [
+      {
+        "functionId": "boundary-auth",
+        "state": "running",
+        "message": "",
+        "boundaryTokenSource": "app",
+        "sessionId": "synthetic-session",
+        "updatedAtMs": 123
+      }
+    ],
+    "uri": "scp://status/functions"
+  },
+  "function_status_get": {
+    "args": {
+      "functionId": "boundary-auth"
+    },
+    "data": {
+      "functionId": "boundary-auth",
+      "state": "running",
+      "message": "",
+      "boundaryTokenSource": "app",
+      "sessionId": "synthetic-session",
+      "updatedAtMs": 123
+    }
+  },
+  "openvpn_get_status": {
+    "args": {},
+    "data": null,
+    "uri": "scp://status/openvpn"
+  },
+  "boundary_get_status": {
+    "args": {},
+    "data": {
+      "functionId": "boundary-auth",
+      "state": "running",
+      "message": "",
+      "boundaryTokenSource": "app",
+      "sessionId": "synthetic-session",
+      "updatedAtMs": 123
+    },
+    "uri": "scp://status/boundary"
+  },
+  "servers_list": {
+    "args": {},
+    "data": [
+      {
+        "id": "srv-1",
+        "name": "Example",
+        "host": "example.invalid",
+        "os": "linux",
+        "connectionMethod": "ssh",
+        "sshPort": 22,
+        "sshUser": "demo",
+        "boundaryTargetId": "",
+        "boundaryListenPort": 0,
+        "services": []
+      }
+    ],
+    "uri": "scp://servers/list"
+  },
+  "server_get": {
+    "args": {
+      "serverId": "srv-1"
+    },
+    "data": {
+      "id": "srv-1",
+      "name": "Example",
+      "host": "example.invalid",
+      "os": "linux",
+      "connectionMethod": "ssh",
+      "sshPort": 22,
+      "sshUser": "demo",
+      "boundaryTargetId": "",
+      "boundaryListenPort": 0,
+      "services": []
+    }
+  },
+  "config_get_paths": {
+    "args": {},
+    "data": {
+      "appConfigPath": "/tmp/config.json"
+    },
+    "uri": "scp://config/paths"
+  },
+  "openvpn_start": {
+    "args": {},
+    "data": {
+      "functionId": "openvpn-connect",
+      "sessionId": "openvpn-connect-session"
+    }
+  },
+  "openvpn_stop": {
+    "args": {},
+    "data": {}
+  },
+  "boundary_auth_start": {
+    "args": {},
+    "data": {
+      "functionId": "boundary-auth",
+      "sessionId": "boundary-auth-session"
+    }
+  },
+  "boundary_auth_stop": {
+    "args": {},
+    "data": {}
+  },
+  "server_tunnel_start": {
+    "args": {
+      "serverId": "srv-1"
+    },
+    "data": {
+      "functionId": "server-tunnel-srv-1",
+      "sessionId": "server-tunnel-srv-1-session"
+    }
+  },
+  "server_tunnel_stop": {
+    "args": {
+      "serverId": "srv-1"
+    },
+    "data": {}
+  },
+  "server_ssh_start": {
+    "args": {
+      "serverId": "srv-1"
+    },
+    "data": {
+      "functionId": "server-ssh-srv-1",
+      "sessionId": "server-ssh-srv-1-session"
+    }
+  },
+  "server_ssh_stop": {
+    "args": {
+      "serverId": "srv-1"
+    },
+    "data": {}
+  },
+  "caddy_start": {
+    "args": {
+      "folder": "/tmp/caddy"
+    },
+    "data": {
+      "functionId": "caddy",
+      "sessionId": "caddy-session"
+    }
+  },
+  "caddy_stop": {
+    "args": {},
+    "data": {}
+  },
+  "server_upsert": {
+    "args": {
+      "server": {
+        "id": "srv-1",
+        "name": "Example",
+        "host": "example.invalid",
+        "os": "linux",
+        "connectionMethod": "ssh",
+        "sshPort": 22,
+        "sshUser": "demo",
+        "boundaryTargetId": "",
+        "boundaryListenPort": 0,
+        "services": []
+      }
+    },
+    "data": [
+      {
+        "id": "srv-1",
+        "name": "Example",
+        "host": "example.invalid",
+        "os": "linux",
+        "connectionMethod": "ssh",
+        "sshPort": 22,
+        "sshUser": "demo",
+        "boundaryTargetId": "",
+        "boundaryListenPort": 0,
+        "services": []
+      }
+    ]
+  },
+  "server_delete": {
+    "args": {
+      "id": "srv-1"
+    },
+    "data": []
+  },
+  "config_save": {
+    "args": {
+      "config": {
+        "app": {
+          "defaultTerminalCols": 120,
+          "defaultTerminalRows": 36
+        }
+      }
+    },
+    "data": {
+      "app": {
+        "defaultTerminalCols": 120,
+        "defaultTerminalRows": 36
+      },
+      "openvpn": {
+        "username": "demo",
+        "terminateOpenVpnWhenHelperExits": false,
+        "autoReconnectEnabled": false,
+        "autoReconnectBaseSeconds": 5,
+        "autoReconnectMaxSeconds": 60
+      },
+      "boundary": {
+        "addr": "",
+        "authMethodId": "",
+        "loginName": "",
+        "authKind": "password",
+        "oidcLoginMode": "browser",
+        "oidcUsername": ""
+      }
+    }
+  },
+  "config_save_partial": {
+    "args": {
+      "patch": {
+        "openvpn": {
+          "username": "demo"
+        }
+      }
+    },
+    "data": {
+      "app": {
+        "defaultTerminalCols": 120,
+        "defaultTerminalRows": 36
+      },
+      "openvpn": {
+        "username": "demo",
+        "terminateOpenVpnWhenHelperExits": false,
+        "autoReconnectEnabled": false,
+        "autoReconnectBaseSeconds": 5,
+        "autoReconnectMaxSeconds": 60
+      },
+      "boundary": {
+        "addr": "",
+        "authMethodId": "",
+        "loginName": "",
+        "authKind": "password",
+        "oidcLoginMode": "browser",
+        "oidcUsername": ""
+      }
+    }
+  },
+  "sync_settings_get": {
+    "args": {},
+    "data": {
+      "repoRoot": "/tmp/config",
+      "openvpnExecutablePath": "",
+      "openvpnOvpnPath": "",
+      "boundaryCliPath": "",
+      "caddyFolder": "",
+      "mcpBindAddress": "127.0.0.1",
+      "mcpSensitiveActionPolicy": "allow-with-token",
+      "ccServerUrl": "",
+      "ccAuthMode": "",
+      "ccDeviceId": "",
+      "ccDeviceName": "",
+      "mcpEnabled": true,
+      "mcpPort": 46739,
+      "mcpAllowedToolCategories": [
+        "read-only"
+      ],
+      "ccEnabled": false,
+      "firstRunCompleted": true
+    }
+  },
+  "sync_settings_save_partial": {
+    "args": {
+      "patch": {
+        "repoRoot": "/tmp/config"
+      }
+    },
+    "data": {
+      "repoRoot": "/tmp/config",
+      "openvpnExecutablePath": "",
+      "openvpnOvpnPath": "",
+      "boundaryCliPath": "",
+      "caddyFolder": "",
+      "mcpBindAddress": "127.0.0.1",
+      "mcpSensitiveActionPolicy": "allow-with-token",
+      "ccServerUrl": "",
+      "ccAuthMode": "",
+      "ccDeviceId": "",
+      "ccDeviceName": "",
+      "mcpEnabled": true,
+      "mcpPort": 46739,
+      "mcpAllowedToolCategories": [
+        "read-only"
+      ],
+      "ccEnabled": false,
+      "firstRunCompleted": true
+    }
+  },
+  "remote_browser_open": {
+    "args": {
+      "serverId": "srv-1"
+    },
+    "data": {
+      "browserId": "browser-1",
+      "rootPath": "/home/demo"
+    }
+  },
+  "remote_browser_close": {
+    "args": {
+      "browserId": "browser-1"
+    },
+    "data": {}
+  },
+  "remote_browser_list_children": {
+    "args": {
+      "browserId": "browser-1",
+      "path": "/home/demo"
+    },
+    "data": [
+      {
+        "name": "folder",
+        "path": "/home/demo/folder",
+        "kind": "directory"
+      }
+    ]
+  },
+  "remote_browser_stat_path": {
+    "args": {
+      "browserId": "browser-1",
+      "path": "/missing"
+    },
+    "data": {
+      "path": "/missing",
+      "kind": "unknown",
+      "exists": false
+    }
+  },
+  "remote_browser_create_directory": {
+    "args": {
+      "browserId": "browser-1",
+      "path": "/home/demo/folder"
+    },
+    "data": {}
+  },
+  "remote_browser_delete_path": {
+    "args": {
+      "browserId": "browser-1",
+      "path": "/home/demo/folder"
+    },
+    "data": {}
+  },
+  "scp_upload": {
+    "args": {
+      "serverId": "srv-1",
+      "localPath": "/tmp/file",
+      "remotePath": "/home/demo/file",
+      "recursive": false
+    },
+    "data": {
+      "result": "Operation completed; inspect the local desktop for details."
+    }
+  },
+  "scp_download": {
+    "args": {
+      "serverId": "srv-1",
+      "localPath": "/tmp/file",
+      "remotePath": "/home/demo/file",
+      "recursive": false
+    },
+    "data": {
+      "result": "Operation completed; inspect the local desktop for details."
+    }
+  },
+  "scp_start_upload": {
+    "args": {
+      "serverId": "srv-1",
+      "localPath": "/tmp/file",
+      "remotePath": "/home/demo/file",
+      "recursive": false
+    },
+    "data": {
+      "sessionId": "scp-session"
+    }
+  },
+  "scp_start_download": {
+    "args": {
+      "serverId": "srv-1",
+      "localPath": "/tmp/file",
+      "remotePath": "/home/demo/file",
+      "recursive": false
+    },
+    "data": {
+      "sessionId": "scp-session"
+    }
+  },
+  "scp_transfer_list": {
+    "args": {},
+    "data": [
+      {
+        "id": "transfer-1",
+        "title": "",
+        "detail": "",
+        "state": "completed",
+        "createdAtMs": 1,
+        "updatedAtMs": 2,
+        "progressPercent": 100,
+        "source": null,
+        "destination": null,
+        "sessionId": "scp-session"
+      }
+    ]
+  },
+  "scp_transfer_get": {
+    "args": {
+      "transferId": "transfer-1"
+    },
+    "data": {
+      "id": "transfer-1",
+      "title": "",
+      "detail": "",
+      "state": "completed",
+      "createdAtMs": 1,
+      "updatedAtMs": 2,
+      "progressPercent": 100,
+      "source": null,
+      "destination": null,
+      "sessionId": "scp-session"
+    }
+  },
+  "config_sync_pull": {
+    "args": {
+      "repoRoot": "/tmp/config"
+    },
+    "data": {},
+    "unavailable": true
+  },
+  "config_sync_push": {
+    "args": {
+      "repoRoot": "/tmp/config"
+    },
+    "data": {},
+    "unavailable": false
+  },
+  "config_git_pull": {
+    "args": {
+      "repoRoot": "/tmp/config"
+    },
+    "data": {},
+    "unavailable": true
+  },
+  "config_git_push": {
+    "args": {
+      "repoRoot": "/tmp/config"
+    },
+    "data": {},
+    "unavailable": true
+  }
+}

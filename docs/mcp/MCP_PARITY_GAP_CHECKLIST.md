@@ -1,8 +1,8 @@
 # SuperControlPanel MCP and Helper Parity Gap Checklist
 
-## Slice 2 status
+## Slice 3 status
 
-Standard `/mcp` implements only `function_status_list` and `scp://status/functions`, with official-client schema/query/error/auth and JSON/SSE tests for both pinned revisions. The remaining existing surface migration, lifecycle/event work, parity additions, Config UX, and native/end-user-client qualification remain open. See [Slice 2 evidence](DESKTOP_STREAMABLE_HTTP_SLICE2.md).
+The existing 40-tool catalog and five resources are adapted to standard `/mcp`, with three protected import/Git tools explicitly unavailable. Official-client tests cover all rows, JSON/SSE, both pinned revisions, schemas, safe errors and policy denial. Existing desktop action payloads/runtime ownership are preserved. Lifecycle/events, reviewed parity additions, Config UX and native/end-user-client qualification remain open. See [Slice 3 evidence](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 ## Purpose
 

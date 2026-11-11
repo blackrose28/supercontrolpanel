@@ -1,8 +1,8 @@
 # SuperControlPanel MCP Security Model
 
-## Slice 2 standard endpoint
+## Slice 3 standard endpoint
 
-`/mcp` exposes only the read-only function-status operation and its resource. Both execute through the same Slice 1 authorization, validation, backup gate, safe DTO projection, and output checks as legacy calls. Every discovery/call/read checks current policy; a legacy session does not confer authority. All HTTP routes reject missing/invalid bearer (401), browser Origin and invalid Host/port (403). Legacy auth errors retain the existing envelope fields. Operational tool failures use `isError: true` with safe stable application codes; invalid arguments and resources use SDK protocol errors. See [Slice 2 verification](DESKTOP_STREAMABLE_HTTP_SLICE2.md). Subscription revocation, worker limits, and cancellation ownership remain Slice 4 work.
+All existing standard tools/resources use Slice 1 authorization, validation, backup gate, safe DTOs and output checks through the shared desktop host. Discovery and execution check current policy; sessions confer no authority. Sensitive operations require local `allow-with-token` and their category. Protected config imports and Git remain capability-blocked, including direct calls to hidden names. MCP/CC authority and local launch configuration remain protected. All HTTP routes require bearer auth and reject browser Origin and invalid Host/port. Operational errors omit runtime diagnostics. See [Slice 3 verification](DESKTOP_STREAMABLE_HTTP_SLICE3.md). Stream revocation, worker bounds and cancellation qualification remain Slice 4.
 
 ## Security goals
 

@@ -294,14 +294,14 @@ fn desktop_protocol_host(app: AppHandle) -> super::protocol::ProtocolHost {
     super::protocol::ProtocolHost {
         permitted: Arc::new(move || {
             allowed_mcp_tools(&discovery_app)
-                .map(|tools| tools.iter().any(|t| t.name == "function_status_list"))
+                .map(|tools| tools.into_iter().map(|t| t.name).collect())
                 .map_err(super::contracts::classify_host_error)
         }),
-        execute: Arc::new(move |args| {
-            audit_mcp_call("tool.call", "function_status_list", &args);
+        execute: Arc::new(move |name, args| {
+            audit_mcp_call("tool.call", name, &args);
             call_mcp_tool(
                 &execution_app,
-                "function_status_list",
+                name,
                 args,
                 crate::services::now_ms,
                 "openvpn-connect",

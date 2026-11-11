@@ -1,8 +1,8 @@
 # SuperControlPanel Helper CLI Spec
 
-## Slice 2 compatibility
+## Slice 3 compatibility
 
-The helper still uses the base URL and REST routes (`/mcp/status`, `/mcp/tools/call`, etc.), with the existing descriptor and `ok/message/data/warnings/timestamp` shapes. It does not speak JSON-RPC or append `/mcp` to its configured endpoint. The SDK is mounted at exact `/mcp` so it cannot intercept helper paths. The integration test executes the helper's `function list` against the shared router. Host/Origin security checks now also apply to helper routes. The `--hidden` example below is historical; Slice 1 rejects that argument.
+The helper continues using the six REST compatibility routes, endpoint/token discovery and existing envelope shapes. Standard MCP now adapts the existing registry catalog at `/mcp`; it does not replace or redirect helper routes. The compiled helper `function list` is exercised against the shared router in JSON and SSE test modes. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 ## Purpose
 

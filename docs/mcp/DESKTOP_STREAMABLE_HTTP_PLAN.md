@@ -1,6 +1,8 @@
 # Desktop MCP over Streamable HTTP
 
-Status: Slice 1 policy and safe contracts implemented on legacy adapters; standard HTTP implementation remains planned. Slice 0 inventory and isolated SDK/client HTTP feasibility verified on Linux. Native platform and integrated application qualification remain open.
+Status: Slices 1–3 implemented: shared safe contracts/policy and SDK HTTP adapter for the existing catalog. Lifecycle/events, reviewed parity additions, Config UX and native application qualification remain open.
+
+[Slice 3 implementation and verification](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 [Slice 1 implementation, compatibility corrections, and TDD evidence](DESKTOP_STREAMABLE_HTTP_SLICE1.md).
 Source assessment: 2026-11-11, repository baseline `e120a2bd6`.
@@ -155,6 +157,8 @@ Every code increment follows repository strict TDD: write a behavioral test, run
 | 4. Lifecycle and events | Cancellation, status/transfer event bridge, bounded workers/queues, listener reconfiguration | Disconnect, slow-client, rotation, concurrent calls, backup/recovery gate tests |
 | 5. Reviewed parity additions | Target search, executable detection, approved RDP/credential operations | Capability, policy, platform/error tests for each addition |
 | 6. Config UX and qualification | Tested setup examples, docs, real-client and native smoke evidence | Release checklist below; no unsupported interoperability claims |
+
+Slice 3 implementation and verification: [DESKTOP_STREAMABLE_HTTP_SLICE3.md](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 Slice 2 implementation and verification: [DESKTOP_STREAMABLE_HTTP_SLICE2.md](DESKTOP_STREAMABLE_HTTP_SLICE2.md).
 

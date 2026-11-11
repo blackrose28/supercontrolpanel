@@ -117,7 +117,7 @@ npm run helper:run -- openvpn status
 
 ## MCP support
 
-SuperControlPanel exposes **localhost Streamable HTTP MCP at `/mcp`** with a deliberately small read-only surface, alongside the existing REST helper routes.
+SuperControlPanel exposes **localhost Streamable HTTP MCP at `/mcp`** for the existing operation catalog, alongside the existing REST helper routes.
 
 Current implementation highlights:
 
@@ -132,7 +132,7 @@ Current implementation highlights:
 
 [Slice 1 compatibility and test record](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE1.md) documents protected fields, stricter inputs, filtered discovery, and reduced remote diagnostics.
 
-Standard `/mcp` currently advertises only `function_status_list` and `scp://status/functions`. Both return `{ "statuses": [...] }` using the safe function-status DTO. Standard calls publish input/output schemas and structured plus text results. Other operations remain available only through the policy-controlled REST/Tauri paths until later slices.
+Standard `/mcp` adapts all 40 existing tools and five resources. Discovery filters current policy/categories and unavailable capabilities (37 tools with all categories and `allow-with-token`). Config import and Git calls remain blocked pending review. `function_status_list` and its resource retain `{ "statuses": [...] }`; other tools/resources return `{ "result": <safe legacy data> }`. Calls publish input/output schemas and matching structured/text results. See [Slice 3 contracts and verification](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 Current compatibility HTTP routes:
 
