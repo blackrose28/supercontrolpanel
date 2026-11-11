@@ -311,6 +311,7 @@ pub fn open_remote_browser_with_id(
     function_store: &FunctionStore,
     server_tunnel_function_id: fn(&str) -> String,
 ) -> Result<RemoteBrowseSession, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     close_all_remote_browser_sessions(browser_store)?;
     let server = load_server_by_id(app, &server_id)?;
     ensure_boundary_tunnel_running(function_store, &server, server_tunnel_function_id)?;

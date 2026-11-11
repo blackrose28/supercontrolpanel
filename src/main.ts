@@ -17,6 +17,8 @@ import {
 } from "./scpTransferState";
 import { uniqueDirectoryChildPathsForTree } from "./scpPickerTreeHelpers";
 import { withTimeout } from "./scpPickerAsync";
+import { mountSettingsBackup } from "./settingsBackupUi";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { buildEnrollmentFormDefaultsFromCcConfig } from "./ccEnrollmentFormDefaults";
 
 type PtyOutputPayload = {
@@ -4076,4 +4078,15 @@ syncCaddyButtons();
 
 window.addEventListener("beforeunload", () => {
   void detachListeners();
+});
+
+mountSettingsBackup({
+  invoke,
+  selectExport: () => saveDialog({ title: "Export encrypted settings", defaultPath: "supercontrolpanel.scpbak", filters: [{ name: "Encrypted settings backup", extensions: ["scpbak"] }] }),
+  selectImport: async () => {
+    const selected = await openDialog({ title: "Import encrypted settings", multiple: false, directory: false, filters: [{ name: "Encrypted settings backup", extensions: ["scpbak"] }] });
+    return typeof selected === "string" ? selected : null;
+  },
+  confirmOverwrite: () => ask("Write the encrypted backup to this destination? An existing file will be replaced.", { title: "Export settings", kind: "warning" }),
+  afterImport: async () => { await loadSyncSettings(); await loadConfig(); await loadServers(); },
 });

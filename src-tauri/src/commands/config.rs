@@ -16,6 +16,7 @@ use crate::services::{
 use crate::{CONFIG_FILE_NAME, SERVERS_FILE_NAME, SYNC_SETTINGS_FILE_NAME};
 
 pub(crate) fn load_app_config_from_disk(app: &AppHandle) -> Result<AppConfig, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let path = config_file_path(app, CONFIG_FILE_NAME)?;
     let mut config = if !path.exists() {
         default_app_config()
@@ -126,6 +127,8 @@ pub(crate) fn load_app_config_from_disk(app: &AppHandle) -> Result<AppConfig, St
 }
 
 fn save_app_config_to_disk(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
+    crate::settings_backup::gate::changed();
     let path = config_file_path(app, CONFIG_FILE_NAME)?;
     let disk = AppConfigForDisk::from(config);
     let serialized =
@@ -134,6 +137,7 @@ fn save_app_config_to_disk(app: &AppHandle, config: &AppConfig) -> Result<(), St
 }
 
 fn save_local_app_settings(app: &AppHandle, config: &AppConfig) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let mut sync_settings = load_sync_settings_from_disk(app, SYNC_SETTINGS_FILE_NAME)?;
     sync_settings.openvpn_executable_path = config.openvpn.executable_path.trim().to_string();
     sync_settings.openvpn_ovpn_path = config.openvpn.ovpn_path.trim().to_string();
@@ -142,6 +146,7 @@ fn save_local_app_settings(app: &AppHandle, config: &AppConfig) -> Result<(), St
 }
 
 pub(crate) fn get_app_config_action(app: AppHandle) -> Result<AppConfig, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let config = load_app_config_from_disk(&app)?;
     scp_debug!(
         "get_app_config: exe_len={} ovpn_len={} user_len={} password_in_memory={} otp_configured={}",
@@ -175,6 +180,7 @@ pub(crate) fn save_sync_settings_action(
     settings: SyncSettingsPatch,
     mcp_state: State<'_, McpRuntimeState>,
 ) -> Result<SyncSettings, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let mut merged = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     if let Some(repo_root) = settings.repo_root {
         merged.repo_root = repo_root;
@@ -271,6 +277,7 @@ pub async fn enroll_device(
     device_name: Option<String>,
     mcp_state: State<'_, McpRuntimeState>,
 ) -> Result<EnrollResult, String> {
+    let _pending_settings_change = crate::settings_backup::gate::begin_async_change()?;
     let server_url = server_url.trim();
     let bootstrap_token = bootstrap_token.trim();
 
@@ -325,6 +332,7 @@ pub async fn enroll_device(
     let enroll_response: EnrollResponse = serde_json::from_str(&response_body)
         .map_err(|e| format!("Invalid enrollment response: {e}"))?;
 
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let mut merged = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     merged.cc_enabled = true;
     merged.cc_server_url = server_url.to_string();
@@ -371,6 +379,7 @@ pub struct EnrollResult {
 
 #[tauri::command]
 pub async fn revoke_my_device(app: AppHandle) -> Result<String, String> {
+    let _pending_settings_change = crate::settings_backup::gate::begin_async_change()?;
     let settings = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
 
     if !settings.cc_enabled
@@ -407,6 +416,7 @@ pub async fn revoke_my_device(app: AppHandle) -> Result<String, String> {
     .await
     .map_err(|e| format!("Revoke task panicked: {e}"))??;
 
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let mut merged = load_sync_settings_from_disk(&app, SYNC_SETTINGS_FILE_NAME)?;
     merged.cc_enabled = false;
     merged.cc_server_url = String::new();
@@ -421,6 +431,8 @@ pub async fn revoke_my_device(app: AppHandle) -> Result<String, String> {
 }
 
 pub(crate) fn sync_config_pull_action(app: AppHandle, repo_root: String) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
+    crate::settings_backup::gate::changed();
     let repo_root = repo_root.trim();
     if repo_root.is_empty() {
         return Err("repoRoot cannot be empty".into());
@@ -459,6 +471,7 @@ pub fn sync_config_pull(app: AppHandle, repo_root: String) -> Result<(), String>
 }
 
 pub(crate) fn sync_config_push_action(app: AppHandle, repo_root: String) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let repo_root = repo_root.trim();
     if repo_root.is_empty() {
         return Err("repoRoot cannot be empty".into());
@@ -602,10 +615,10 @@ pub(crate) fn save_app_config_action(
     app: AppHandle,
     mut config: AppConfig,
 ) -> Result<AppConfig, String> {
-    let _incoming_pw_len = config.openvpn.password.len();
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let _incoming_otp_len = config.openvpn.otp_secret.len();
     if !config.openvpn.password.is_empty() {
-        scp_debug!("save_app_config: writing password to keyring (len={_incoming_pw_len})");
+        scp_debug!("save_app_config: writing password to keyring");
         keyring_set_or_delete(KEYRING_OPENVPN_PASSWORD, &config.openvpn.password)?;
     } else if let Some(p) = keyring_get_optional(KEYRING_OPENVPN_PASSWORD)? {
         scp_debug!(

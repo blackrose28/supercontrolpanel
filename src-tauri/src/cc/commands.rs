@@ -54,6 +54,7 @@ pub(crate) fn sync_cc_status_from_settings(app: &AppHandle) -> Result<(), String
 
 #[tauri::command]
 pub async fn init_cc_connection(app: AppHandle) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let settings =
         load_sync_settings_from_disk(&app, "sync-local.json").map_err(|e| e.to_string())?;
     let generation = app.state::<CcRuntimeState>().begin_generation();
@@ -80,6 +81,7 @@ pub async fn init_cc_connection(app: AppHandle) -> Result<String, String> {
         ),
     );
 
+    crate::settings_backup::gate::mark_cc_started();
     let connection = CcConnection::new(
         settings.cc_server_url.clone(),
         settings.cc_agent_token.clone(),

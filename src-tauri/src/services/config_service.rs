@@ -216,6 +216,7 @@ pub fn load_sync_settings_from_disk(
     app: &AppHandle,
     sync_settings_file_name: &str,
 ) -> Result<SyncSettings, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let path = sync_settings_path(app, sync_settings_file_name)?;
     if !path.exists() {
         return Ok(SyncSettings::default());
@@ -247,6 +248,8 @@ pub fn save_sync_settings_to_disk(
     settings: &SyncSettings,
     sync_settings_file_name: &str,
 ) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
+    crate::settings_backup::gate::changed();
     let path = sync_settings_path(app, sync_settings_file_name)?;
     let encoded = serde_json::to_string_pretty(settings)
         .map_err(|e| format!("failed to encode sync settings: {e}"))?;
@@ -322,6 +325,7 @@ pub fn keyring_load_from_os(account: &str) -> Result<Option<String>, String> {
 /// startup by `initialize_keyring_cache`), so this never triggers an OS
 /// keyring unlock prompt.
 pub fn keyring_get_optional(account: &str) -> Result<Option<String>, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     Ok(crate::stores::keyring_cache_get(account))
 }
 
@@ -329,6 +333,8 @@ pub fn keyring_get_optional(account: &str) -> Result<Option<String>, String> {
 /// persistence across app restarts) and the in-memory cache (so subsequent
 /// reads see the new value immediately without hitting the OS keyring).
 pub fn keyring_set_or_delete(account: &str, value: &str) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
+    crate::settings_backup::gate::changed();
     // 1. Write to OS keyring for persistence.
     let e = keyring_entry(account)?;
     if value.is_empty() {

@@ -166,6 +166,10 @@ pub(crate) fn handle_openvpn_terminal_state(app: &AppHandle, state: &str, reason
         if delay_secs > 0 {
             thread::sleep(Duration::from_secs(delay_secs));
         }
+        let _settings_guard = match crate::settings_backup::gate::wait_for_maintenance() {
+            Ok(guard) => guard,
+            Err(_) => return,
+        };
         {
             let reconnect_store = app_clone.state::<OpenVpnReconnectStore>();
             let mut reconnect = match reconnect_store.state.lock() {
@@ -276,6 +280,7 @@ pub(crate) fn start_openvpn_action(
     function_store: State<'_, FunctionStore>,
     _admin_store: State<'_, OpenVpnAdminStore>,
 ) -> Result<StartFunctionResult, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     scp_debug!("start_openvpn_function: invoked");
     let saved_config = load_app_config_from_disk(&app)?;
     let (resolved_openvpn, resolved_username, combined_password) = match prepare_openvpn_start(

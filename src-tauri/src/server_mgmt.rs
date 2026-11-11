@@ -70,6 +70,7 @@ fn servers_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 }
 
 pub fn load_servers(app: &AppHandle) -> Result<Vec<Server>, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let path = servers_path(app)?;
     if !path.exists() {
         return Ok(Vec::new());
@@ -81,6 +82,8 @@ pub fn load_servers(app: &AppHandle) -> Result<Vec<Server>, String> {
 }
 
 pub fn save_servers(app: &AppHandle, servers: &[Server]) -> Result<(), String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
+    crate::settings_backup::gate::changed();
     let path = servers_path(app)?;
     let file = ServersFile {
         servers: servers.to_vec(),

@@ -972,10 +972,49 @@
                     <div class="actions">
                         <button id="cfg-save">Save Config</button>
                         <button id="cfg-reload">Reload Config</button>
+                        <button id="cfg-export-settings">Export settings</button>
+                        <button id="cfg-import-settings">Import settings</button>
                         <span id="cfg-status" class="hint"></span>
                     </div>
                 </section>
             </main>
+            <dialog id="settings-backup-dialog" aria-labelledby="backup-title">
+                <h2 id="backup-title">Settings backup</h2>
+                <p>Encrypted backups include stored passwords and app tokens. Keep your backup passphrase safe; it cannot be recovered.</p>
+                <p id="backup-path" class="hint"></p>
+                <div class="form-grid">
+                    <label for="backup-passphrase">Backup passphrase</label>
+                    <input id="backup-passphrase" type="password" autocomplete="off" maxlength="4096" />
+                    <label for="backup-confirmation" class="backup-export-only">Confirm passphrase</label>
+                    <input id="backup-confirmation" class="backup-export-only" type="password" autocomplete="off" maxlength="4096" />
+                </div>
+                <fieldset id="backup-options" class="backup-import-only">
+                    <legend>Replace selected sections</legend>
+                    <label><input id="backup-shared" type="checkbox" checked /> Shared settings</label>
+                    <label><input id="backup-servers" type="checkbox" checked /> Server records</label>
+                    <label><input id="backup-local" type="checkbox" checked /> Device-local settings</label>
+                    <label><input id="backup-secrets" type="checkbox" checked /> Configured passwords and OTP secrets</label>
+                    <label><input id="backup-preserve-paths" type="checkbox" checked /> Preserve destination paths unless explicitly remapped below</label>
+                    <label><input id="backup-recover-identity" type="checkbox" /> Same-device recovery: restore original CC identity and MCP token, disabled</label>
+                    <p class="hint">Optional destination path overrides (blank keeps the selected path policy):</p>
+                    <div class="form-grid">
+                        <label for="backup-path-repoRoot">Sync repository root</label><input id="backup-path-repoRoot" data-backup-path="repoRoot" type="text" maxlength="4096" autocomplete="off" />
+                        <label for="backup-path-openvpnExecutablePath">OpenVPN executable</label><input id="backup-path-openvpnExecutablePath" data-backup-path="openvpnExecutablePath" type="text" maxlength="4096" autocomplete="off" />
+                        <label for="backup-path-openvpnOvpnPath">OVPN file</label><input id="backup-path-openvpnOvpnPath" data-backup-path="openvpnOvpnPath" type="text" maxlength="4096" autocomplete="off" />
+                        <label for="backup-path-boundaryCliPath">Boundary CLI</label><input id="backup-path-boundaryCliPath" data-backup-path="boundaryCliPath" type="text" maxlength="4096" autocomplete="off" />
+                        <label for="backup-path-caddyFolder">Caddy folder</label><input id="backup-path-caddyFolder" data-backup-path="caddyFolder" type="text" maxlength="4096" autocomplete="off" />
+                    </div>
+                    <p class="hint">Stop connections and transfers, close remote browsers, and disable MCP and CC before import. If CC has been running, restart after disabling it to stop reconnect loops.</p>
+                </fieldset>
+                <pre id="backup-preview" class="backup-import-only"></pre>
+                <label class="backup-import-only"><input id="backup-replace-confirm" type="checkbox" /> I reviewed the preview and confirm replacement of selected settings and credential deletions.</label>
+                <p id="backup-status" role="status"></p>
+                <div class="actions">
+                    <button id="backup-action">Preview backup</button>
+                    <button id="backup-replace" class="backup-import-only" disabled>Replace selected settings</button>
+                    <button id="backup-cancel">Cancel</button>
+                </div>
+            </dialog>
             <div id="enroll-overlay" class="modal-overlay enroll-overlay hidden" aria-hidden="true">
                 <div class="modal-panel" role="dialog" aria-label="Device enrollment">
                     <h2>Welcome to Super Control Panel</h2>

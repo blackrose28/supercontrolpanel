@@ -218,6 +218,14 @@ Pre-MCP refactor planning docs live under `docs/refactor/`:
       - Use a private Git repo as the source of truth for config.
       - Optionally place the repo clone inside a cloud-synced folder (Google Drive/OneDrive/Dropbox) so Git handles history/merging and the cloud service provides backup and multi-device availability.
 
+### Encrypted settings backup
+
+Config → **Export settings** creates a passphrase-encrypted `.scpbak` containing all three settings files and the app's known OS-keyring credentials, including per-server SSH passwords. Locked/unreadable credentials abort a full export. The passphrase must match its confirmation and cannot be recovered.
+
+**Import settings** authenticates the backup and shows a redacted preview before confirmed replacement of selected sections. Destination paths are preserved by default, with optional remapping. Portable imports rotate MCP access and require CC re-enrollment; MCP and CC remain disabled. Stop sessions/transfers and close remote browsers first; disable MCP/CC and restart if CC has been running. Active work is never terminated automatically.
+
+External certificate/key/OVPN/SSH-identity/Caddy files are referenced, not bundled. Boundary app tokens and telemetry queue keys remain encrypted in the archive but cannot be restored until their compatibility can be validated; the destination telemetry key stays intact, while a changed Boundary controller/auth identity clears the old app token for fresh login. Restore uses an encrypted crash-recovery journal. If recovery blocks startup, keep the journal/key, unlock the OS credential store and restart. See [backup scope, format and recovery](docs/mcp/SETTINGS_BACKUP.md) for details and platform qualification limits.
+
 ### Servers page (SSH / Boundary / SCP)
 
 - Each server record includes:

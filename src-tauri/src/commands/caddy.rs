@@ -17,6 +17,7 @@ pub(crate) fn start_caddy_action(
     session_store: State<'_, SessionStore>,
     function_store: State<'_, FunctionStore>,
 ) -> Result<StartFunctionResult, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     start_caddy_run_service(
         cols,
         rows,

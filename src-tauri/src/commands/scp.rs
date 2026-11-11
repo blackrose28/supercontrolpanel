@@ -17,6 +17,7 @@ pub(crate) fn scp_upload_action(
     recursive: Option<bool>,
     transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let transfer_id = create_scp_transfer_entry(
         &transfer_store,
         now_ms,
@@ -79,6 +80,7 @@ pub(crate) fn start_scp_upload_action(
     recursive: Option<bool>,
     transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let transfer_id = create_scp_transfer_entry(
         &transfer_store,
         now_ms,
@@ -145,6 +147,7 @@ pub(crate) fn scp_download_action(
     recursive: Option<bool>,
     transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let transfer_id = create_scp_transfer_entry(
         &transfer_store,
         now_ms,
@@ -207,6 +210,7 @@ pub(crate) fn start_scp_download_action(
     recursive: Option<bool>,
     transfer_store: State<'_, ScpTransferStore>,
 ) -> Result<String, String> {
+    let _settings_guard = crate::settings_backup::gate::enter()?;
     let transfer_id = create_scp_transfer_entry(
         &transfer_store,
         now_ms,
