@@ -1,6 +1,6 @@
 # Desktop MCP over Streamable HTTP
 
-Status: Slices 1–5 implemented: shared safe contracts/policy, SDK HTTP adapter, bounded execution, lifecycle/resource invalidations and reviewed parity additions. Config UX and native application qualification remain Slice 6.
+Status: Slices 1–6 implemented, with Linux qualification recorded in [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md). Config now exposes the full endpoint, separate token copy, tested Inspector examples and runtime recovery controls. Cross-platform release sign-off remains gated on native Windows/macOS, external auth/keyring/session workflows and additional client evidence; see the explicit qualification limits.
 
 [Slice 5 implementation, policy review and verification](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
 
@@ -162,6 +162,8 @@ Every code increment follows repository strict TDD: write a behavioral test, run
 | 5. Reviewed parity additions | Target search, executable detection, approved RDP/credential operations | Capability, policy, platform/error tests for each addition |
 | 6. Config UX and qualification | Tested setup examples, docs, real-client and native smoke evidence | Release checklist below; no unsupported interoperability claims |
 
+Slice 6 implementation, setup and qualification: [DESKTOP_STREAMABLE_HTTP_SLICE6.md](DESKTOP_STREAMABLE_HTTP_SLICE6.md).
+
 Slice 3 implementation and verification: [DESKTOP_STREAMABLE_HTTP_SLICE3.md](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 Slice 2 implementation and verification: [DESKTOP_STREAMABLE_HTTP_SLICE2.md](DESKTOP_STREAMABLE_HTTP_SLICE2.md).
@@ -169,6 +171,8 @@ Slice 2 implementation and verification: [DESKTOP_STREAMABLE_HTTP_SLICE2.md](DES
 Complete the policy foundation before enabling mutations through the standard endpoint. Slice 2 may land behind the existing disabled-by-default setting while later families are migrated; clearly expose the implemented subset.
 
 ## Acceptance tests and release checklist
+
+This is the full release gate, not a claim that every OS/external-system workflow has been exercised. Slices 1–5 record automated contract evidence; [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records the completed Config work, Linux native/client results and remaining gates. Unchecked composite items still require the broader qualification stated in each item.
 
 - [ ] Every advertised revision passes its lifecycle/metadata, JSON/SSE, notifications, malformed input, unsupported-version, and cancellation fixtures using the pinned SDK client. Test revisions independently; no blended lifecycle assumptions.
 - [ ] Every current tool/resource has a preserved or deliberately changed contract, schema, policy decision, and acceptance test. Forbidden config changes fail through both REST and MCP, including indirect sync/git imports.
@@ -180,10 +184,10 @@ Complete the policy foundation before enabling mutations through the standard en
 - [ ] Playwright covers Config enable/disable, full endpoint, token handling, accurate blocked-policy presentation, runtime error/restart state, and client-example controls. Mocked IPC tests are supplemented by native desktop smoke tests.
 - [ ] Backup restore/recovery and local settings patches still coordinate correctly with listener reconfiguration and concurrent calls. A restore cannot leave stale authorized streams active.
 - [ ] Real-client smoke evidence records client/SDK versions, protocol, OS, bearer configuration, discovery, one safe query, one permitted mutation, one denial, and reconnect behavior. Windows/macOS/Linux desktop builds and native elevation/keyring limitations are recorded honestly.
-- [ ] README and current transport/security/schema/catalog/parity/helper docs describe the shipped behavior and retained compatibility routes. Remove stale claims only when corresponding behavior lands.
+- [x] README and current transport/security/schema/catalog/parity/helper docs describe the shipped behavior and retained compatibility routes. Remove stale claims only when corresponding behavior lands.
 
 Use `cargo test --manifest-path src-tauri/Cargo.toml`, `npx playwright test`, and `npm run build` as the current baseline, selecting focused tests during RED/GREEN. Add SDK client integration tests to the appropriate Rust test boundary. The root has no `npm test` script. Before completion/commit inspect the diff and run required Ripwire quality/change checks for code; record environment-dependent failures instead of claiming native coverage from mocks.
 
 ## Decisions still requiring spike evidence
 
-The preferred defaults are one SDK protocol adapter, one loopback listener, shared operation policy, retained REST compatibility, desktop-owned long-running work, and a bounded snapshot/event model. Slice 0 establishes the candidate dependency versions and both revisions with the tested clients. Remaining gates are native Windows/macOS desktop builds, intended end-user client support beyond Inspector, async Tauri integration, per-operation deadlines and queue tuning, protected config-sync staging, and RDP/credential policy details. See the qualification report for precise limits; none requires the full CLI refactor.
+The preferred defaults are one SDK protocol adapter, one loopback listener, shared operation policy, retained REST compatibility, desktop-owned long-running work, and a bounded snapshot/event model. Slice 0 establishes the candidate dependency versions and both revisions with the tested clients. Remaining gates are native Windows/macOS desktop builds, intended end-user client support beyond Inspector, native external auth/elevation/keyring/session workflows, broader Config native interaction and deadline/queue tuning. Async Tauri routing/lifecycle and reviewed RDP/credential contracts are implemented and tested; protected config-sync staging remains deliberately unavailable remotely. See the qualification report for precise limits; none requires the full CLI refactor.

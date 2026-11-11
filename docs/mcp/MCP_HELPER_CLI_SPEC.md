@@ -1,5 +1,10 @@
 # SuperControlPanel Helper CLI Spec
 
+## Slice 6 qualification
+
+Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.
+
+
 ## Slice 3 compatibility
 
 The helper continues using the six REST compatibility routes, endpoint/token discovery and existing envelope shapes. Standard MCP now adapts the existing registry catalog at `/mcp`; it does not replace or redirect helper routes. The compiled helper `function list` is exercised against the shared router in JSON and SSE test modes. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md).

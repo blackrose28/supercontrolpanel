@@ -1,5 +1,10 @@
 # SuperControlPanel MCP Tool Schemas
 
+## Slice 6 qualification
+
+Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.
+
+
 ## Slice 3 standard result schemas
 
 All standard tools publish the executable registry input/output schemas. Inputs reject unknown fields and invalid types/bounds. `function_status_list` and `scp://status/functions` retain `{ "statuses": [...] }`; every other tool/resource wraps the existing safe `data` payload as `{ "result": <data> }`, including arrays, null status, and empty mutation results. Structured content and JSON text agree; resources use `application/json`. REST envelopes stay unchanged. Unknown tools/invalid arguments use SDK invalid-params errors; operational failures use safe `isError: true` results; resource failures use SDK resource errors. See [Slice 3 fixtures and limits](DESKTOP_STREAMABLE_HTTP_SLICE3.md).

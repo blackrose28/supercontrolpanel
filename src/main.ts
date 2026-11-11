@@ -327,6 +327,10 @@ const cfgMcpAllowedConfigMutation = mustElement<HTMLInputElement>("#cfg-mcp-allo
 const cfgMcpSensitivePolicy = mustElement<HTMLSelectElement>("#cfg-mcp-sensitive-policy");
 const cfgMcpStatus = mustElement<HTMLElement>("#cfg-mcp-status");
 const cfgMcpSnippet = mustElement<HTMLElement>("#cfg-mcp-snippet");
+const cfgMcpEndpoint = mustElement<HTMLInputElement>("#cfg-mcp-endpoint");
+const cfgMcpExampleEra = mustElement<HTMLSelectElement>("#cfg-mcp-example-era");
+const cfgMcpPolicyHelp = mustElement<HTMLElement>("#cfg-mcp-policy-help");
+const cfgMcpActionStatus = mustElement<HTMLElement>("#cfg-mcp-action-status");
 const cfgCcEnabled = mustElement<HTMLInputElement>("#cfg-cc-enabled");
 const cfgCcServerUrl = mustElement<HTMLInputElement>("#cfg-cc-server-url");
 const cfgCcAuthMode = mustElement<HTMLSelectElement>("#cfg-cc-auth-mode");
@@ -1185,39 +1189,57 @@ async function refreshMcpRuntimeStatus() {
   try {
     const runtime = await invoke<McpRuntimeStatus>("mcp_get_runtime_status");
     if (runtime.lastError) {
-      cfgMcpStatus.textContent = `Error: ${runtime.lastError}`;
+      cfgMcpStatus.textContent = "Listener error. Check the bind address and port, then retry the listener.";
       return;
     }
     cfgMcpStatus.textContent = runtime.active
-      ? `Running ${runtime.transport} on ${runtime.bindAddress}:${runtime.port} (${runtime.implementationStage})`
+      ? `Running at http://${runtime.bindAddress.includes(":") ? `[${runtime.bindAddress}]` : runtime.bindAddress}:${runtime.port}/mcp (${runtime.implementationStage})`
       : runtime.enabled
         ? `Enabled but not active (${runtime.implementationStage})`
         : "Disabled in config.";
   } catch (e) {
-    cfgMcpStatus.textContent = `Status unavailable: ${String(e)}`;
+    cfgMcpStatus.textContent = "Status unavailable. Refresh status or retry the listener.";
   }
 }
 
 function renderMcpSnippet() {
-  const enabled = cfgMcpEnabled.checked;
   const bindAddress = cfgMcpBindAddress.value.trim() || "127.0.0.1";
+  const host = bindAddress.includes(":") && !bindAddress.startsWith("[")
+    ? `[${bindAddress}]` : bindAddress;
   const port = Number(cfgMcpPort.value) || 46739;
-  const token = cfgMcpAuthToken.value.trim();
-  const categories = readMcpAllowedToolCategories();
-  cfgMcpSnippet.textContent = JSON.stringify(
-    {
-      transport: "http",
-      url: `http://${bindAddress}:${port}`,
-      bearerToken: token || "(set token)",
-    },
-    null,
-    2,
-  );
+  cfgMcpEndpoint.value = `http://${host}:${port}/mcp`;
+  cfgMcpSnippet.textContent = [
+    'npx --yes @modelcontextprotocol/inspector@2.14.0 --cli',
+    '  --server-url "$SCP_MCP_URL" --transport http',
+    `  --protocol-era ${cfgMcpExampleEra.value} --header "Authorization: Bearer $SCP_MCP_TOKEN"`,
+    `  --method tools/call --tool-name function_status_list --tool-args-json '{}'`,
+  ].join(" \\\n");
+  cfgMcpPolicyHelp.textContent = cfgMcpSensitivePolicy.value === "allow-with-token"
+    ? "Token holders may launch and mutate within allowed categories. All clients share one local principal."
+    : "Sensitive launches and mutations are blocked. No approval queue is available. Use local controls or select Allow with token.";
+}
+
+async function copyMcpValue(value: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(value);
+    cfgMcpActionStatus.textContent = `${label} copied.`;
+  } catch {
+    cfgMcpActionStatus.textContent = "Copy failed. Check clipboard access and try again.";
+  }
+}
+
+async function saveMcpSettingsPatch(next: Partial<SyncSettings>) {
+  try {
+    await saveSyncSettingsPatch(next);
+    cfgMcpActionStatus.textContent = "MCP settings saved.";
+  } catch {
+    cfgMcpActionStatus.textContent = "Save failed. Reload Config to recover saved values, then try again.";
+  }
 }
 
 async function saveSyncSettingsPatch(next: Partial<SyncSettings>) {
-  syncSettings = { ...(syncSettings ?? { repoRoot: "" }), ...next };
   await invoke("save_sync_settings", { settings: next });
+  syncSettings = { ...(syncSettings ?? { repoRoot: "" }), ...next };
   renderMcpSnippet();
   await refreshMcpRuntimeStatus();
 }
@@ -3991,12 +4013,12 @@ cfgCaddyFolder.addEventListener("change", () => {
 });
 
 cfgMcpEnabled.addEventListener("change", () => {
-  void saveSyncSettingsPatch({ mcpEnabled: cfgMcpEnabled.checked }).catch(() => {});
+  void saveMcpSettingsPatch({ mcpEnabled: cfgMcpEnabled.checked });
 });
 
 cfgMcpBindAddress.addEventListener("change", () => {
   const mcpBindAddress = cfgMcpBindAddress.value.trim() || "127.0.0.1";
-  void saveSyncSettingsPatch({ mcpBindAddress }).catch(() => {});
+  void saveMcpSettingsPatch({ mcpBindAddress });
 });
 
 cfgMcpPort.addEventListener("change", () => {
@@ -4005,7 +4027,7 @@ cfgMcpPort.addEventListener("change", () => {
     cfgStatus.textContent = "MCP port must be 1-65535.";
     return;
   }
-  void saveSyncSettingsPatch({ mcpPort }).catch(() => {});
+  void saveMcpSettingsPatch({ mcpPort });
 });
 
 cfgMcpAuthToken.addEventListener("change", () => {
@@ -4014,13 +4036,13 @@ cfgMcpAuthToken.addEventListener("change", () => {
     cfgStatus.textContent = "MCP auth token cannot be empty.";
     return;
   }
-  void saveSyncSettingsPatch({ mcpAuthToken }).catch(() => {});
+  void saveMcpSettingsPatch({ mcpAuthToken });
 });
 
 cfgMcpTokenRegenerateBtn.addEventListener("click", () => {
   const mcpAuthToken = generateLocalMcpToken();
   cfgMcpAuthToken.value = mcpAuthToken;
-  void saveSyncSettingsPatch({ mcpAuthToken }).catch(() => {});
+  void saveMcpSettingsPatch({ mcpAuthToken });
 });
 
 for (const checkbox of [
@@ -4030,16 +4052,39 @@ for (const checkbox of [
   cfgMcpAllowedConfigMutation,
 ]) {
   checkbox.addEventListener("change", () => {
-    void saveSyncSettingsPatch({
+    void saveMcpSettingsPatch({
       mcpAllowedToolCategories: readMcpAllowedToolCategories(),
-    }).catch(() => {});
+    });
   });
 }
 
 cfgMcpSensitivePolicy.addEventListener("change", () => {
-  void saveSyncSettingsPatch({
+  void saveMcpSettingsPatch({
     mcpSensitiveActionPolicy: cfgMcpSensitivePolicy.value,
-  }).catch(() => {});
+  });
+});
+
+mustElement<HTMLButtonElement>("#cfg-mcp-copy-endpoint").addEventListener("click", () => {
+  void copyMcpValue(cfgMcpEndpoint.value, "Endpoint");
+});
+mustElement<HTMLButtonElement>("#cfg-mcp-copy-token").addEventListener("click", () => {
+  void copyMcpValue(cfgMcpAuthToken.value, "Token");
+});
+mustElement<HTMLButtonElement>("#cfg-mcp-copy-example").addEventListener("click", () => {
+  void copyMcpValue(cfgMcpSnippet.textContent ?? "", "Example");
+});
+cfgMcpExampleEra.addEventListener("change", renderMcpSnippet);
+mustElement<HTMLButtonElement>("#cfg-mcp-refresh").addEventListener("click", () => {
+  void refreshMcpRuntimeStatus();
+});
+mustElement<HTMLButtonElement>("#cfg-mcp-restart").addEventListener("click", async () => {
+  try {
+    await invoke("mcp_sync_runtime");
+    cfgMcpActionStatus.textContent = "Listener settings reapplied.";
+  } catch {
+    cfgMcpActionStatus.textContent = "Listener retry failed. Check saved settings and refresh status.";
+  }
+  await refreshMcpRuntimeStatus();
 });
 
 cfgCcSaveBtn.addEventListener("click", () => {

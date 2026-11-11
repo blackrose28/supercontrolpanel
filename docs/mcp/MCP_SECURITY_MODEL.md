@@ -1,8 +1,13 @@
 # SuperControlPanel MCP Security Model
 
+## Slice 6 qualification
+
+Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.
+
+
 ## Slice 3 standard endpoint
 
-All existing standard tools/resources use Slice 1 authorization, validation, backup gate, safe DTOs and output checks through the shared desktop host. Discovery and execution check current policy; sessions confer no authority. Sensitive operations require local `allow-with-token` and their category. Protected config imports and Git remain capability-blocked, including direct calls to hidden names. MCP/CC authority and local launch configuration remain protected. All HTTP routes require bearer auth and reject browser Origin and invalid Host/port. Operational errors omit runtime diagnostics. See [Slice 3 verification](DESKTOP_STREAMABLE_HTTP_SLICE3.md). [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) adds SDK stream revocation on listener replacement, shared worker bounds, pending-work cancellation and policy checks before snapshot invalidations. Accepted desktop handlers continue after disconnect; cancellation is checked at worker handoff. Native runtime qualification remains Slice 6.
+All existing standard tools/resources use Slice 1 authorization, validation, backup gate, safe DTOs and output checks through the shared desktop host. Discovery and execution check current policy; sessions confer no authority. Sensitive operations require local `allow-with-token` and their category. Protected config imports and Git remain capability-blocked, including direct calls to hidden names. MCP/CC authority and local launch configuration remain protected. All HTTP routes require bearer auth and reject browser Origin and invalid Host/port. Operational errors omit runtime diagnostics. See [Slice 3 verification](DESKTOP_STREAMABLE_HTTP_SLICE3.md). [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) adds SDK stream revocation on listener replacement, shared worker bounds, pending-work cancellation and policy checks before snapshot invalidations. Accepted desktop handlers continue after disconnect; cancellation is checked at worker handoff. Linux native qualification and remaining cross-platform/external-system gates are recorded in Slice 6.
 
 ## Slice 5 reviewed additions
 

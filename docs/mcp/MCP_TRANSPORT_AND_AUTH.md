@@ -1,10 +1,10 @@
 # SuperControlPanel MCP Transport and Auth
 
-## Implemented Slice 4 transport
+## Implemented Streamable HTTP transport
 
 One Axum listener serves the SDK at exact `/mcp` and all six REST compatibility routes without redirects. Pinned rmcp 3.9.0/Axum 0.8.8 and SDK-managed legacy sessions are unchanged. The adapter covers all existing registry tools/resources under shared policy, with official-client tests for 2025-11-25 and 2026-07-28. Standard JSON/SSE handling belongs to the SDK. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md) for contracts, tests and qualification limits.
 
-All routes require bearer auth, reject any Origin, and require Host `127.0.0.1:<port>`, `localhost:<port>`, or `[::1]:<port>`. Native requests omit Origin. Bodies are limited to 1 MiB. This remains a local static-bearer deployment without OAuth discovery or general remote-client claims. Listener status retains `transport: "http"` and `implementationStage: "http-streamable-slice2"`. Config UX and native qualification remain later slices. [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) documents shared worker limits, response/body deadlines, subscription invalidations, cancellation handoff and bounded listener shutdown. The transfer snapshot adds `scp://status/transfers` while preserving the five original resource URIs.
+All routes require bearer auth, reject any Origin, and require Host `127.0.0.1:<port>`, `localhost:<port>`, or `[::1]:<port>`. Native requests omit Origin. Bodies are limited to 1 MiB. This remains a local static-bearer deployment without OAuth discovery or general remote-client claims. Listener status retains `transport: "http"` and `implementationStage: "http-streamable-slice2"`. Config endpoint/token/example controls and Linux qualification are recorded in [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md); Windows/macOS and external-system qualification remain open. [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) documents shared worker limits, response/body deadlines, subscription invalidations, cancellation handoff and bounded listener shutdown. The transfer snapshot adds `scp://status/transfers` while preserving the five original resource URIs.
 
 Slice 5 extends the same registry/host to five reviewed parity tools; no routes, settings, SDK versions or command/event payloads change. Both HTTP surfaces retain bearer and category/sensitivity checks. [Slice 5 contracts and qualification limits](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
 
@@ -39,6 +39,8 @@ Use an embedded MCP server reachable from the local machine.
 - App shutdown should also stop the MCP server cleanly
 
 ## Helper CLI strategy
+
+The shipped helper uses REST compatibility routes and base-URL/token discovery. The examples below describe the original direction; standard-client configuration uses `/mcp` and the tested [Inspector setup](DESKTOP_STREAMABLE_HTTP_SLICE6.md).
 
 Do not add a second custom IPC protocol for one-shot command-line automation.
 
@@ -112,12 +114,12 @@ Use a single device-local bearer token stored in `sync-local.json`.
 - token is generated locally
 - token is device-local and not part of synced config
 - legacy `sync-local.json` files missing the token will get one generated on load
-- UI should later expose regenerate/copy actions without changing the storage contract
+- Config exposes masked token entry, regenerate and separate copy actions without changing the storage contract
 
 
 ## Current implementation status
 
-The current repo now includes a minimal in-process localhost HTTP listener.
+The current in-process Axum listener serves standard Streamable HTTP at `/mcp` and retains the REST compatibility endpoints below.
 
 ### Current local HTTP endpoints
 
@@ -146,7 +148,7 @@ The current repo now includes a minimal in-process localhost HTTP listener.
 
 ### Important note
 
-This is a **minimal localhost HTTP transport** for the current implementation phase. It is intentionally simpler than a full spec-complete MCP transport and should be treated as the repo's current working transport layer, not the final polish state.
+Standard transport uses the pinned SDK and the tested revisions/modes above. The legacy endpoints retain their envelope shapes for the helper. This deployment uses a local static bearer; it does not implement remote OAuth interoperability. Only the clients and platform workflows in [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) are qualified.
 
 ### Slice 1 policy corrections
 
@@ -154,7 +156,8 @@ Discovery, tool calls, resources, and Tauri MCP adapters share the registry's fa
 
 ### Current error behavior
 
-- malformed requests and MCP call failures return a standardized JSON envelope
+- standard `/mcp` uses SDK protocol errors and safe tool/resource errors; see [schemas](MCP_TOOL_SCHEMAS.md)
+- legacy REST malformed requests and call failures retain the standardized JSON envelope
 - envelope shape:
   - `ok: false`
   - `message`

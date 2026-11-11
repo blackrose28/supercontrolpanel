@@ -147,6 +147,8 @@ Current compatibility HTTP routes:
 
 All routes require the device-local bearer token, reject browser Origins, and validate the loopback Host and configured port. Use `http://127.0.0.1:<port>/mcp` (or `http://[::1]:<port>/mcp` for an IPv6 listener) for standard clients; the helper continues using the base URL.
 
+Config displays/copies the full `/mcp` endpoint, masks the token with a separate copy/regenerate action, and offers status refresh and listener retry. **Block sensitive actions** retains the stored `require-ui-approval` policy; no approval queue exists. Examples target the tested **Inspector CLI 2.14.0** with modern or legacy protocol selection and bearer headers supplied through shell variables. See [Slice 6 setup, results and release gates](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE6.md). Linux native app/client smoke is qualified separately from mocked UI tests; Windows/macOS and other product clients remain unqualified. REST stays through at least one stable release with the standard endpoint and a reviewed helper migration path.
+
 MCP calls share a 16-worker limit. Accepted desktop work continues after disconnect or listener restart; query status before retrying a lost response. Standard clients can subscribe to status and transfer snapshot invalidations, including `scp://status/transfers`, or poll snapshots. See [Slice 4 lifecycle and limits](docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE4.md).
 
 Detailed design docs live under `docs/mcp/`:

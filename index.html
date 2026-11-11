@@ -720,11 +720,16 @@
                             max="65535"
                             placeholder="46739"
                         />
+                        <label for="cfg-mcp-endpoint">Standard MCP endpoint</label>
+                        <div class="inline-input-actions single-action">
+                            <input id="cfg-mcp-endpoint" type="text" readonly />
+                            <button id="cfg-mcp-copy-endpoint" type="button">Copy endpoint</button>
+                        </div>
                         <label for="cfg-mcp-auth-token">Auth token</label>
                         <div class="inline-input-actions single-action">
                             <input
                                 id="cfg-mcp-auth-token"
-                                type="text"
+                                type="password"
                                 class="masked-secret"
                                 autocomplete="off"
                                 spellcheck="false"
@@ -732,6 +737,10 @@
                             <button id="cfg-mcp-token-regenerate" type="button">
                                 Regenerate
                             </button>
+                        </div>
+                        <div class="form-grid-span hint">
+                            <button id="cfg-mcp-copy-token" type="button">Copy token</button>
+                            Regenerating saves immediately and disconnects existing clients. Keep the token private.
                         </div>
                         <label for="cfg-mcp-allowed-read-only">Allowed tool categories</label>
                         <div class="form-grid-span">
@@ -754,15 +763,28 @@
                         </div>
                         <label for="cfg-mcp-sensitive-policy">Sensitive action policy</label>
                         <select id="cfg-mcp-sensitive-policy">
-                            <option value="require-ui-approval">Require UI approval</option>
+                            <option value="require-ui-approval">Block sensitive actions</option>
                             <option value="allow-with-token">Allow with token</option>
                         </select>
+                        <p id="cfg-mcp-policy-help" class="form-grid-span hint"></p>
                         <div class="form-grid-span hint">
                             MCP status: <span id="cfg-mcp-status">Not configured yet.</span>
                         </div>
                         <div class="form-grid-span hint">
-                            MCP client snippet:
-                            <code id="cfg-mcp-snippet">(load Config first)</code>
+                            <button id="cfg-mcp-refresh" type="button">Refresh status</button>
+                            <button id="cfg-mcp-restart" type="button">Retry listener</button>
+                            <p id="cfg-mcp-action-status" role="status"></p>
+                        </div>
+                        <label for="cfg-mcp-example-era">Inspector CLI 2.14.0 (POSIX shell)</label>
+                        <select id="cfg-mcp-example-era">
+                            <option value="modern">2026-07-28 (modern)</option>
+                            <option value="legacy">2025-11-25 (legacy)</option>
+                        </select>
+                        <div class="form-grid-span hint">
+                            Set SCP_MCP_URL to the copied endpoint and SCP_MCP_TOKEN to the copied token in your shell.
+                            This example queries function status; it does not save credentials in the snippet.
+                            <pre><code id="cfg-mcp-snippet">(load Config first)</code></pre>
+                            <button id="cfg-mcp-copy-example" type="button">Copy example</button>
                         </div>
                     </div>
 

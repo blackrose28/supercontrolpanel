@@ -1,12 +1,17 @@
 # SuperControlPanel MCP and Helper Parity Gap Checklist
 
+## Slice 6 qualification
+
+Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.
+
+
 ## Slice 3 status
 
 The existing 40-tool catalog and five resources are adapted to standard `/mcp`, with three protected import/Git tools explicitly unavailable. Official-client tests cover all rows, JSON/SSE, both pinned revisions, schemas, safe errors and policy denial. Existing desktop action payloads/runtime ownership are preserved. Lifecycle/events, reviewed parity additions, Config UX and native/end-user-client qualification remain open. See [Slice 3 evidence](DESKTOP_STREAMABLE_HTTP_SLICE3.md).
 
 ## Slice 5 status
 
-Reviewed MCP gaps are implemented: target search, OpenVPN detection, conditional sensitive RDP launch and write-only SSH credential set/clear. The catalog now has 45 operations (42 discoverable with all categories and allow-with-token), with six resources and Slice 4 snapshot invalidations. Config UX, intended-client/native qualification and helper subcommands remain open. See [Slice 5 policy, tests and limitations](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
+Reviewed MCP gaps are implemented: target search, OpenVPN detection, conditional sensitive RDP launch and write-only SSH credential set/clear. The catalog now has 45 operations (42 discoverable with all categories and allow-with-token), with six resources and Slice 4 snapshot invalidations. Config UX and Linux Inspector/native smoke are recorded in Slice 6; Windows/macOS, additional product clients, external-system workflows and new helper subcommands remain open. See [Slice 5 policy, tests and limitations](DESKTOP_STREAMABLE_HTTP_SLICE5.md).
 
 ## Purpose
 

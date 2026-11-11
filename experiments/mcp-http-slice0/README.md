@@ -41,3 +41,15 @@ the application's actual authorization policy or any real mutation.
 
 See [the Slice 0 report](../../docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE0.md)
 and [recorded test output](../../docs/mcp/evidence/SLICE0_COMPAT.tap).
+
+## Integrated native qualification (Slice 6)
+
+The opt-in `tests/native-smoke.mjs` is separate from the synthetic Slice 0 fixture and default npm suite. It starts the built Tauri app in temporary XDG directories, with D-Bus activation configured to use the same temporary profile, and invokes the pinned Inspector against the real desktop operation host.
+
+```sh
+npm run build
+cargo build --manifest-path src-tauri/Cargo.toml --bin super-control-panel --bin supercontrolpanelhelper
+xvfb-run -a dbus-run-session -- node experiments/mcp-http-slice0/tests/native-smoke.mjs
+```
+
+Run from the repo root on Linux with Xvfb, xdotool, dbus-run-session, dbus-update-activation-environment and fusermount3 installed. The only mutation is inert server metadata under the temporary profile; no network session or credential write runs. The harness stops its own app, unmounts its temporary document-portal mount if created, and removes the profile. It tests Inspector discovery/queries/mutations/reconnection and uses the official SDK to check a hidden tool's server-side policy denial (Inspector refuses that call locally). See [Slice 6 evidence and remaining gates](../../docs/mcp/DESKTOP_STREAMABLE_HTTP_SLICE6.md).

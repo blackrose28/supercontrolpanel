@@ -1,0 +1,4 @@
+Inspector 2.14.0 modern: native discovery, safe query, persisted metadata mutation, resource, reconnect PASS
+Inspector 2.14.0 legacy: native discovery, safe query, persisted metadata mutation, resource, reconnect PASS
+Inspector 2.14.0 modern: native restart, old-token rejection, policy denial without mutation, reconnect PASS
+Inspector 2.14.0 legacy: native restart, old-token rejection, policy denial without mutation, reconnect PASS

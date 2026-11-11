@@ -1,5 +1,10 @@
 # SuperControlPanel MCP Tool Catalog
 
+## Slice 6 qualification
+
+Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.
+
+
 ## Implemented catalog (Slice 5)
 
 Standard `/mcp` adapts all 45 registry operations and six fixed resources (the original five plus `scp://status/transfers`). Discovery uses current category, sensitive-action and capability policy: at most 42 tools are visible; `config_sync_pull`, `config_git_pull` and `config_git_push` remain unavailable. Slice 5 adds `boundary_search_targets`, `detect_openvpn_executable`, `server_rdp_start`, `server_ssh_password_set` and `server_ssh_password_clear`. RDP has an interactive-desktop capability check at invocation; SSH credentials are write-only. See [Slice 5 contracts/policy](DESKTOP_STREAMABLE_HTTP_SLICE5.md). [Slice 4](DESKTOP_STREAMABLE_HTTP_SLICE4.md) adds status/transfer snapshot subscriptions and bounded transport execution. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md) and the [per-operation test matrix](DESKTOP_STREAMABLE_HTTP_INVENTORY.md).
