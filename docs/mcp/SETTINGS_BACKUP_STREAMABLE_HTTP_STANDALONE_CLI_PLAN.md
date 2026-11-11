@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, read-only inventory CLI, and local profile identity/ownership foundation; runtime extraction and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, inventory/profile CLI, and profile-bound credential/cache adapters; runtime extraction and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -102,10 +102,60 @@ as untested and does not model all subprocess coverage; actual Cargo results are
 verification evidence. The desktop's ignored local lockfile needed offline refresh after
 the core dependency change. Native Windows/macOS lock behavior still needs testing.
 
-Next: extract namespace-aware secret-store/cache adapters and runtime stores/events,
-then one operation family with foreground child cleanup. Settings import must retain
-the target identity and never copy the archive's namespace. No keyring/cache isolation
-or runtime cleanup is claimed until those adapters and their integration tests exist.
+The next increment below adds namespace-aware secret-store/cache adapters. Runtime
+stores/events and one operation family with foreground child cleanup remain next.
+Settings import must retain the target identity and never copy the archive's namespace.
+
+### Profile-bound credential adapters (2026-11-11)
+
+`scp-core::credentials` now provides an injectable `SecretBackend`, explicit known
+credential accounts, a `ProfileSecrets` adapter borrowing a live `ProfileOwner`, and
+an owned `CredentialCache` keyed by `(credential namespace, account)`. No CLI operation
+can choose a desktop namespace through this adapter. The desktop's fixed identifiers,
+global cache, commands, and backup secret-store trait remain unchanged; conversion of
+desktop callers is a separate characterization/refactoring slice.
+
+Account mappings cover OpenVPN password/OTP, Boundary password/OIDC password/OIDC OTP/
+app token, and dynamic SSH passwords. Dynamic server IDs must be 1–256 ASCII letters,
+digits, hyphens, underscores, or dots; invalid accounts fail before touching the backend.
+This validates credential addresses only and does not change desktop/inventory parsing.
+
+Only successful reads (including missing entries) populate the cache. A fresh read
+evicts the old value before consulting the backend; writes evict first and populate
+only after success, so unknown native write outcomes cannot return stale cached values.
+Hosts explicitly refresh after external maintenance or clear the cache. `None` deletes
+idempotently; `Some("")` is an explicitly empty secret, distinct from missing. Future
+adapters for desktop's empty-string-as-delete convention must translate at the boundary.
+Values redact Debug output and zeroize their owned buffers when dropped. Typed errors
+retain no native error payloads: locked/unavailable storage, invalid account/data, and
+ambiguous matches are distinct from `Ok(None)` for a missing credential.
+
+The opt-in `scp-core/os-keyring` feature implements `OsSecretBackend` with keyring v3
+and the desktop's persistent native platform features. The default CLI dependency graph
+does not include keyring or D-Bus/GUI dependencies. Linux native-feature builds require
+the D-Bus development library/pkg-config. Calls are synchronous and may prompt/block;
+bounded workers and host interaction/cancellation must be supplied before user-facing
+commands or MCP call them. No real credential operations were performed in validation.
+
+TDD evidence: credential integration tests first failed because the core module/API
+was absent. Injected-backend tests cover profile/account isolation, explicit account
+mapping, cached misses, refresh, errors/retry, failed writes/deletes, empty/missing
+semantics, and redaction. Native entry tests use per-entry keyring mocks without
+changing the process-global native builder. Native error tests verify sanitized
+classification. A compile-fail doctest checks that the owner cannot be dropped while
+the profile adapter is still used. Linux validation passes all 24 workspace tests with
+native features, the compile-fail doctest, all 101 desktop tests, strict Clippy, formatting,
+and a locked standalone release build. The default dependency tree excludes keyring,
+D-Bus, Tauri, and webview dependencies. Ripwire quality delta reports zero gating
+regressions; remaining findings are new trait/test entry points and the small native
+entry-construction boilerplate. Its test gate still flags the unrelated settings-backup
+Markdown heading, so Cargo results provide the executed coverage evidence.
+Native OS unlock/persistence and Windows/macOS checks
+remain unvalidated; these mocks establish the adapter contract, not platform qualification.
+
+Next: extract runtime stores/events and lifecycle context, then an operation family
+with foreground child cleanup. Integrate the credential adapter only behind bounded
+host capabilities; settings import and CLI credential commands remain unimplemented.
 
 Proposed Cargo workspace boundaries:
 

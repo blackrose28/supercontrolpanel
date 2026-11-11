@@ -166,7 +166,23 @@ to clear ownership. OS locks release on process exit, including forced terminati
 Future runtime and config writers must retain the core ownership guard for their full
 lifetime. Inventory listing stays read-only and can run while a profile is owned.
 This lock coordinates this CLI profile only; it does not isolate host VPN routes or
-external Boundary state. Runtime/child cleanup and keyring/cache adapters remain planned.
+external Boundary state. Runtime/child cleanup remains planned.
+
+The core now provides a profile-bound credential store and a cache keyed by namespace
+and account. Its optional `os-keyring` feature uses the same persistent native stores as
+the desktop. Current CLI commands do not access credentials; the new adapter is a
+foundation for runtime/settings operations. The desktop continues using its existing
+credential identifiers and cache. Secret debug output is redacted, owned secret buffers
+are zeroized on drop, and missing credentials are distinct from locked/unavailable stores.
+Cached reads require an explicit refresh after external changes; failed refreshes or
+writes evict stale entries. Native calls can prompt/block, so host timeout and interaction
+handling must be added before exposing them through commands or MCP.
+
+Developers can validate the optional adapter with
+`cargo test --locked --workspace --all-features` (uses injected backend/keyring mocks,
+not real credentials). On Linux, building that feature also requires the D-Bus development
+library and `pkg-config`; the default inventory/profile CLI build does not. Real native
+keyring/unlock checks on supported OSes remain release gates.
 
 See [the standalone CLI delivery plan](docs/mcp/SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md)
 for runtime ownership, credential isolation, and remaining delivery gates.
