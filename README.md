@@ -360,7 +360,11 @@ The same overview adapter also runs in a synthetic stdio subprocess: raw newline
 probes and the official SDK client cover legacy initialization and modern
 discovery, exact schemas/DTOs, fixed host errors, policy rejection and idle EOF
 exit. Direct stdout checks catch diagnostic corruption the SDK client can ignore.
-This does not qualify active-work shutdown or native cleanup. The SDK dependency
+An official-client cancellation probe also checks both revisions: a separate
+synthetic control channel proves cooperative cancellation reaches one overview
+read while another stays active and completes after release. Every stdout line
+is validated, including the absence of a response for the cancelled request.
+Active EOF shutdown and native cleanup remain unqualified. The SDK dependency
 remains isolated; no desktop wiring or CLI MCP command is enabled. Production
 host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified

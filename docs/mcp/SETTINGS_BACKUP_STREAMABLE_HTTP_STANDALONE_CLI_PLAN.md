@@ -2096,11 +2096,51 @@ approximate resolver; existing entry-gated adapter tests prove it remains live.
 Four new reachability findings are non-gating. Test gate exits 4 with unknown
 runners/coarse untested paths; see SDK evidence for the exact limits.
 
-Next focused increment: gated cooperative stdio cancellation/concurrent-read and
-active EOF qualification. Account for the SDK response-drain interval and
-blocking-stdio fallback; do not equate idle EOF exit with bounded native cleanup.
+The next increment below qualifies cooperative cancellation/concurrent reads.
+Active EOF remains separate from idle EOF and bounded native cleanup.
 Coordinated CLI import, other operations and packaging remain actionable without
 repeating the unchanged cgroup-delegation probe.
+
+### Cooperative subprocess stdio cancellation qualification (2026-11-13)
+
+The same unchanged `OverviewAdapter` now has a gated synthetic subprocess host.
+One official-client test runs both supported lifecycle revisions (two additional
+subprocesses). A separate loopback control connection per read reports entry,
+active state, cancellation/release and completion; MCP stdin remains SDK-owned.
+The test submits two overview calls, confirms both are active, explicitly cancels
+the first through `RequestHandle::cancel`, observes its cooperative completion,
+then confirms the other is still active before releasing it to the exact DTO.
+This generic stdio SDK path sends `notifications/cancelled` for both revisions;
+HTTP stream-close cancellation is not assumed. No progress wrapper or new tool
+is needed. The control channel and host are synthetic only.
+
+The official client's stdout reader now passes through the same bounded JSON-RPC
+line validator as the raw probes. It observes just handshake/survivor responses,
+no cancelled-ID response or trailing output, and successful child exit after idle
+client closure. The 64 KiB lines/five-second watchdogs are test bounds. No runtime,
+native operation, keyring, config, profile owner or production CLI wiring is added.
+The exact SDK/lock are unchanged; normal Tokio net/IO features support the fixture.
+
+TDD: the test first fails waiting for host entry against the ungated fixture;
+minimal gated hosting passes. Replacing the supplied request token with an
+independent token makes cancellation completion time out; restoration passes.
+The final locked spike suite passes 32 tests, strict Clippy/fmt/whitespace pass,
+and the desktop dependency probe passes with 18 existing warnings and an empty
+normal-edge SDK reverse graph. Ripwire quality delta has no gating regressions
+after sharing the stdout validator; two new non-gating test reachability/length
+findings remain. Source-level trait dispatch and subprocess test reach are still
+approximate. The staged test gate exits 4 for eight unknown-runner test modules
+(all run by Cargo) and three unrelated untested paths; this is not a clean static
+coverage claim. See [SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#cooperative-stdio-cancellation-and-concurrency-2026-11-13).
+
+Next focused increment: qualify EOF during active synthetic work using the same
+separate channel. Inspect SDK drain ordering, release a cooperative read during
+drain and observe response/process completion; distinguish drain expiry from a
+handler/native-work join. Do not assert immediate cancellation at EOF or assume
+blocking-stdio fallback shutdown is bounded. EOF before lifecycle selection,
+malformed input, backpressure and signals remain unqualified. HTTP shipping
+policy, coordinated CLI import, other contracts and packaging remain independently
+actionable; do not repeat the unchanged cgroup gate.
 
 ### stdio MCP contract
 

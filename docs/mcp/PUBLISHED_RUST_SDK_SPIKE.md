@@ -763,8 +763,90 @@ file-scope/ambiguous `main` blast radius. The complete spike suite and three cor
 targets exercise those selected test modules; this is not a clean static coverage
 verdict for unchanged desktop/runtime paths.
 
-Next: add a gated cooperative synthetic stdio host and qualify cancellation plus
-an unrelated concurrent read, then distinguish EOF during active work from idle
-EOF using the published service drain behavior. Keep native non-cooperative
-cleanup and the blocking-stdin fallback limitations explicit. CLI coordinated
-import, other operations and packaging remain independent actionable work.
+The next increment below qualifies cooperative cancellation and an unrelated
+concurrent read. Active EOF and native cleanup remain separate qualifications.
+
+## Cooperative stdio cancellation and concurrency (2026-11-13)
+
+The isolated `stdio-fixture` now accepts a `gated` mode with a harness-supplied
+loopback address. Each injected `SyntheticHost::read_overview` opens its own
+control connection, emits a fixed preface and `entered`, and waits for either the
+actual request token or a test command. `check` returns `active`; `release` emits
+`released`/`finished` and permits the unchanged shared DTO. Cancellation emits
+`cancelled`/`finished`, closes the gate connection and returns a host error. The
+fixed error is discarded by the unchanged `OverviewAdapter`; the SDK suppresses
+the response for the cancelled request. These markers describe synthetic work,
+not native cleanup. No production host requirement, progress wrapper, tool,
+runtime/profile/keyring/config or HTTP transport is introduced. Control reads
+never touch MCP stdin. Gate input is capped at 128 bytes per command. The harness
+requires a fixed preface to ignore devbox HTTP/TLS port probes; this is test
+framing, not production authentication.
+
+Published registry source inspected before fixture selection:
+
+- `service.rs::RequestHandle::cancel` sends a `CancelledNotification` with the
+  handle's ID through `Peer::send_notification`; this consumes the handle and
+  does not wait for host completion.
+- The generic `(AsyncRead, AsyncWrite)` adapter uses `AsyncRwTransport`, with no
+  Streamable HTTP worker interception. For both supported revisions the server
+  service loop removes the matching request token from `local_ct_pool` and
+  cancels it on `notifications/cancelled`. It drops responses whose token was
+  removed. Handlers must still cooperate; cancellation does not abort/join them.
+- The IO/lifecycle/drain paths described above are unchanged: EOF drains before
+  cancelling the internal service token. Active EOF is intentionally not covered
+  by this request-cancellation test. The non-Linux/non-FIFO blocking stdin
+  fallback and five-second EOF/two-second service-cancel drains still do not
+  establish hard process/native cleanup bounds.
+
+`tests/stdio/cancellation.rs` adds one official-client test over both revisions,
+two subprocesses. It waits for first entry before submitting the second call,
+then confirms both are active. `RequestHandle::cancel` must produce the first
+gate's cancellation/completion/EOF, while the second still acknowledges active.
+Only an explicit separate-channel release lets the survivor finish and return
+the exact structured/text overview DTO with the correct revision result shape.
+There are no sleep-based entry assumptions or HTTP progress/priming dependencies.
+Cancelling the now-idle client must close its writer, and child wait must succeed
+with the fixed stop marker and exactly two stderr host entries.
+
+To avoid the official SDK's non-JSON-line tolerance, every stdout line is checked
+and forwarded by a task sharing `read_response_line` with existing raw probes.
+The test joins this task through EOF and requires exactly two correlated
+responses: handshake and survivor, none for the cancelled ID. Validation retains
+the 64 KiB newline cap and rejects diagnostics, invalid envelopes and trailing
+output; the forwarding fixture caps response count at 16. These limits and the
+five-second watchdogs are test safeguards, not production throughput promises.
+
+TDD: the test compiled first against the existing ungated binary and failed at
+the entry watchdog. Early harness attempts accepted devbox HTTP/TLS probes;
+the fixed binary preface removed that interference before recording the intended
+RED. Gated host implementation passed. A mutation replacing the request token
+with `CancellationToken::new()` then failed at cancellation completion; restored
+code passed. The full suite passed again after sharing stdout validation to
+remove a duplicate identified by Ripwire. No dependency version or lockfile
+changes were needed; normal Tokio net/IO features are explicit for the fixture.
+
+Validation: locked isolated suite **32 pass** (11 adapter, 5 boundary, 5 HTTP,
+4 lifecycle, 3 negotiation boundary, 4 stdio), strict all-target Clippy, format
+and whitespace checks pass. The locked desktop dependency probe passes with
+18 existing warnings; the normal-edge SDK reverse graph is empty. Root/core,
+full desktop, release/MSRV, native Windows/macOS and UI suites were not rerun.
+Ripwire impact/uses cannot resolve the host trait dispatch (one declined adapter
+call); source confirms the synthetic fixture use. The shared stdout-reader
+refactor affects raw `Wire::request`/start/tests; approximate name matches also
+list existing HTTP tests, all exercised by the full suite. Edit-check reports
+unchanged signatures and no incompatible callers. Quality delta exits 0 with
+no preexisting-worse/gating findings; two new non-gating findings mark the test
+as dead/long (71 statements versus a 60 threshold), although Cargo executes it.
+No suppressions or baseline changes were added. The staged test gate exits 4:
+eight test files/modules have unknown runners, all run by the full spike suite;
+three unrelated untested paths are the desktop `run_boundary_oidc_automation`
+and two documentation headings. Its coarse file-scope/name graph is not evidence
+that this synthetic-only change affects native OIDC, nor a clean static coverage
+claim for that unchanged code.
+
+Next: qualify active EOF using the separate gate, beginning with controlled
+release during SDK drain and response/process completion. Drain expiry/internal
+token cancellation is not a host join; keep non-cooperative/native limitations
+explicit. EOF before lifecycle selection, malformed input, backpressure, signals,
+production stdio ownership, HTTP shipping policy, CLI coordinated import, other
+operations and packaging remain open; the unchanged cgroup gate is not retried.

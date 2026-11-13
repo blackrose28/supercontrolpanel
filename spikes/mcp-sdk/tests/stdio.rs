@@ -14,10 +14,37 @@ use tokio::{
 const MODERN: &str = "2026-07-28";
 const LEGACY: &str = "2025-11-25";
 
+#[path = "stdio/cancellation.rs"]
+mod cancellation;
+
 async fn bounded<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(5), future)
         .await
         .expect("stdio fixture watchdog")
+}
+
+/// Test-only 64 KiB bound; inspect EVERY stdout line, including shutdown.
+async fn read_response_line(
+    output: &mut (impl tokio::io::AsyncBufRead + Unpin),
+) -> Option<(Vec<u8>, Value)> {
+    let mut bytes = Vec::new();
+    let read = output
+        .take(65537)
+        .read_until(b'\n', &mut bytes)
+        .await
+        .unwrap();
+    if read == 0 {
+        return None;
+    }
+    assert!(
+        read <= 65536 && bytes.ends_with(b"\n"),
+        "invalid protocol line"
+    );
+    let value: Value = serde_json::from_slice(&bytes).expect("stdout must be protocol JSON");
+    assert_eq!(value["jsonrpc"], "2.0");
+    assert!(value.get("id").is_some());
+    assert!(value.get("result").is_some() ^ value.get("error").is_some());
+    Some((bytes, value))
 }
 
 fn spawn(mode: &str) -> Child {
@@ -98,23 +125,9 @@ impl Wire {
     }
 
     async fn line(&mut self) -> Option<Value> {
-        // Test-only 64 KiB bound; inspect EVERY stdout line, including shutdown.
-        let mut bytes = Vec::new();
-        let read = bounded((&mut self.output).take(65537).read_until(b'\n', &mut bytes))
+        bounded(read_response_line(&mut self.output))
             .await
-            .unwrap();
-        if read == 0 {
-            return None;
-        }
-        assert!(
-            read <= 65536 && bytes.ends_with(b"\n"),
-            "invalid protocol line"
-        );
-        let value: Value = serde_json::from_slice(&bytes).expect("stdout must be protocol JSON");
-        assert_eq!(value["jsonrpc"], "2.0");
-        assert!(value.get("id").is_some());
-        assert!(value.get("result").is_some() ^ value.get("error").is_some());
-        Some(value)
+            .map(|(_, value)| value)
     }
 
     async fn request(&mut self, method: &str, mut params: Value, id: u64) -> Value {

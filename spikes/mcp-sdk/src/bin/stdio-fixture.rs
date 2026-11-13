@@ -3,16 +3,30 @@
 use rmcp::ServiceExt;
 use scp_core::mcp_dto::McpAppOverviewResult;
 use scp_mcp_sdk_spike::overview::{OverviewAdapter, OverviewHost, OverviewPolicy};
+use std::net::SocketAddr;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    net::TcpStream,
+};
 use tokio_util::sync::CancellationToken;
 
 #[derive(Clone)]
 struct SyntheticHost {
     fail: bool,
+    gate: Option<SocketAddr>,
 }
 
 impl OverviewHost for SyntheticHost {
-    async fn read_overview(&self, _: CancellationToken) -> Result<McpAppOverviewResult, String> {
+    async fn read_overview(
+        &self,
+        cancellation: CancellationToken,
+    ) -> Result<McpAppOverviewResult, String> {
         eprintln!("fixture host read");
+        if let Some(address) = self.gate {
+            gated_read(address, cancellation)
+                .await
+                .map_err(|_| "fixture gate failed")?;
+        }
         if self.fail {
             return Err("password=TOP_SECRET native /private/path".into());
         }
@@ -21,6 +35,36 @@ impl OverviewHost for SyntheticHost {
             active_functions: 2,
             known_function_count: 5,
         })
+    }
+}
+
+/// Test-only side channel: no progress/tool additions or reads from MCP stdin.
+async fn gated_read(address: SocketAddr, cancellation: CancellationToken) -> std::io::Result<()> {
+    assert!(address.ip().is_loopback());
+    let mut stream = TcpStream::connect(address).await?;
+    stream.write_all(b"scp-stdio-gate-v1\nentered\n").await?;
+    let mut control = BufReader::new(stream);
+    loop {
+        let mut command = String::new();
+        let mut limited = (&mut control).take(128);
+        tokio::select! {
+            biased;
+            _ = cancellation.cancelled() => {
+                control.get_mut().write_all(b"cancelled\nfinished\n").await?;
+                return Err(std::io::Error::other("fixture cancelled"));
+            }
+            read = limited.read_line(&mut command) => {
+                read?;
+                match command.as_str() {
+                    "check\n" => control.get_mut().write_all(b"active\n").await?,
+                    "release\n" => {
+                        control.get_mut().write_all(b"released\nfinished\n").await?;
+                        return Ok(());
+                    }
+                    _ => return Err(std::io::Error::other("invalid fixture control")),
+                }
+            }
+        }
     }
 }
 
@@ -40,6 +84,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter = OverviewAdapter::new(
         SyntheticHost {
             fail: mode == "error",
+            gate: if mode == "gated" {
+                Some(
+                    std::env::args()
+                        .nth(2)
+                        .ok_or("missing fixture address")?
+                        .parse()?,
+                )
+            } else {
+                None
+            },
         },
         OverviewPolicy {
             allowed_categories,
