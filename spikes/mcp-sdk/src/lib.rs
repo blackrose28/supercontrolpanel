@@ -3,6 +3,7 @@
 //! The separate overview module defines an injected, request-scoped host seam.
 
 pub mod http_errors;
+pub mod negotiation_errors;
 pub mod overview;
 
 use std::borrow::Cow;

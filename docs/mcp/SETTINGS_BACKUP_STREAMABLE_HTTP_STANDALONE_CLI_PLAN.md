@@ -1899,6 +1899,45 @@ plain-text experiment as final hosting. Coordinated CLI import, other operation
 contracts, stdio MCP and packaging remain independently actionable; do not repeat
 unchanged cgroup qualification.
 
+### Isolated pre-dispatch negotiation mapping (2026-11-13)
+
+The published SDK's HTTP negotiation/standard-header validators and service-side
+version/metadata negotiation run before the overview hooks. New paired native/mapped
+raw probes cover eight cases across both initialized/discovered revisions and JSON/SSE
+hosting. Native HTTP 400 codes remain `-32020` (modern/legacy version and modern
+method/name mismatch), `-32022` (unsupported version), `-32602` (missing/incomplete
+modern metadata), and `-32600` (initialize version mismatch). Caller values appear in
+native messages or unsupported-version data. Original fixtures remain unchanged.
+
+A new opt-in `negotiation_errors::with_fixed_negotiation_errors` layer inspects only
+HTTP 400, exact `application/json`, exact-size response bodies at most 64 KiB. Selected
+JSON-RPC codes above retain status, ID (including explicit null/absence) and code,
+with exact `MCP request negotiation failed`, no native diagnostics/data and fresh
+JSON headers. It rebuilds only recognized envelopes; unknown envelopes/codes retain
+bytes/headers. All other statuses, unknown sizes and oversized bodies pass untouched.
+This is a pinned-SDK experiment, not a universal redactor or final production host.
+IDs remain correlation values, not sanitized strings. SDK logs and parser/native/
+session/panic/success-data policies remain separate shipping decisions. A body-read
+failure outside the SDK's infallible finite JSON path returns the same 400 with
+fixed plain text; code preservation is qualified only for recognized native envelopes.
+
+Official clients decode modern header-mismatch and legacy initialize-mismatch errors
+in JSON and initialized SSE modes, then successfully call the real injected adapter.
+Matching progress is consumed while the fake host is still gated, proving successful
+SSE stays live. Raw probes also assert no host entry and usable streamed discovery.
+Synthetic tests check integer/string/null IDs, exclusions and both composition orders:
+`with_fixed_http_errors` still erases the envelope/code in either order. Existing
+three official success/cancellation tests retain their explicit HTTP wrapper; neither
+wrapper is silently installed as production hosting.
+
+RED/GREEN, refactoring and validation details are in [the SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md).
+Next focused work can qualify the same injected adapter over standard stdio in the
+isolated spike, starting from published SDK lifecycle/IO source and official clients,
+without real runtime/keyring wiring or corrupting protocol stdout. HTTP SDK logging,
+admission/session/native failure policy and production hosting remain open. Coordinated
+CLI import, other operation contracts and packaging are independently actionable.
+Do not repeat unchanged cgroup qualification or claim native cleanup from token tests.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

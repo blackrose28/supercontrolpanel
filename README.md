@@ -348,9 +348,14 @@ protocol-error/logging policy remains a shipping gate. A separate unwrapped prot
 adapter now returns fixed `MCP method not supported` / `-32601` for custom requests,
 including malformed known-method fallback. Raw and official clients preserve modern
 404 and legacy 200 envelopes, including initialized legacy SSE. This does not cover
-pre-dispatch parser/header/session errors; composing with the HTTP-status experiment
-still removes modern error envelopes. The SDK dependency remains
-isolated; no desktop wiring or CLI MCP command is enabled. Production host ownership/authentication,
+pre-dispatch parser/header/session errors. A separate opt-in negotiation mapper now
+replaces selected finite HTTP 400 JSON errors with `MCP request negotiation failed`,
+preserving native status, code and ID while dropping diagnostics/data. Raw and official
+probes cover negotiation rejection and subsequent live JSON/SSE use. It inspects only
+exact-size bodies up to 64 KiB; excluded bodies and HTTP 200 errors pass unchanged.
+Neither mapping prevents SDK logs. Composing with the HTTP-status experiment still
+removes error envelopes, in either order. The SDK dependency remains isolated; no desktop
+wiring or CLI MCP command is enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified
 before standard `/mcp` is available.
 

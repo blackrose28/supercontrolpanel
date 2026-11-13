@@ -554,3 +554,110 @@ reviewed scoped mapping. Keep original raw evidence and successful SSE unbuffere
 this custom hook cannot sanitize errors emitted before dispatch. SDK logging and
 native failure policy remain shipping decisions. Independent coordinated CLI import,
 other operation contracts, stdio MCP and packaging remain actionable.
+
+## Isolated pre-dispatch negotiation boundary (2026-11-13)
+
+Inspected published `tower.rs` protocol-version/header validators, standard-header
+validation, `serve_negotiated_request_directly` and `jsonrpc_http_status`, plus
+`common/server_side_http.rs` and `service/server.rs` inline negotiation. Header/body
+consistency is checked before hook dispatch. The inline service rejects unsupported
+versions and missing required metadata before calling the adapter; negotiated HTTP
+handling returns terminal JSON for these non-200 errors even with SSE configured.
+Initialize header/body mismatch uses invalid-request `-32600`, not header-mismatch.
+No SDK/dependency/lockfile or production desktop/core/CLI changes are needed.
+
+New `tests/adapter/negotiation.rs` is nested under the existing protocol module.
+Paired native/mapped raw matrices run each of eight cases after real lifecycle setup
+in both revisions and JSON/SSE configurations. Legacy SSE requires an initialize
+session header and initialized notification, reusing the existing probe. Every case
+returns HTTP 400/application-json with ID 42 and no host entry:
+
+| Case | Native code | Synthetic marker in native response |
+| --- | --- | --- |
+| Legacy header/body metadata version mismatch | -32020 | Message |
+| Modern header/body metadata version mismatch | -32020 | Message |
+| Matching unsupported header + metadata version | -32022 | Error data (`requested`) |
+| Modern Mcp-Method mismatch | -32020 | Message |
+| Modern Mcp-Name mismatch | -32020 | Message |
+| Missing required modern metadata | -32602 | No |
+| Incomplete required modern metadata | -32602 | No |
+| Initialize header/body version mismatch | -32600 | Message |
+
+Raw fixtures from previous increments remain untouched. Native probes continue
+asserting native reflection rather than passing through the new mapper. Catalog
+requests after the failures still work and stream when configured for SSE.
+
+The new separately named `negotiation_errors::with_fixed_negotiation_errors` is an
+**opt-in experiment immediately outside the SDK route**. It examines only HTTP 400,
+exact `application/json`, exact-size response bodies at most 65536 bytes. The pinned
+SDK uses finite `Full`/infallible bodies for the qualified paths. It bounded-collects
+only those candidates, validates a typed JSON-RPC error, and maps only codes -32020,
+-32022, -32600 and -32602 to exact `MCP request negotiation failed`. Native HTTP
+status, code and ID remain; native message/data and response headers are discarded,
+with fresh JSON content type. Integer/string IDs are correlation values, not
+redacted fields. Explicit null versus absent ID is preserved; SDK Option serialization
+alone would omit null. Unknown envelopes/codes retain original bytes and headers.
+Unknown-size or oversized candidates and all other statuses pass unchanged, including
+HTTP 200 protocol errors. No request body or successful SSE body is polled by this
+layer. It is not an arbitrary transport, logging or universal redaction guarantee.
+If incorrectly mounted over a fallible/non-SDK finite body that fails reading, the
+fallback is same HTTP 400 / fixed `MCP negotiation response unavailable` plain text,
+without native details or a JSON-RPC code. Native code preservation is qualified only
+for recognized SDK envelopes. Parser/plain-text/native/session errors, SDK warnings
+and raw message tracing, panics, successful values and production admission limits
+still require explicit shipping decisions. No production hosting is enabled.
+
+The official matrix uses a test-only header corrupter for modern tools/list, and a
+legacy custom initialize request with mismatched version. Both must decode
+`ServiceError::McpError` (-32020/-32600 respectively), with fixed text/no data, across
+JSON and SSE. After host non-entry is checked, a real overview call completes. In SSE
+mode the official client consumes matching progress 1 while the host is still gated,
+then receives the result after release. Progress stays in the existing test-only
+wrapper. This checks liveness rather than collecting a successful stream. It does
+not qualify official-client production auth, every malformed request shape or native
+cleanup. Fixture five-second waits/listener cleanup are unchanged.
+
+`tests/negotiation_boundary.rs` checks selected-code mapping, integer/string/null
+IDs, dropped diagnostic headers/data, unchanged HTTP 200/404/500 responses, plain
+text, malformed/unknown-code JSON and oversized bodies. Two explicit composition
+orders prove `with_fixed_http_errors` still erases the envelope/code, returning its
+original fixed plain text. Existing three official success/cancellation tests retain
+that HTTP wrapper. The new negotiation tests do not compose with it unless explicitly
+testing that loss; neither combination is final standards-ready production hosting.
+
+TDD: an identity stub for the new layer produces behavioral RED on reflected native
+-32020 text; native characterization passes unchanged. The mapper makes it GREEN.
+The added explicit-null correlation test then fails because SDK serialization omits
+`id: null`; preserving the original ID presence makes it pass. A subsequent identity
+mutation independently fails raw and official fixed-error tests and synthetic mapping;
+restoring the layer passes. Refactoring reuses the SDK metadata builder (removing a
+clone of an older fixture helper), separates raw case assertions and official error
+checks, and keeps existing raw probe construction as an identity-hosted wrapper.
+
+Validation: locked isolated suite **28 pass** (11 adapter, 5 boundary, 5 HTTP,
+4 lifecycle, 3 negotiation-boundary), strict all-target Clippy, formatting and staged
+whitespace pass. The desktop SDK dependency probe also passes (18 existing desktop
+bin warnings); full desktop/core/CLI, UI, minimum Rust and native OS qualification
+are not rerun. The temporary identity mutation is restored before final checks.
+
+Ripwire impact/uses before extraction identify one existing raw-probe start caller
+and its parent test module; the old start signature and identity hosting are retained.
+Edit-check reports unchanged signature, no incompatible callers. Affected selection
+for the new mapper resolves the two new test modules but no runner; runtime tests
+supply that evidence. Final quality has zero gates/preexisting regressions, nine new
+reachability findings for executed tests/test callbacks and one non-gating verbosity
+finding for the explicit eight-case data table (68 lines). Initial fixture-helper
+clone and test complexity/verbosity findings were removed by the refactors above,
+without suppressions. Staged test gate exits 4: five executed test files/modules have
+unknown runners; two documentation symbols and dynamically dispatched
+`supported_protocol_versions` are unmodeled. Eight of ten hunks use file scope
+(140 seeds, 17 impacted). This is not a clean static coverage claim.
+
+Next: qualify the injected adapter over standard stdio in an independently reviewable
+isolated spike, inspecting the pinned SDK's IO, service lifecycle and official client
+first. Keep synthetic hosts separate from real CLI runtime/keyring integration; prove
+clean stdout and lifecycle/cancellation behavior before enabling a CLI MCP command.
+Do not assume these HTTP layers sanitize stdio protocol errors or SDK logs. HTTP
+logging/admission/session/native error policies remain shipping decisions. Coordinated
+CLI import, other operation contracts and packaging remain actionable independently
+of the unchanged Linux containment qualification gate.

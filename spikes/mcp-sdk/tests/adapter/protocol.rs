@@ -68,6 +68,13 @@ struct RawProbe {
 }
 impl RawProbe {
     async fn start(version: ProtocolVersion, json_response: bool) -> Self {
+        Self::start_hosted(version, json_response, std::convert::identity).await
+    }
+    async fn start_hosted(
+        version: ProtocolVersion,
+        json_response: bool,
+        hosting: fn(Router) -> Router,
+    ) -> Self {
         let (tx, reads) = mpsc::unbounded_channel();
         let adapter = OverviewAdapter::new(
             FakeHost(tx),
@@ -87,7 +94,8 @@ impl RawProbe {
                     .enforce_origin_validation()
                     .with_cancellation_token(stop.child_token()),
             );
-        let server = BoundServer::bind(Router::new().nest_service("/mcp", service), stop).await;
+        let server =
+            BoundServer::bind(hosting(Router::new().nest_service("/mcp", service)), stop).await;
         let mut probe = Self {
             server,
             version,
@@ -220,3 +228,6 @@ async fn raw_custom_fallback_preserves_native_status_code_and_envelope() {
         }
     }
 }
+
+#[path = "negotiation.rs"]
+mod negotiation;
