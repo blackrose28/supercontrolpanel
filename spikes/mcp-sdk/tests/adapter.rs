@@ -294,3 +294,6 @@ async fn stateless_disconnect_reaches_cooperative_host_and_preserves_other_read(
         probe.server.finish().await;
     }
 }
+
+#[path = "adapter/official_client.rs"]
+mod official_client;

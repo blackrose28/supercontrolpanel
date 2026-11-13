@@ -279,13 +279,87 @@ three executed test files have unknown runners and two documentation symbols are
 unmodeled; ten unlocated hunks fall back to seven file-granular seeds. These are
 static-analysis limits/reviewed short similarity, not a claim of a clean static gate.
 
-**Next focused increment:** qualify this adapter with the official SDK client in
-JSON and SSE configurations for both revisions, including legacy stateful explicit
-cancellation and modern stream-close cancellation after actual streamed progress
-where supported. Keep the fake host seam and production listener separate. Review
-an explicit malformed-input/redaction boundary before shipping, rather than assuming
-returned host error redaction covers SDK parsing. Desktop wiring/auth/token rotation,
+The following increment qualifies the official-client adapter matrix and cooperative
+SSE cancellation. **Next focused increment:** establish an explicit malformed-input /
+parser-error redaction boundary in the isolated spike before shipping; returned host
+error redaction does not cover SDK parsing. Desktop wiring/auth/token rotation,
 host-owned work tracking/drain, admission/concurrency/queue limits, compatibility
 routes, real runtime/keyring calls and third-party/native OS clients remain later.
 A host must define accepted-operation ownership and response-loss/duplicate-start
 semantics before adding operation starts; request cancellation alone is insufficient.
+
+## Official-client overview qualification (2026-11-13)
+
+`tests/adapter/official_client.rs` is a child module of the adapter integration test,
+reusing its cooperative fake host, DTO fixture and result assertions. Production
+sources, dependency versions, lockfiles and the `OverviewHost` seam are unchanged.
+The published package's `service.rs` (`RequestHandle::cancel`) and
+`transport/streamable_http_client.rs` (`Event::ControlMessage`) were inspected
+before choosing cancellation APIs. There is no cancel-on-drop assumption.
+
+| Exact revision | Response configuration | Adapter observations |
+| --- | --- | --- |
+| 2026-07-28 | JSON | Discover, tools-only capabilities, filtered schemas, DTO/text/resultType, rejections and returned-host-error redaction pass |
+| 2026-07-28 | SSE | Same contract checks; cancellation after matching client progress reaches cooperative work, unrelated read completes |
+| 2025-11-25 | JSON, stateless | Initialize; same contract checks with legacy result mapping |
+| 2025-11-25 | SSE, stateful | Same contract checks; explicit cancellation with recorded session and request ID reaches cooperative work, unrelated read completes |
+
+The allowed catalog has exactly `app_get_overview`, its complete input/output
+schemas, and tools-only capabilities. Omitted and empty arguments succeed. Empty
+categories, unknown policy/category, unknown and known-but-unimplemented names,
+and extra arguments return protocol `-32602` without raw input/error data and
+before fake host entry. A secret-bearing returned host error becomes exactly
+`App overview unavailable`, `isError: true`, with no structured content. This
+qualifies returned strings only, not native errors, panics, parser errors or
+success-value redaction.
+
+A test-only `ServerHandler` wrapper sends progress through the real context peer
+before delegating to `OverviewAdapter::call_tool` with that context. It does not
+add progress to the adapter or host seam. The official client's `on_progress`
+callback reports the decoded token/value to the test; matching progress is consumed
+before cancellation, not merely a socket or priming event. Both reads have entered
+and both progress tokens are observed before the first request is cancelled.
+For legacy SSE, the request recorder verifies session headers on both tool calls
+and one `notifications/cancelled` POST with the first request's exact ID. For modern
+HTTP, the inspected worker intercepts that API's control message and closes the
+request SSE stream; the recorder snapshot contains no cancellation POST. The fake
+observes its token and reports completion. The other token is unset at the check,
+then that read reports completion and returns the expected DTO after release.
+There is no indefinite negative-window, native cleanup, hard deadline, or accepted
+background operation cancellation claim.
+
+The recorder buffers only these small synthetic test request bodies (64 KiB test
+limit) and forwards them unchanged; it is not a production parser or error boundary.
+Listeners use ephemeral IPv4 loopback without bearer middleware, as in the existing
+adapter probes. Five-second waits and listener cleanup remain fixture watchdogs.
+
+TDD: the three tests first fail compilation solely for the missing `OfficialProbe`.
+Implementing the test wrapper/client/recorder makes them pass. Behavioral mutation
+REDs then independently suppress streamed progress, replace the adapter's request
+token, and expose the raw host error: the first two hit the relevant observation
+watchdog; the third fails the exact public-content assertion. All mutations are
+restored. Refactoring extracts catalog/rejection assertions and the wire recorder.
+The final locked spike suite passes **15 tests** (6 adapter including these three,
+5 HTTP, 4 lifecycle); strict all-target spike Clippy, formatting and whitespace
+checks pass. No production source or dependency changes require a desktop/root
+suite rerun here; full desktop/root/native OS/MSRV tests are not rerun.
+
+Ripwire impact/uses/affected still cannot prove the external SDK dispatch edge;
+affected lists two adapter constructions as candidates and zero proven tests.
+Source review and actual HTTP/mutation tests cover that edge. The new wrapper
+edit-check reports no incompatible callers, but its same-named client caller is
+approximate. Final quality exits 0 with no gating/preexisting regressions and six
+new non-gating reachability findings on executed test/trait entry points. Initial
+nesting, complexity and length findings are removed by the test-only refactor;
+no suppressions are added. Test gate exits 4: four executed test files/modules have
+unknown runners, the unchanged adapter dispatch and two documentation symbols are
+unmodeled; seven unlocated hunks use five file-scope seeds (122 symbols, 11 impacted).
+The official-client child module executes within `--test adapter`, not as a separate
+Cargo integration target. This is not a clean static test-gate claim.
+
+Next: characterize secret-bearing SDK parse/deserialization failures and implement
+an explicit fixed-message error boundary in the isolated spike, preserving valid
+modern/legacy JSON/SSE behavior. Authentication, production desktop wiring and
+compatibility routes, runtime/keyring work, host admission/drain and accepted-operation
+ownership stay separate. Other CLI contracts/import, stdio and packaging can proceed
+independently; the unchanged cgroup qualification is not repeated.

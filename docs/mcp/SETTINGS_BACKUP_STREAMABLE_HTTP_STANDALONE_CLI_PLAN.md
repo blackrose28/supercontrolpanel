@@ -1813,14 +1813,47 @@ with no suppressions. Staged test gate exits 4 (three executed files of unknown
 runner, two documentation symbols, ten unlocated hunks/seven file-scope seeds).
 See the evidence document for the precise static limits; no clean-gate claim.
 
-Next focused increment: qualify the injected adapter with the official SDK client
-across JSON/SSE and both revisions, and explicitly test legacy stateful cancellation
-and modern stream-close cancellation with cooperative fake host work. Review the
-malformed-input/redaction boundary before shipping. Host-owned tracking/drain,
-admission limits, desktop auth/wiring, compatibility routes, operation ownership,
-real runtime/keyring, third-party/native OS clients remain unqualified. Coordinated
+The next increment below completes the official-client adapter matrix and cooperative
+SSE cancellation. The malformed-input/redaction boundary remains a shipping gate.
+Host-owned tracking/drain, admission limits, desktop auth/wiring, compatibility
+routes, operation ownership, real runtime/keyring and third-party/native OS clients
+remain unqualified. Coordinated
 CLI import, other operation contracts, stdio MCP and packaging remain actionable.
 Do not repeat unchanged cgroup qualification.
+
+### Official-client injected overview qualification (2026-11-13)
+
+Three additional adapter tests use the pinned official rmcp 3.10.0 client against
+both exact revisions, JSON and SSE configurations. They assert tools-only discovery,
+filtered catalog/input/output schemas, omitted/empty arguments, shared DTO/text and
+modern/legacy result mapping, policy/name/argument rejection before host entry, and
+fixed returned-host-error text without structured data. Production code, dependencies,
+lockfiles and host seam are unchanged.
+
+A test-only ServerHandler wrapper emits progress through the real request context
+before delegating to the adapter. The official client receives the matching progress
+token before cancellation; socket opening or SSE priming is insufficient. Two SSE
+reads enter independently. Explicit RequestHandle::cancel sends a recorded legacy
+notifications/cancelled POST with the matching ID and a session header. For modern
+HTTP, the published worker closes the request stream instead; the wire snapshot
+contains no cancellation POST. Both reach the actual cooperative fake host token
+and observe fake completion. The other token is unset at the check and its read
+completes successfully after release. This extends adapter evidence beyond the prior
+JSON/stateless disconnect test without relabeling that historical test as stateful.
+
+These are synthetic loopback fixtures without bearer middleware. They do not prove
+native cleanup, accepted background operation cancellation, hard shutdown bounds,
+work admission/drain, production auth or native OS compatibility. The error boundary
+still covers only returned host strings; SDK parser errors remain outside it.
+Detailed TDD, validation and static-analysis evidence is in
+[PUBLISHED_RUST_SDK_SPIKE.md](PUBLISHED_RUST_SDK_SPIKE.md).
+
+Next focused increment: characterize secret-bearing malformed inputs and add a
+separately reviewable fixed-message parser/error boundary to the isolated HTTP spike,
+with exact modern/legacy behavior and regression coverage for valid streaming.
+Do not silently change production compatibility routes or broaden the host seam.
+Coordinated CLI import, other operation contracts, stdio MCP and packaging remain
+independent actionable work. Do not repeat unchanged cgroup qualification.
 
 ## Work 1: complete settings export/import
 

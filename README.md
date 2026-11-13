@@ -334,10 +334,14 @@ cancellation and verify an unrelated request survives. A cancelled request token
 or joined listener does not stop the fixture's non-cooperative handler; tests
 release and observe handler cleanup separately. An isolated injected adapter now
 maps the one read-only `app_get_overview` operation using the shared policy,
-catalog and result DTO. Fake-host HTTP tests for both revisions cover denial
-before host entry, redacted host errors, and cooperative read cancellation while
-another request completes. This adds only a spike-to-core dependency; no desktop
-wiring or CLI MCP command is enabled. Production host ownership/authentication,
+catalog and result DTO. Official-client tests qualify that adapter for both revisions
+in JSON and SSE modes: filtered schemas, DTO mapping, denial before host entry and
+redacted returned host errors. After consuming matching progress notifications,
+SSE tests verify legacy stateful explicit cancellation and modern stream-close
+cancellation reach cooperative fake work while another read completes. Progress is
+supplied by a test wrapper; the adapter host seam stays unchanged. Parser-error
+redaction remains a separate shipping gate. The SDK dependency remains isolated; no
+desktop wiring or CLI MCP command is enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified
 before standard `/mcp` is available.
 
