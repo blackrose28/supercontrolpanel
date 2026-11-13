@@ -15,6 +15,7 @@ use rmcp::{
     ClientHandler, ClientLifecycleMode, ClientServiceExt, ErrorData, RoleClient, RoleServer,
     ServerHandler, ServiceError,
 };
+use scp_mcp_sdk_spike::http_errors::with_fixed_http_errors;
 use std::{
     borrow::Cow,
     sync::{Arc, Mutex},
@@ -261,8 +262,10 @@ impl OfficialProbe {
                     .with_cancellation_token(stop.child_token()),
             );
         let wire = Arc::new(Mutex::new(Vec::new()));
+        // The separately named boundary leaves all successful streaming bodies alone.
+        // Raw SDK characterization remains in http.rs and error_boundary.rs.
         let router = record_requests(Router::new().nest_service("/mcp", service), wire.clone());
-        let server = BoundServer::bind(router, stop).await;
+        let server = BoundServer::bind(with_fixed_http_errors(router), stop).await;
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(server.url.clone()),
         );

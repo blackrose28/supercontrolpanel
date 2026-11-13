@@ -363,3 +363,99 @@ modern/legacy JSON/SSE behavior. Authentication, production desktop wiring and
 compatibility routes, runtime/keyring work, host admission/drain and accepted-operation
 ownership stay separate. Other CLI contracts/import, stdio and packaging can proceed
 independently; the unchanged cgroup qualification is not repeated.
+
+## Isolated HTTP-status error boundary (2026-11-13)
+
+Published registry source was inspected first: `common/server_side_http.rs`
+`expect_json` bounds and collects the request, returns 413 on overflow, 500 with
+body-read error text, and 415 with serde text on deserialization failure. These
+parser branches do not log that error there. `internal_error_response` separately
+formats native error text into HTTP 500 **and logs it**. `StreamableHttpService`
+validates Accept/Content-Type before parsing; protocol/header/session checks and
+handler dispatch follow. `model.rs` uses an untagged message wrapper; request enum
+fallback can deserialize an invalid known method as `CustomRequest`. The default
+`ServerHandler::on_custom_request` uses the method itself as the `-32601` message.
+Returned `OverviewHost` strings never cover these SDK paths.
+
+`tests/error_boundary.rs` uses synthetic markers only, ephemeral loopback and
+five-second fixture watchdogs, with the original bearer fixture and explicit Origin
+validation. The raw comparison uses JSON/stateless configuration for both revisions,
+not an initialized legacy session. `Mcp-Method` matches the body and tool calls carry
+`Mcp-Name: spike_echo`; modern request metadata uses the SDK's client-context builder.
+No raw body/arguments/native diagnostic is printed or logged by this test/boundary.
+The original raw `http.rs`, lifecycle fixture and raw overview probes are unchanged.
+
+| Synthetic input | Native 2026-07-28 | Native 2025-11-25, stateless | Marker observed in native response |
+| --- | --- | --- | --- |
+| Truncated JSON; string/array root; invalid jsonrpc; object ID/method | 415 text beginning `fail to deserialize request body`, no JSON-RPC code | Same | No, for these cases only |
+| tools/call arguments is a string; initialize capabilities is a string | 404 / `-32601` | 200 / `-32601` | No; typed request falls through to custom handling |
+| tools/call arguments null, extra synthetic secret field | 200 / `-32602` | Same | No; null becomes omitted arguments, fixture rejects missing message |
+| Unknown method containing marker | 404 / `-32601` | 200 / `-32601` | **Yes**, method is the native error message |
+| Client result with unknown action string | 400 / `-32600` | Same | No; not evidence of enum validation: an empty-result fallback can accept the shape before the server rejects the response message |
+
+`src/http_errors.rs::with_fixed_http_errors` is a separately named, opt-in hosting
+layer in the isolated spike. It examines **only the HTTP status**. All HTTP 4xx/5xx
+bodies become exact `MCP HTTP request failed` with `text/plain; charset=utf-8`,
+no JSON-RPC envelope/code/data or reflected ID. Status is retained, including 415
+for malformed envelopes; this deliberately does not turn it into `-32700`.
+All error headers are discarded except `Allow` matching exactly `POST`, `GET, POST`
+or `GET, POST, DELETE`, preserving known SDK method guidance without forwarding
+arbitrary header text. This also replaces native JSON-RPC bodies on HTTP 400/404;
+it is a scoped experimental transport choice, not final standard protocol-error
+compatibility. The table's native 200 responses pass through unchanged, including
+legacy unknown-method reflection. The layer must not be described as a complete
+protocol-error, native-error, success-value, panic or logging redactor.
+
+Mounting outside fixture auth/admission retains wrong-token 401, Origin/Host
+403, bad Accept 406 and Content-Type 415 before a deliberately oversized malformed
+body; authorized otherwise-valid admission reaches the existing 4096-byte limit
+and returns 413. Modern GET remains 405 with `Allow: POST`. These admission probes
+use the modern revision. They prove status/precedence preservation, not concurrency
+limits, production token policy or work admission/drain. The boundary never polls
+request or response bodies; it adds no request buffer or size policy. Successful
+200/202/204 headers/bodies pass unchanged. A synthetic HTTP 500 with marker-bearing
+body/header verifies replacement, not a real native/session failure or SDK logging
+redaction. No SDK tracing subscriber is installed by the fixture. The SDK still has
+raw message trace sites and header/error warning paths: production logging requires
+its own reviewed policy, independently of this response layer.
+
+The existing official-client overview harness explicitly mounts the layer now.
+The exact modern/legacy JSON/SSE catalog/schema/DTO/policy/returned-host-error tests
+still pass. Progress is decoded before cancellation; cooperative fake completion
+and the unrelated successful read still pass for both SSE revisions, including
+initialized stateful legacy. This exercises successful streaming through the layer,
+not malformed-input coverage in every stateful/session mode. Progress remains in
+the test wrapper only; `OverviewHost` and `OverviewAdapter` are unchanged.
+
+TDD: first compile RED is solely the absent `http_errors` module. Initial GREEN
+passes native/fixed comparisons; the admission fixture is corrected to replace,
+not append, its existing Authorization header. A separate 405 `Allow` preservation
+test fails before the safe-header rule is implemented. A behavioral mutation that
+bypasses replacement fails on native parser text versus exact fixed text. Another
+mutation buffers responses before classifying status and fails the official SSE
+progress watchdog. Both mutations are restored. Refactoring uses the SDK metadata
+builder, explicit fixture headers/config and one synthetic-response helper; it
+leaves the original native SDK fixtures untouched.
+
+Validation: final locked spike suite passes **20 tests** (6 adapter, 5 error boundary,
+5 original HTTP, 4 lifecycle); strict all-target spike Clippy, formatting and
+whitespace pass. Dependencies/lockfiles and production sources are unchanged;
+root/desktop/native OS/MSRV and UI/E2E suites are not rerun for this isolated layer.
+
+Ripwire impact/uses on the changed official-client start find its three executed
+matrix/cancellation tests; affected selection for the layer names the official child
+module and new boundary target (unknown runners). New layer edit-check and unchanged
+start signature have zero incompatible callers. Final quality exits 0: zero gates
+or preexisting regressions, six new non-gating reachability findings on executed
+test entries and the message builder. Initial cloned fixture setup/metadata and
+response-test duplication are removed using the SDK builder and focused helpers;
+no suppressions are added. Staged test gate exits 4: three executed test files/modules
+have unknown runners; two documentation symbols and the SDK-dispatched unchanged
+supported-version method are unmodeled. Seven unlocated hunks use seven file-scope
+seeds (136 symbols, 12 impacted). This is not a clean static test-gate claim.
+
+Next: add a fixed-message protocol-level custom/unknown-request boundary in the
+injected adapter, retaining error codes/statuses and covering malformed-known-method
+fallback plus legacy initialized SSE. Do not solve HTTP 200 errors by buffering SSE.
+Logging and other native failure policies remain shipping gates; CLI import, other
+operations, stdio MCP and packaging remain independently actionable.

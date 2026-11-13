@@ -339,9 +339,13 @@ in JSON and SSE modes: filtered schemas, DTO mapping, denial before host entry a
 redacted returned host errors. After consuming matching progress notifications,
 SSE tests verify legacy stateful explicit cancellation and modern stream-close
 cancellation reach cooperative fake work while another read completes. Progress is
-supplied by a test wrapper; the adapter host seam stays unchanged. Parser-error
-redaction remains a separate shipping gate. The SDK dependency remains isolated; no
-desktop wiring or CLI MCP command is enabled. Production host ownership/authentication,
+supplied by a test wrapper; the adapter host seam stays unchanged. A separately
+named isolated HTTP boundary now replaces 4xx/5xx diagnostics with fixed text,
+preserving status and known method guidance without buffering JSON/SSE responses.
+Raw parser probes remain separate. HTTP 200 protocol errors and SDK logging are
+outside that boundary; legacy unknown-method errors can still reflect input, so
+protocol-error/logging policy remains a shipping gate. The SDK dependency remains
+isolated; no desktop wiring or CLI MCP command is enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified
 before standard `/mcp` is available.
 

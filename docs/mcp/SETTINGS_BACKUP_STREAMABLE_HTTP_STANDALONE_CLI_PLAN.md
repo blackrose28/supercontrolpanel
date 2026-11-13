@@ -1848,12 +1848,37 @@ still covers only returned host strings; SDK parser errors remain outside it.
 Detailed TDD, validation and static-analysis evidence is in
 [PUBLISHED_RUST_SDK_SPIKE.md](PUBLISHED_RUST_SDK_SPIKE.md).
 
-Next focused increment: characterize secret-bearing malformed inputs and add a
-separately reviewable fixed-message parser/error boundary to the isolated HTTP spike,
-with exact modern/legacy behavior and regression coverage for valid streaming.
-Do not silently change production compatibility routes or broaden the host seam.
-Coordinated CLI import, other operation contracts, stdio MCP and packaging remain
-independent actionable work. Do not repeat unchanged cgroup qualification.
+### Isolated HTTP-status error boundary (2026-11-13)
+
+The separately named `http_errors::with_fixed_http_errors` layer now replaces HTTP
+4xx/5xx response bodies/headers with exact `MCP HTTP request failed` text, retaining
+the status and only recognized SDK `Allow` values. It does not read any body or
+change request admission. Original SDK fixtures remain unchanged; official-client
+adapter JSON/SSE/progress/cancellation/concurrency tests now additionally run through
+this layer. Production desktop/custom routes, dependencies and the host seam stay
+unchanged. This is an isolated HTTP-status boundary, not universal error redaction
+or a shipping-ready protocol-error mapping.
+
+New synthetic raw/bounded comparisons characterize malformed envelope shapes,
+argument types/null, invalid initialization types and unknown method/result variants
+for both exact revisions in stateless JSON hosting. Native parser failures produce
+415 text (no marker observed for those envelope cases); malformed typed requests can
+fall through to `CustomRequest`. Unknown methods reflect their method in native
+`-32601`: modern HTTP 404 is replaced by fixed text, while legacy HTTP 200 passes
+through unchanged. No claim that returned host strings cover these paths. Detailed
+HTTP/protocol table, SDK source/logging limits, TDD and verification appear in
+[PUBLISHED_RUST_SDK_SPIKE.md](PUBLISHED_RUST_SDK_SPIKE.md).
+
+Next focused increment: establish a fixed-message **protocol-level** unknown/custom
+request boundary in the isolated injected adapter, informed by published
+`ServerHandler::on_custom_request` and malformed-known-method fallback. Preserve
+raw SDK characterization and exact modern/legacy protocol error codes/statuses;
+cover unknown secret methods and typed deserialization fallback using official and
+raw clients, including initialized legacy SSE. HTTP 200 errors must not require
+buffering successful SSE. SDK logging policy and other native errors remain separate
+shipping decisions; do not claim comprehensive redaction. Coordinated CLI import,
+other operation contracts, stdio MCP and packaging remain independently actionable.
+Do not repeat unchanged cgroup qualification.
 
 ## Work 1: complete settings export/import
 
