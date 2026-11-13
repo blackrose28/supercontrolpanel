@@ -1305,3 +1305,74 @@ error policy. Backpressure, signals, native Windows/macOS stdio and hard native
 cleanup remain unqualified. HTTP shipping policy, production ownership, coordinated
 CLI import, other operation contracts and packaging remain independently actionable.
 Do not repeat unchanged cgroup qualification.
+
+## Raw stdio DEBUG diagnostic characterization (2026-11-13)
+
+The isolated `raw-debug` fixture mode installs a separate **test-only** subscriber.
+It enables only DEBUG events from `rmcp::transport::async_rw` and `rmcp::service`,
+records every event field through tracing's Debug visitor, and emits JSON records
+with target, level and original formatted fields to stderr. It neither rewrites
+SDK errors nor installs a shipping sanitizer. Spans and TRACE/INFO/WARN events are
+disabled; no claim is made about those levels, other targets, or all secret paths.
+The existing fixed EOF observer remains unchanged and mutually exclusive.
+
+Pinned published source was inspected before implementation:
+`transport/async_rw.rs::try_parse_with_compatibility` formats the raw failed line
+and serde error in its DEBUG message; the transport's second protocol-error event
+contains the serde error. `service.rs` logs `received request` with `id` / `request`
+and `received id-less peer error` with `error`. The tests intentionally retain
+this data, using synthetic passwords only. No dependency or lock changes;
+rmcp remains exactly 3.10.0. Final source review also checked locked tracing
+0.1.44 / tracing-core 0.1.36: Visit defaults forward primitive/string fields to
+record_debug, so the visitor retains fields rather than only fixed markers.
+
+Two bounded subprocess probes add raw-log evidence to previously characterized
+wire behavior, rather than repeating the parser/EOF matrix:
+
+| Stage and synthetic input | Observed raw diagnostic and protocol/process evidence |
+| --- | --- |
+| Bootstrap: valid JSON, numeric method 17, password `SYNTHETIC_PARSER_PASSWORD`; then complete modern discovery | Parser DEBUG message contains the password, raw numeric method and serde error. Exactly the fixed idless `-32600` response, followed by correlated discovery; discovery still does not select service. |
+| Same bootstrap: unsolicited idless peer Error with existing synthetic message/data | Existing typed `ExpectedInitializeRequest` observer checks variant, absent ID, code, both sentinel values and active external token. Original error passes through `?`; after excluding raw DEBUG records, stderr equals the existing full raw Rust termination diagnostic plus fixed startup markers. No RunningService, unsuccessful actual wait. |
+| Modern discovery followed by correlated tools/list, then the numeric-method input | Actual service selection proven by catalog response and fixed `fixture input service created` marker before parser sentinel. Parser DEBUG data persists in active service; same exact idless wire error. |
+| Active idless peer Error, followed by malformed tools/call string arguments `SYNTHETIC_REQUEST_PASSWORD` | Peer DEBUG `error` field retains both synthetic message and password data. Request DEBUG fields retain ID 3 and the supplied string. No peer-error reply; exactly correlated fixed `-32601` / `MCP method not supported`, then catalog recovery. No host invocation. |
+| Actual stdin EOF | Every stdout line is checked through EOF, with the existing correlated checker unchanged and the separate exact idless checker reused. Active wait succeeds with exact fixed created/waiting-Closed/external-cancelled/stopped markers after excluding raw records. |
+
+The parent starts draining stderr concurrently **before any input**, with a 64 KiB
+total test budget and watchdog; bounded synthetic inputs keep the recorded events
+small. The subscriber starts no worker or logger flush guard. No sleeps, stdin interception,
+real configuration/profile/keyring/runtime, new tool or scpctl MCP entry point.
+Actual `child.wait` is checked in both probes, rather than inferring exit from
+stdout closure. These tests qualify normal small-pipe completion on this host;
+they do not qualify backpressure or arbitrary logging volume.
+
+TDD: both new probes first failed at missing raw parser DEBUG evidence
+(`/tmp/scp-raw-red.log`), then passed with the explicit subscriber. A mutation that
+discarded all field values failed both probes; another retaining message text but
+discarding other fields failed the active peer-data assertion while bootstrap
+passed (`/tmp/scp-raw-mutation.log`, `/tmp/scp-raw-fields-mutation.log`). The original
+observer was restored before verification. Dispatch assertions were extracted into
+a helper after quality delta flagged new-test length; behavior stayed green.
+
+Locked full spike: **47 tests**, including 19 stdio; strict all-target Clippy,
+formatting and whitespace checks pass. Root/core/desktop/native/MSRV/UI/release
+checks are outside this fixture/test-only change. Raw logs remain unsanitized;
+HTTP fixed-error mappings are a distinct boundary. Signals, native Windows/macOS
+stdio, hard native cleanup, production ownership and general logging/error policy
+remain unqualified. The fixed EOF observer is not evidence for this raw boundary.
+
+Ripwire quality delta exits 0: eight non-gating new-symbol reachability rows
+(tracing trait callbacks and Cargo tests), one minor existing entry-point churn
+row, no gating regressions or suppressions. Edit checks find no incompatible
+callers; helper visibility widens only to sibling tests. The staged test gate
+exits 4 with thirteen unknown-runner test files/modules, all executed by the full
+Cargo suite, and unchanged EOF callback / desktop OIDC / two documentation-heading
+rows. This is not a claim that static analysis models subprocess or trait dispatch.
+
+Next focused increment: advance coordinated CLI import through a bounded pure
+backup archive/model validation extraction into scp-core, preserving existing
+desktop serialization, validation order and errors with characterization tests.
+Inspect the desktop backup module and core profile/credential boundaries first;
+keep filesystem/keyring apply/recovery and CLI command enablement separate until
+their ownership contracts are qualified. HTTP shipping policy, stdio production
+logging policy, other operation contracts and packaging remain independently
+actionable. Do not repeat unchanged cgroup qualification.

@@ -6,6 +6,8 @@ mod active;
 mod eof_observer;
 #[path = "stdio_fixture/input_errors.rs"]
 mod input_errors;
+#[path = "stdio_fixture/raw_observer.rs"]
+mod raw_observer;
 #[path = "stdio_fixture/startup_eof.rs"]
 mod startup_eof;
 
@@ -87,6 +89,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if matches!(mode.as_str(), "gated-eof" | "gated-eof-expiry") {
         eof_observer::install();
     }
+    if mode == "raw-debug" {
+        raw_observer::install();
+    }
     let allowed_categories = match mode.as_str() {
         "denied" => vec![],
         "bad-category" => vec!["read-only".into(), "SECRET_CATEGORY".into()],
@@ -121,7 +126,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("fixture started");
     match mode.as_str() {
         "startup-eof" => startup_eof::run(adapter).await,
-        "input-errors" => input_errors::run(adapter).await,
+        "input-errors" | "raw-debug" => input_errors::run(adapter).await,
         _ => active::run(adapter, completion).await,
     }
 }

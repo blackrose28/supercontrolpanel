@@ -392,7 +392,12 @@ through discovery; active legacy/modern services recover. A separate strict
 idless-error checker preserves newline/64 KiB integrity and rejects any extra
 fields, data or ID; the existing correlated-response checker stays unchanged.
 These tests characterize pinned SDK behavior, including the legacy idless reply;
-raw SDK logging and production error policy remain unqualified.
+a separate test-only DEBUG subscriber now records raw parser messages and active
+peer-error/request fields with synthetic password sentinels. Bootstrap retains its
+original typed error; active protocol replies remain fixed. Concurrent bounded
+stderr capture and actual process waits verify small-input completion. These raw
+logs contain supplied data: this is characterization, and production logging/error
+policy remains unqualified.
 The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
 enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified

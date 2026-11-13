@@ -2354,6 +2354,38 @@ ownership remain open. HTTP shipping policy, coordinated CLI import, other
 operations and packaging are independently actionable. Do not repeat unchanged
 cgroup qualification.
 
+### Raw stdio DEBUG diagnostic characterization (2026-11-13)
+
+The isolated raw-debug fixture installs an explicit test-only DEBUG subscriber for
+the pinned SDK transport/service targets. It records original formatted fields and
+messages on stderr, including synthetic parser passwords, peer-error message/data
+and malformed-request arguments. It does not discard raw fields like the fixed
+EOF observer, which stays unchanged. Original typed bootstrap errors pass through;
+no production logging, sanitizer, SDK change, new tool or CLI MCP command.
+
+Two bounded subprocess probes distinguish bootstrap from active modern dispatch
+using correlated discovery/catalog responses and fixed service-created observations.
+Both check exact fixed wire errors, recovery, every stdout line through EOF, actual
+stdin closure and actual child.wait status. Bootstrap retains the exact original
+raw termination diagnostic; active shutdown retains fixed Closed/external-cancelled
+markers and performs no host read. Parent stderr draining starts before input and
+has a 64 KiB total budget, so these small diagnostics cannot prevent process exit.
+
+TDD: both probes RED without subscriber, then GREEN. Discard-all and retain-message-
+only mutations fail raw parser and peer-field assertions respectively; restored
+code passes. Full locked spike 47 tests (19 stdio), strict all-target Clippy,
+formatting and whitespace pass. Production, native OS and root workspace checks
+are outside this fixture/test-only scope. See
+[raw SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#raw-stdio-debug-diagnostic-characterization-2026-11-13).
+
+Next: advance coordinated CLI import with a focused pure backup archive/model
+validation extraction into core. Preserve desktop serialization, validation order
+and errors; inspect profile/credential ownership before moving apply/recovery or
+enabling an import command. Raw diagnostics do not choose production logging/error
+policy. HTTP shipping policy, stdio backpressure/signals/native Windows/macOS,
+hard native cleanup, other contracts and packaging remain separate qualifications.
+Do not repeat unchanged cgroup qualification.
+
 ### stdio MCP contract
 
 - Use the same SDK adapter, operation schemas, policy, and redaction as desktop MCP, hosted directly on the headless runtime.

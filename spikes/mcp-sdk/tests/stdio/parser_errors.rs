@@ -9,7 +9,7 @@ fn invalid_shape() -> Value {
         "params":{"password":"SYNTHETIC_STDIO_SECRET"}})
 }
 
-async fn read_invalid_request_line(output: &mut (impl tokio::io::AsyncBufRead + Unpin)) {
+pub(super) async fn read_invalid_request_line(output: &mut (impl tokio::io::AsyncBufRead + Unpin)) {
     // This is a separate, exact SDK-error exception; correlated replies still require id.
     let mut bytes = Vec::new();
     let read = output

@@ -3,7 +3,7 @@ use super::*;
 
 const SENTINEL: &str = "SYNTHETIC_STDIO_SECRET";
 
-fn peer_error() -> Value {
+pub(super) fn peer_error() -> Value {
     json!({"jsonrpc":"2.0","error":{"code":-32600,"message":SENTINEL,
         "data":{"password":SENTINEL}}})
 }
