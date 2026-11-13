@@ -69,6 +69,8 @@ impl fmt::Debug for SecretValue {
 /// Sanitized failures. Missing credentials are `Ok(None)`, never an error or empty value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecretError {
+    /// Ordinary profile access was denied; distinct from native store failures.
+    RecoveryRequired,
     Unavailable,
     InvalidAccount,
     InvalidData,
@@ -78,6 +80,7 @@ pub enum SecretError {
 impl fmt::Display for SecretError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
+            Self::RecoveryRequired => "CLI profile recovery evidence is present or cannot be inspected; ordinary credential operations are unavailable",
             Self::Unavailable => {
                 "OS credential store is locked or unavailable; unlock or enable the store and retry"
             }
@@ -185,7 +188,15 @@ impl<'a, B: SecretBackend> ProfileSecrets<'a, B> {
         Ok(())
     }
 
-    fn key(&self, account: &CredentialAccount) -> Result<(String, String), SecretError> {
+    fn key(&mut self, account: &CredentialAccount) -> Result<(String, String), SecretError> {
+        // Observe before account validation, cache access/eviction-to-native or backend I/O.
+        // Reuse the owner's monotonic latch; clearing the cache never grants admission.
+        if self.owner.ensure_runtime_operations().is_err() {
+            self.cache
+                .entries
+                .retain(|(namespace, _), _| namespace != self.owner.credential_namespace());
+            return Err(SecretError::RecoveryRequired);
+        }
         Ok((
             self.owner.credential_namespace().into(),
             account.account_name()?,

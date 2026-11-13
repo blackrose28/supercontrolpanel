@@ -91,7 +91,7 @@ The [CLI import admission review](CLI_IMPORT_ADMISSION.md) specifies target name
 retention, account mapping/refusal rules and pending-recovery exclusion. Desktop
 undo journals and completion tombstones do not identify a CLI target and must not
 be replayed as CLI recovery. Denial-only owner acquisition and stat-only ordinary
-CLI file-read fences and runtime entry denial are implemented; none enables import or recovery.
+CLI file-read fences and runtime/credential entry denial are implemented; none enables import or recovery.
 
 Version 1 consists of `SCPBAK01`, a little-endian 32-bit JSON-header length, the exact header bytes, and AES-256-GCM ciphertext/tag. The magic, length and header are associated data. The header declares format version, `argon2id-19`, `aes-256-gcm`, memory/iterations/parallelism, a fresh random 16-byte salt and 12-byte nonce. The encrypted payload has its own schema version, app version, platform, timestamp, file/credential inventory and external references. There is no compression or machine-bound decryption key.
 
@@ -139,6 +139,7 @@ or keyring access; see the [read contract](CLI_IMPORT_ADMISSION.md#second-prereq
 This is not a coordinated snapshot or complete in-process maintenance gate.
 
 The [CLI lifetime audit](CLI_MAINTENANCE_LIFETIMES.md) records implemented monotonic
-runtime entry denial and permitted cleanup. Credential fencing, active supervision
-and reader/publisher exclusion remain future requirements. Desktop recovery is
+runtime/credential entry denial and permitted cleanup. Credential denial has a
+distinct fixed error and evicts the affected namespace cache before returning.
+Active supervision and reader/publisher exclusion remain future requirements. Desktop recovery is
 unchanged; entry checks cannot terminate active work or retract issued readers.

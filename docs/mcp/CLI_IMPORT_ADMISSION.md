@@ -1,13 +1,13 @@
 # Coordinated CLI import: admission and ownership contract
 
-Status: admission design reviewed 2026-11-13; denial-only acquisition, runtime entry and ordinary-read fences implemented.
+Status: admission design reviewed 2026-11-13; denial-only acquisition, runtime/credential entry and ordinary-read fences implemented.
 No CLI import, recovery implementation or secret-bearing model ships. Except for
-the acquisition, runtime entry and ordinary-read fences described below, the matrices specify required future behavior.
+the acquisition, runtime/credential entry and ordinary-read fences described below, the matrices specify required future behavior.
 Passing the shared desktop archive validators does not admit CLI import.
 The [in-process lifetime audit](CLI_MAINTENANCE_LIFETIMES.md) traces existing
 capabilities, denial/cleanup precedence and future cross-process read exclusion;
-runtime entry denial after acquisition is now implemented, with credential fencing
-and maintenance/recovery authority still pending.
+runtime and credential entry denial after acquisition are implemented; serialized
+maintenance and recovery authority remain pending.
 
 ## Ownership acquisition audit
 
@@ -21,7 +21,7 @@ impact and affected results. There are two production callers of
 | `scpctl profile init` | `initialize_profile` → `ProfileOwner::acquire` | Denies recovery evidence before identity loading/creation |
 | Linux `scpctl caddy run` | host `run` → `ProfileRuntime::acquire` → `ProfileOwner::acquire` | Denies recovery evidence before output creation or launch |
 | Library runtime construction | Public `ProfileRuntime::acquire` delegates to the same owner constructor | Delegates to the fenced owner constructor |
-| Library credential adapter | `ProfileSecrets::new` borrows an owner; read/refresh/write use that namespace | Borrow enforces lock lifetime only; credential methods do not yet consult owner runtime denial or provide maintenance exclusion |
+| Library credential adapter | `ProfileSecrets::new` borrows an owner; read/refresh/write use that namespace | Borrow retains lock; credential entries consult shared owner latch before validation/cache/backend, evict namespace on denial; no maintenance exclusion |
 | `server list`, `config show` | Direct core readers with metadata-only recovery check, no owner acquisition | Denies observed recovery evidence; no coordinated snapshot or maintenance lease |
 | Unit/integration fixtures | Core profile, credentials, sessions, foreground; CLI and Caddy lifecycle tests | Exercise direct/public constructors, conflicts and owner release; now include recovery-artifact admission tests |
 
@@ -126,8 +126,8 @@ No ordinary owner capability or credential adapter can be constructed from a
 restricted recovery lease. Failure after journaling revokes ordinary in-process
 access as well as blocking the next process; checking only the next acquisition
 is insufficient. Recovery authority must not be an ordinary owner plus a public
-`ignore_recovery` boolean. Current `ProfileSecrets` lifetime borrowing alone cannot
-enforce those requirements.
+`ignore_recovery` boolean. Current `ProfileSecrets` borrowing and entry observation cannot serialize
+publication or provide restricted recovery authority.
 
 A separately versioned CLI journal must authenticate its target namespace,
 transaction identity, schema/policy version, bounded fixed filenames and typed
@@ -279,6 +279,27 @@ and scoped-worker joins remain allowed with existing payloads and error ordering
 
 See the [implementation evidence and acceptance matrix](CLI_MAINTENANCE_LIFETIMES.md#runtime-entry-implementation-evidence-2026-11-13).
 This observes entry only; no active monitoring, escaped-reader/secret revocation,
-blocked native interruption, credential admission, publisher exclusion or recovery
+blocked native interruption, publisher exclusion or recovery
 authority is added. Caddy can create an empty output file before a late denial.
 No shared desktop/CC/admin/MCP primitive or command/event contract changes.
+
+## Fourth prerequisite: credential ordinary-entry denial (implemented)
+
+`ProfileSecrets::read`, `read_fresh` and `write` use private mutable `key` to
+consult the owner's existing retained-path monotonic latch before account
+validation, cache access/eviction-to-native or backend calls. Production always
+uses the same two exact names and symlink_metadata. Denial evicts the affected
+namespace's entire cache and returns distinct `SecretError::RecoveryRequired`:
+`CLI profile recovery evidence is present or cannot be inspected; ordinary credential operations are unavailable`.
+This public enum addition requires exhaustive consumers to handle recovery; native
+error classification remains unchanged. Cached presence, empty and absence never
+bypass denial. Other profiles are independent; clear/drop remain allowed, and
+artifact removal never resets that owner. Keyring delete/rollback is mutation.
+
+See the [credential evidence](CLI_MAINTENANCE_LIFETIMES.md#credential-entry-implementation-evidence-2026-11-13).
+The adapter borrows the original owner through native operations. Raw backend APIs
+remain trusted primitives shared with hosts, not CLI authority or a sandbox.
+No production CLI keyring command, live keyring probe, recovery API, import command,
+journal format, publisher lock or active monitor ships. Checks cannot serialize
+external writers, interrupt blocked calls or retract cloned secrets. Serialized
+admission and authenticated target-bound restricted recovery remain required.

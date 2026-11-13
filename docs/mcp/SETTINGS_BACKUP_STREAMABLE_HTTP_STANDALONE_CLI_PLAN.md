@@ -2387,6 +2387,60 @@ gates; independent HTTP shipping policy, production stdio logging, operation and
 packaging work remains actionable. Continue in a NEW same-devbox thread after
 that increment, with notifications enabled and no parent coordination/wait.
 
+### CLI credential ordinary-entry denial (2026-11-13)
+
+Completed the credential slice from the [lifetime audit](CLI_MAINTENANCE_LIFETIMES.md#credential-entry-implementation-evidence-2026-11-13).
+The private mutable `ProfileSecrets::key` checks the retained owner before account
+validation, cache lookup/eviction-to-native or backend access. Production reuses
+the exact two-name symlink_metadata predicate and existing private monotonic latch.
+Denial evicts every cache entry for that namespace, preserving independent profiles,
+and returns new public `SecretError::RecoveryRequired` with fixed text:
+`CLI profile recovery evidence is present or cannot be inspected; ordinary credential operations are unavailable`.
+External exhaustive enum matches must handle this addition; tracked consumers were
+audited. Native conversion remains unchanged. Public adapter signatures and owner
+borrowing remain intact; private key's receiver changes from `&self` to `&mut self`.
+
+Behavioral RED showed cached reads succeeding and InvalidAccount winning after late
+evidence. GREEN covers existing adapter then evidence, both names, cached present/
+empty/absent, read/fresh/set/delete, all invalid-account entries, unchanged native
+counts, namespace eviction and independent cache preservation, cache clear/drop,
+removal latch and original namespace on fresh acquisition. Empty/DONE/directory
+and Unix links/dangling objects deny without changing identity/evidence. Private
+inspection failures share runtime denial; credential observation also latches later
+runtime checks. Mock native operations assert the owner lock is retained during
+reads, sets, deletes and failures. Runtime denial/cleanup and compile-fail borrowing
+remain green. No live keyring is probed.
+
+Validation: locked all-feature workspace **176 passed, eight ignored subprocess
+fixtures exercised by parents**, strict all-target/all-feature Clippy, fmt and
+whitespace checks pass. Ripwire edit checks report no incompatible callers; manual
+review records the public enum addition and private receiver change that its
+signature lens does not detect. Affected credential/profile/runtime/CLI tests run
+through Cargo. Quality delta has zero gating findings/suppressions; ten new-symbol
+Cargo-test/trait reachability rows and one intentional two-method mock duplication
+row remain, with no existing-symbol regression. No dependencies/schema, desktop/UI/
+SDK/native Windows/macOS/MSRV/release reruns or cgroup probe are claimed.
+Local Markdown checks verify 60 targets and 16 fragments across six changed docs.
+The staged static test gate exits 4 with 13 unknown-runner modules (executed by
+Cargo) and 148 untested rows including unchanged desktop/documentation-derived
+reachability; no native/trait/subprocess static-coverage claim is made.
+
+This is entry observation only: no active monitor, blocked-native interruption,
+escaped-reader/cloned-secret revocation, durable latch, publisher lease or recovery
+authority. Cache clear/drop are permitted cleanup; keyring delete/rollback remains
+mutation. Raw SecretBackend/OsSecretBackend and SessionStore remain trusted shared
+primitives, not CLI authority or a sandbox. No production CLI keyring command exists.
+Read serialization and authenticated restricted target-bound recovery remain gates.
+
+Next focused increment: bounded production stdio diagnostics/error policy review
+against pinned SDK source and the existing raw-debug/startup-error evidence. Make
+the fixed startup diagnostic, subscriber boundary and acceptance matrix concrete;
+keep raw characterization intact and do not claim generic sanitization or enable a
+production stdio command. HTTP shipping policy, operation contracts and packaging
+remain independently actionable. Continue in a NEW same-devbox thread after every
+completed increment while actionable work remains, notifications enabled and no
+parent messaging/wait. Honor stop/cancel/approval instructions.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

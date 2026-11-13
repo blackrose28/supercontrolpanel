@@ -6,6 +6,9 @@ use scp_core::{
 };
 use std::collections::HashMap;
 
+#[path = "credentials/recovery.rs"]
+mod recovery;
+
 #[derive(Default)]
 struct Backend {
     entries: HashMap<(String, String), SecretValue>,

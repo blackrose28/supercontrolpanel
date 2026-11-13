@@ -193,8 +193,8 @@ permanently denies ordinary operations for that owner, even after artifact remov
 `CLI profile recovery evidence is present or cannot be inspected; ordinary runtime operations are unavailable`.
 Namespace/ID inspection and close/poll/drop/worker join remain available. This is
 entry observation only: no active monitoring, interruption of blocked native work,
-or revocation of issued readers or cloned secrets. Credential fencing and serialized
-maintenance remain pending; see the [lifetime audit](docs/mcp/CLI_MAINTENANCE_LIFETIMES.md).
+or revocation of issued readers or cloned secrets. Serialized maintenance remains
+pending; see the [lifetime audit](docs/mcp/CLI_MAINTENANCE_LIFETIMES.md).
 A late launch denial may leave Caddy's newly created empty output file.
 
 The core now provides a profile-bound credential store and a cache keyed by namespace
@@ -204,7 +204,15 @@ foundation for runtime/settings operations. The desktop continues using its exis
 credential identifiers and cache. Secret debug output is redacted, owned secret buffers
 are zeroized on drop, and missing credentials are distinct from locked/unavailable stores.
 Cached reads require an explicit refresh after external changes; failed refreshes or
-writes evict stale entries. Native calls can prompt/block, so host timeout and interaction
+writes evict stale entries. Every profile adapter read, fresh read, set and delete now
+checks the owner's recovery latch before account validation, cache or native access.
+Denial returns the distinct `SecretError::RecoveryRequired` with fixed text
+`CLI profile recovery evidence is present or cannot be inspected; ordinary credential operations are unavailable`,
+and evicts all cached entries for that namespace. Other profiles remain independent;
+cache clear/drop remain allowed. Artifact removal does not reset the owner. Raw
+`SecretBackend`/`OsSecretBackend` are trusted primitives, not CLI authority or a sandbox.
+Keyring deletion/rollback is mutation, not permitted cleanup under denial.
+Native calls can prompt/block, so host timeout and interaction
 handling must be added before exposing them through commands or MCP.
 
 Developers can validate the optional adapter with
