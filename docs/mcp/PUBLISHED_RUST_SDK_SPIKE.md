@@ -936,3 +936,77 @@ handlers/native cleanup. EOF before lifecycle selection, malformed input,
 backpressure and signals remain separate. Production stdio ownership, HTTP
 shipping policy, coordinated CLI import, other operation contracts and packaging
 remain actionable; do not repeat unchanged cgroup qualification.
+
+## Active stdio EOF drain expiry and internal cancellation (2026-11-13)
+
+`gated-eof-expiry` reuses the same `SyntheticHost`, `OverviewAdapter`, gate protocol
+and SDK stdio transport. The observer additionally enables WARN events from
+`rmcp::service` and maps only the exact fixed `timed out draining in-flight
+responses` message to `fixture sdk drain expired` on stderr. It forwards no raw
+fields/diagnostics and never reads MCP stdin or writes stdout. This remains
+fixture instrumentation, not production logging or sanitization policy.
+
+Published 3.10.0 `transport/io.rs`, `async_rw.rs`, service/server/client lifecycle
+and `service.rs` drain/RunningService code were inspected before fixture selection.
+After actual receive-None EOF the loop selects Closed and a five-second response
+drain, emits that WARN on expiry, then cancels `serve_loop_ct`. Request/context
+tokens descend from that internal token. Service cancellation instead selects a
+two-second drain. Neither drain is a join of handler/native work.
+
+`RunningService::waiting(mut self)` takes/awaits its service handle and then drops
+the wrapper. Its `dg: ct.drop_guard()` cancels the externally supplied token on
+drop even though the EOF loop does not. The new fixture therefore retains the
+wrapper while waiting for an optional `Notify` acknowledgment after `gated_read`
+returns. That synthetic gate work has written cancelled/finished and closed its
+connection; the host asserts the external token is still active before calling
+waiting. Closed and the subsequent external-token cancellation are separately
+asserted and marked. The host wait prevents runtime exit from discarding gate
+work before it reports. It observes synthetic completion only; it neither joins
+the entire handler nor proves SDK joining/native cleanup. Other modes retain
+the same immediate waiting behavior; explicit serve_with_ct supplies the token
+that serve otherwise creates internally.
+
+The raw test runs legacy Initialize and modern Discover/complete inline metadata
+in separate subprocesses. It proves gate entry and active state before stdin
+closure, actual SDK EOF and active state afterward, then waits for the exact
+expiry marker without sending any release/cancel command. Only that observation
+uses a 12-second watchdog, exceeding the SDK's five-second window; normal entry,
+post-expiry gate and process checks retain five-second fixture watchdogs. No sleep
+establishes EOF or expiry, and these are not production shutdown deadlines.
+Cancellation/finished/gate EOF, absence of any remaining stdout response, actual
+successful child wait, one host read/EOF/expiry marker and the final stop marker
+are required. Raw newline/64 KiB JSON-RPC validation remains active through EOF.
+
+TDD: unsupported mode fails host entry first. The minimal expiry mode passes both
+revisions. Removing only the expiry marker fails when stderr reaches EOF without
+that evidence. A second mutation replacing the actual request token with a fresh
+independent token fails waiting for gate cancellation after observed expiry.
+Both mutations are restored before final validation. No dependency/lockfile or
+production source changes are needed; rmcp remains exactly 3.10.0.
+
+Validation: the locked full spike suite passes **34 tests** (11 adapter, 5 error
+boundary, 5 HTTP, 4 lifecycle, 3 negotiation boundary, 6 stdio). Strict all-target
+Clippy, formatting and whitespace checks pass. The locked desktop SDK dependency
+probe passes with 18 existing warnings; its normal-edge SDK reverse graph is
+empty. No root/core/full desktop, native Windows/macOS, MSRV, release or UI checks
+were rerun for this synthetic-only slice. No dependency or lock changes occurred.
+
+Ripwire impact/uses report no direct fixture main/observer callers and decline
+the host trait call from the adapter; source and subprocess tests verify these
+uses. Existing symbol edit checks retain signatures with no incompatible callers.
+The EOF tests share their handshake/held-entry/actual-EOF setup after quality
+analysis found duplication; the restored full suite passes after refactoring.
+Final quality delta exits **2** solely for a major short-horizon-churn finding on
+fixture main (`churn=self`, three recent touches); it is retained as a disclosed
+history risk, with no suppression, baseline alteration or artificial extraction.
+Two minor churn rows and one new non-gating test dead-code row also remain;
+Cargo executes that test. The duplicate/length findings are gone. This is not a
+clean quality-delta verdict or proof of static coverage. The staged test gate
+exits 4 for one unknown-runner EOF test module (executed by Cargo) and two
+unrelated untested documentation headings; it is not a native coverage claim.
+
+Next: qualify EOF before lifecycle selection, with explicit observations for
+legacy initialization and modern discovery/inline selection. Malformed input,
+backpressure, signals, native Windows/macOS stdio, production host ownership,
+HTTP shipping policy, coordinated CLI import, other operations and packaging
+remain open. The unchanged cgroup gate is not retried.

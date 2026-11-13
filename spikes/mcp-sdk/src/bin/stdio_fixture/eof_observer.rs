@@ -1,4 +1,4 @@
-//! Observe one pinned SDK event; never forward SDK fields or diagnostics.
+//! Observe fixed pinned SDK events; never forward SDK fields or diagnostics.
 use tracing::{field::Visit, span, Event, Metadata, Subscriber};
 
 pub(super) fn install() {
@@ -11,14 +11,17 @@ impl Subscriber for EofObserver {
     fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         metadata.is_event()
             && metadata.target() == "rmcp::service"
-            && *metadata.level() == tracing::Level::INFO
+            && matches!(
+                *metadata.level(),
+                tracing::Level::INFO | tracing::Level::WARN
+            )
     }
 
     fn event(&self, event: &Event<'_>) {
-        let mut message = EofMessage(false);
+        let mut message = EofMessage(None);
         event.record(&mut message);
-        if message.0 {
-            eprintln!("fixture sdk input eof");
+        if let Some(marker) = message.0 {
+            eprintln!("{marker}");
         }
     }
 
@@ -32,12 +35,16 @@ impl Subscriber for EofObserver {
     fn exit(&self, _: &span::Id) {}
 }
 
-struct EofMessage(bool);
+struct EofMessage(Option<&'static str>);
 
 impl Visit for EofMessage {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" && format!("{value:?}") == "input stream terminated" {
-            self.0 = true;
+        if field.name() == "message" {
+            self.0 = match format!("{value:?}").as_str() {
+                "input stream terminated" => Some("fixture sdk input eof"),
+                "timed out draining in-flight responses" => Some("fixture sdk drain expired"),
+                _ => None,
+            };
         }
     }
 }

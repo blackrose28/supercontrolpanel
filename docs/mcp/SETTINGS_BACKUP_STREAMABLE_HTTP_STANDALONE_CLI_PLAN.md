@@ -2179,6 +2179,46 @@ backpressure, signals, native Windows/macOS stdio, production host ownership,
 HTTP shipping policy, coordinated CLI import, other contracts and packaging
 remain open. The unchanged cgroup qualification is not retried.
 
+### Active subprocess EOF drain expiry qualification (2026-11-13)
+
+The same injected overview adapter and separate synthetic gate now qualify EOF
+drain expiry for both supported lifecycles. The harness observes host entry and
+active state, closes stdin, observes actual SDK EOF, and checks active state again.
+It never sends release/cancel. A fixed observer marker for the pinned SDK's exact
+`timed out draining in-flight responses` event establishes expiry; its 12-second
+observation watchdog exceeds the five-second drain instead of racing it.
+Gate cancelled/finished/EOF, no remaining stdout response, successful child wait,
+and exact fixed completion/stop diagnostics are required.
+
+The fixture host waits for a synthetic gate-completion acknowledgment while
+retaining `RunningService`, then asserts the externally supplied service token is
+still active. This prevents `waiting()`'s consuming wrapper/drop guard from
+supplying the cancellation under test. After `waiting()` returns Closed the
+external token is cancelled by that guard, as separately asserted. The SDK loop
+cancels its internal token after drain expiry; it does not itself cancel the
+external token. This is test-host completion observation, not SDK handler joining,
+a native-work join or a hard cleanup guarantee. No production adapter/tool,
+runtime/profile/keyring/config or CLI MCP command is added; rmcp stays =3.10.0.
+
+TDD: the new expiry test first failed at gate entry against the unsupported mode.
+Implementation passed both revisions. Removing the expiry marker failed at EOF
+without expiry evidence; replacing the request token with an independent token
+failed waiting for cooperative cancellation. Restored code passes the full suite.
+Locked full spike suite: 34 pass; strict Clippy, formatting/whitespace and the
+locked desktop dependency probe pass (18 existing warnings), with an empty normal
+SDK reverse graph. Quality delta exits 2 only for major recent fixture-main churn;
+duplicate setup was refactored and no suppressions/baseline edits were added.
+See [SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#active-stdio-eof-drain-expiry-and-internal-cancellation-2026-11-13)
+for validation and limits.
+
+Next focused increment: qualify EOF before lifecycle selection in the isolated
+stdio fixture, inspecting legacy initialize versus modern discovery/inline
+selection before choosing explicit evidence and bounds. Malformed input,
+backpressure, signals, native Windows/macOS stdio and production host ownership
+remain separate qualifications. HTTP shipping policy, coordinated CLI import,
+other operation contracts and packaging remain independently actionable; do not
+repeat unchanged cgroup qualification.
+
 ### stdio MCP contract
 
 - Use the same SDK adapter, operation schemas, policy, and redaction as desktop MCP, hosted directly on the headless runtime.

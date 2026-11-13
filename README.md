@@ -366,7 +366,12 @@ read while another stays active and completes after release. Every stdout line
 is validated, including the absence of a response for the cancelled request.
 A raw subprocess probe also observes the SDK service loop receiving EOF while an
 overview is active, then releases it and checks the drained response and process
-exit for both revisions. EOF drain expiry and native cleanup remain unqualified.
+exit for both revisions. A separate expiry probe holds the read through the SDK's
+five-second drain, observes the exact expiry event and cooperative internal-token
+cancellation, and checks no response and successful exit. The fixture retains the
+service wrapper until gate completion so its external-token drop guard cannot
+supply that cancellation. This is synthetic cooperation; handler joining and
+native cleanup remain unqualified.
 The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
 enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified

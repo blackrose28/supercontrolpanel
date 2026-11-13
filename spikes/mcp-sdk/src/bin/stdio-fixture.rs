@@ -6,10 +6,11 @@ mod eof_observer;
 use rmcp::ServiceExt;
 use scp_core::mcp_dto::McpAppOverviewResult;
 use scp_mcp_sdk_spike::overview::{OverviewAdapter, OverviewHost, OverviewPolicy};
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
+    sync::Notify,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -17,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 struct SyntheticHost {
     fail: bool,
     gate: Option<SocketAddr>,
+    completion: Option<Arc<Notify>>,
 }
 
 impl OverviewHost for SyntheticHost {
@@ -26,9 +28,12 @@ impl OverviewHost for SyntheticHost {
     ) -> Result<McpAppOverviewResult, String> {
         eprintln!("fixture host read");
         if let Some(address) = self.gate {
-            gated_read(address, cancellation)
-                .await
-                .map_err(|_| "fixture gate failed")?;
+            let outcome = gated_read(address, cancellation).await;
+            if let Some(completion) = &self.completion {
+                // Test-host acknowledgment of gate work, not an SDK handler join.
+                completion.notify_one();
+            }
+            outcome.map_err(|_| "fixture gate failed")?;
         }
         if self.fail {
             return Err("password=TOP_SECRET native /private/path".into());
@@ -74,7 +79,7 @@ async fn gated_read(address: SocketAddr, cancellation: CancellationToken) -> std
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mode = std::env::args().nth(1).unwrap_or_default();
-    if mode == "gated-eof" {
+    if matches!(mode.as_str(), "gated-eof" | "gated-eof-expiry") {
         eof_observer::install();
     }
     let allowed_categories = match mode.as_str() {
@@ -87,10 +92,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "require-ui-approval"
     };
+    let completion = (mode == "gated-eof-expiry").then(|| Arc::new(Notify::new()));
     let adapter = OverviewAdapter::new(
         SyntheticHost {
             fail: mode == "error",
-            gate: if matches!(mode.as_str(), "gated" | "gated-eof") {
+            completion: completion.clone(),
+            gate: if matches!(mode.as_str(), "gated" | "gated-eof" | "gated-eof-expiry") {
                 Some(
                     std::env::args()
                         .nth(2)
@@ -107,8 +114,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
     eprintln!("fixture started");
-    let service = adapter.serve(rmcp::transport::stdio_pipes()).await?;
-    service.waiting().await?;
+    let external = CancellationToken::new();
+    let service = adapter
+        .serve_with_ct(rmcp::transport::stdio_pipes(), external.clone())
+        .await?;
+    if let Some(completion) = completion {
+        // Retain RunningService: waiting() consumes it and drops its external-token guard.
+        // This test host waits for synthetic cooperation, not a native/handler join.
+        completion.notified().await;
+        assert!(!external.is_cancelled());
+        eprintln!("fixture host completion observed external active");
+        assert!(matches!(
+            service.waiting().await?,
+            rmcp::service::QuitReason::Closed
+        ));
+        assert!(external.is_cancelled());
+        eprintln!("fixture waiting closed external cancelled");
+    } else {
+        service.waiting().await?;
+    }
     eprintln!("fixture stopped");
     Ok(())
 }
