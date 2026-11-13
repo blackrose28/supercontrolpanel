@@ -586,3 +586,32 @@ fn config_show_default_profile_uses_isolated_cli_directory() {
         1
     );
 }
+
+#[test]
+fn profile_init_denies_recovery_evidence_without_stdout_or_identity_creation() {
+    for name in [
+        "settings-restore-journal.enc",
+        "scp-cli-restore-journal.enc",
+    ] {
+        let temp = tempfile::tempdir().unwrap();
+        let artifact = temp.path().join(name);
+        fs::write(&artifact, b"private journal contents").unwrap();
+        for json in [false, true] {
+            let mut args = vec![
+                "--config-dir",
+                temp.path().to_str().unwrap(),
+                "profile",
+                "init",
+            ];
+            if json {
+                args.push("--json");
+            }
+            let output = cli(&args);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(output.stdout.is_empty());
+            assert_eq!(String::from_utf8(output.stderr).unwrap(), "scpctl: CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable\n");
+            assert!(!temp.path().join("profile.json").exists());
+            assert_eq!(fs::read(&artifact).unwrap(), b"private journal contents");
+        }
+    }
+}

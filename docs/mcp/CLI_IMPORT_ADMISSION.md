@@ -1,9 +1,9 @@
 # Coordinated CLI import: admission and ownership contract
 
-Status: design review, 2026-11-13, against local commit `c4af757`.
-No CLI import, recovery implementation, new profile fence or secret-bearing model
-ships with this document. The matrices below specify required behavior for future
-increments. Passing the shared desktop archive validators does not admit CLI import.
+Status: admission design reviewed 2026-11-13; denial-only acquisition fence implemented.
+No CLI import, recovery implementation or secret-bearing model ships. Except for
+the acquisition fence described below, the matrices specify required future behavior.
+Passing the shared desktop archive validators does not admit CLI import.
 
 ## Ownership acquisition audit
 
@@ -14,16 +14,17 @@ impact and affected results. There are two production callers of
 
 | Entry or capability | Current route | Recovery gap |
 | --- | --- | --- |
-| `scpctl profile init` | `initialize_profile` → `ProfileOwner::acquire` | May initialize identity despite a recovery artifact |
-| Linux `scpctl caddy run` | host `run` → `ProfileRuntime::acquire` → `ProfileOwner::acquire` | Can launch despite a recovery artifact; output is created after acquisition |
-| Library runtime construction | Public `ProfileRuntime::acquire` delegates to the same owner constructor | Must not be bypassed by gating only CLI dispatch |
+| `scpctl profile init` | `initialize_profile` → `ProfileOwner::acquire` | Denies recovery evidence before identity loading/creation |
+| Linux `scpctl caddy run` | host `run` → `ProfileRuntime::acquire` → `ProfileOwner::acquire` | Denies recovery evidence before output creation or launch |
+| Library runtime construction | Public `ProfileRuntime::acquire` delegates to the same owner constructor | Delegates to the fenced owner constructor |
 | Library credential adapter | `ProfileSecrets::new` borrows an owner; read/refresh/write use that namespace | Borrow enforces lock lifetime only; no pending-recovery state or maintenance exclusion |
 | `server list`, `config show` | Direct file readers, no owner acquisition | Can observe files during future recovery; currently intentional read-only behavior |
-| Unit/integration fixtures | Core profile, credentials, sessions, foreground; CLI and Caddy lifecycle tests | Exercise direct/public constructors, conflicts and owner release; no recovery-artifact admission tests yet |
+| Unit/integration fixtures | Core profile, credentials, sessions, foreground; CLI and Caddy lifecycle tests | Exercise direct/public constructors, conflicts and owner release; now include recovery-artifact admission tests |
 
 `ProfileOwner` fields are private, with no alternate public constructor, Clone or
 deserialization. Acquisition creates the directory/lock, takes a nonblocking OS
-lock, then loads or creates `profile.json`. That is the central future fence.
+lock, then inspects recovery-artifact metadata before loading or creating
+`profile.json`. That is the central ordinary-ownership fence.
 An error drops `OwnerLock` and explicitly unlocks it. The persistent lock file is
 never unlinked. Namespace validation requires version 1 and the CLI prefix plus a
 UUID v4, and unknown metadata fields fail. This does not detect a copied identity:
@@ -152,9 +153,9 @@ destination fingerprint checks. Archive/Changes stay off IPC/MCP/CC. This contra
 does not resolve guardian death, process-tree containment or shared-profile safety;
 those remain independent [supervision gates](LINUX_OPERATION_SUPERVISION.md).
 
-## First testable prerequisite: acquisition fence
+## First prerequisite: acquisition fence (implemented)
 
-Implement a small **denial-only** fence inside `ProfileOwner::acquire`, after taking
+A small **denial-only** fence is implemented inside `ProfileOwner::acquire`, after taking
 the OS lock and before `load_or_create_identity`. Inspect the two exact journal
 paths with `symlink_metadata`, without opening/reading them. Only `NotFound` means
 absent; any object or other inspection error denies ownership with a fixed recovery
@@ -165,7 +166,7 @@ settings, credentials and artifacts must remain unchanged. Denial must release t
 OS lock without deleting it. Ordinary cross-process ownership conflict keeps its
 existing precedence.
 
-Strict RED/GREEN cases must cover:
+Strict RED/GREEN tests cover:
 
 - Each artifact name with bytes, empty file, directory and Unix symlink (including
   dangling link); the desktop tombstone is denied without a content exception.
@@ -185,3 +186,20 @@ hold the same lock when publishing future journals; stat checks do not prevent a
 hostile external process racing filesystem changes. Filesystem alias/TOCTOU and
 native Windows/macOS behavior need explicit qualification, not a portable-safety
 claim from Linux tests.
+
+Implementation evidence (2026-11-13): behavioral RED failures showed direct owner
+and runtime acquisition succeeding, real init creating identity, and real Caddy
+launching despite evidence. A private acquisition inspection seam also first
+allowed injected PermissionDenied/Other errors, then denied them with the fixed
+error. The seam is inaccessible to library callers; production always uses
+`symlink_metadata`. No chmod/root assumption is used. Both names are tested with
+bytes, empty files, directories, completion bytes, Unix existing/dangling symlinks,
+existing/missing identity, settings preservation and retained/unlocked lock files.
+The full all-feature locked core/CLI workspace passes **155 tests** (seven ignored
+subprocess fixtures exercised by parents); strict Clippy, formatting and diff
+checks pass. Ripwire reports no gating regressions or suppressions; remaining
+findings are six Cargo-test reachability rows and three minor churn/module-size
+rows. Matrix refactoring removed the initial new-test complexity/nesting findings.
+Native Windows/macOS, desktop, SDK spike, UI, live keyring, release and
+MSRV checks were not rerun for this acquisition-only change. No dependency, schema,
+command/event, recovery format or native supervision changes.

@@ -2218,6 +2218,43 @@ HTTP shipping policy, production stdio logging, other operation contracts and
 packaging remain independently actionable. Do not repeat unchanged cgroup probes
 or create a blocked successor while independent work remains.
 
+### CLI recovery-artifact acquisition fence (2026-11-13)
+
+Implemented the first [admission prerequisite](CLI_IMPORT_ADMISSION.md#first-prerequisite-acquisition-fence-implemented).
+After the existing OS lock, before identity loading/creation, ordinary owner
+acquisition inspects both exact journal names using `symlink_metadata`. Only
+NotFound permits progress. All objects and other inspection errors return the
+same fixed recovery error. There is no content read, tombstone exception, keyring
+access, bypass or recovery. The private inspection seam allows reliable error
+injection without changing the public owner/runtime API. Conflict precedence and
+persistent lock-file/drop behavior remain intact.
+
+RED tests demonstrated admission/identity creation and Caddy launch despite
+artifacts, including direct core/runtime boundaries; injected inspection errors
+also initially succeeded. GREEN tests cover both filenames, bytes/empty/directory,
+Unix links/dangling links, desktop DONE bytes, exact identity/settings/artifact
+preservation, missing identity, lock release, CLI exit 1/no stdout, and Caddy denial
+before log/child creation. Existing clean initialization, namespace, conflicts,
+credentials, runtime/session/foreground and read-only query tests remain green.
+Locked all-feature workspace **155 pass**, seven ignored subprocess fixtures
+exercised by parents; strict Clippy, formatting and diff checks pass. Ripwire
+quality delta exits 0 with no gating findings or suppressions: six Cargo-test
+reachability findings and three minor churn/module-size rows remain. Refactoring
+removed the initial test complexity/nesting findings.
+No dependency/schema/desktop/SDK/native-supervision changes; native Windows/macOS,
+MSRV, desktop, SDK spike, UI, live keyring and release checks were not rerun.
+
+Next focused increment: design and implement stat-only pending-recovery denial
+for the existing `config show` / `server list` read paths, without profile creation,
+identity initialization, locking or keyring access. Audit their direct core/file
+reader boundaries first; specify fixed errors and NotFound/inspection precedence,
+then use strict RED/GREEN at core and actual CLI boundaries. This increment leaves
+those readers unchanged. In-process maintenance/revocation and restricted recovery
+authority remain later prerequisites; acquisition alone does not enable import,
+guardian/tree crash retention or native supervision. HTTP shipping policy,
+production stdio logging, other operations and packaging remain independently
+actionable. Do not reprobe unchanged managed cgroup controls.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

@@ -351,3 +351,24 @@ fn assert_released_descendant_reaped(fixture: &CaddyFixture, pid: u32) {
     assert_eq!(libc::WEXITSTATUS(status), 0);
     assert!(!Path::new("/proc").join(pid.to_string()).exists());
 }
+
+#[test]
+fn real_cli_recovery_evidence_denies_caddy_before_log_or_child_creation() {
+    for name in [
+        "settings-restore-journal.enc",
+        "scp-cli-restore-journal.enc",
+    ] {
+        let fixture = CaddyFixture::new();
+        fs::create_dir(fixture.path("profile")).unwrap();
+        let artifact = fixture.path("profile").join(name);
+        fs::write(&artifact, b"private journal contents").unwrap();
+        let output = CliChild::spawn(&mut fixture.command("success")).finish();
+        assert_eq!(output.status.code(), Some(1), "{output:?}");
+        assert!(output.stdout.is_empty());
+        assert_eq!(String::from_utf8(output.stderr).unwrap(), "scpctl: CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable\n");
+        assert!(!fixture.path("log").exists());
+        assert!(!fixture.path("pid").exists());
+        assert!(!fixture.path("profile/profile.json").exists());
+        assert_eq!(fs::read(&artifact).unwrap(), b"private journal contents");
+    }
+}

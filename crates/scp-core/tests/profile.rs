@@ -109,3 +109,116 @@ fn new_profile_files_are_private() {
         assert_eq!(fs::metadata(path).unwrap().permissions().mode() & 0o077, 0);
     }
 }
+
+const RECOVERY_ERROR: &str = "CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable";
+const JOURNALS: [&str; 2] = [
+    "settings-restore-journal.enc",
+    "scp-cli-restore-journal.enc",
+];
+
+fn assert_recovery_denied(root: &std::path::Path) {
+    assert_eq!(
+        scp_core::host::ProfileRuntime::acquire(root)
+            .err()
+            .expect("runtime must deny recovery evidence"),
+        RECOVERY_ERROR
+    );
+    assert_eq!(
+        ProfileOwner::acquire(root)
+            .err()
+            .expect("owner must deny recovery evidence"),
+        RECOVERY_ERROR
+    );
+    // Denial releases the OS lock but never removes its persistent file.
+    let lock = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.join("runtime-owner.lock"))
+        .unwrap();
+    lock.try_lock().expect("denial must release ownership");
+    lock.unlock().unwrap();
+}
+
+#[test]
+fn recovery_artifact_objects_deny_owner_and_runtime_without_changing_profile() {
+    for name in JOURNALS {
+        for kind in ["bytes", "empty", "directory", "tombstone"] {
+            for existing_identity in [false, true] {
+                assert_artifact_case(name, kind, existing_identity);
+            }
+        }
+    }
+}
+
+fn assert_artifact_case(name: &str, kind: &str, existing_identity: bool) {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path();
+    let identity = existing_identity.then(|| {
+        drop(ProfileOwner::acquire(root).unwrap());
+        fs::read(root.join("profile.json")).unwrap()
+    });
+    for file in ["config.json", "servers.json", "sync-local.json"] {
+        fs::write(root.join(file), b"unchanged private settings").unwrap();
+    }
+    let artifact = root.join(name);
+    if kind == "directory" {
+        fs::create_dir(&artifact).unwrap();
+    } else {
+        let contents: &[u8] = match kind {
+            "bytes" => b"private recovery contents",
+            "tombstone" => b"SCP-RESTORE-DONE-1",
+            _ => b"",
+        };
+        fs::write(&artifact, contents).unwrap();
+    }
+    let before = fs::read(&artifact).ok();
+    assert_recovery_denied(root);
+    assert_eq!(fs::read(root.join("profile.json")).ok(), identity);
+    assert_eq!(fs::read(&artifact).ok(), before);
+    assert_eq!(
+        fs::symlink_metadata(&artifact).unwrap().is_dir(),
+        kind == "directory"
+    );
+    for file in ["config.json", "servers.json", "sync-local.json"] {
+        assert_eq!(
+            fs::read(root.join(file)).unwrap(),
+            b"unchanged private settings"
+        );
+    }
+}
+
+#[test]
+#[cfg(unix)]
+fn recovery_symlinks_including_dangling_targets_are_denied_without_following() {
+    for name in JOURNALS {
+        for dangling in [false, true] {
+            let temp = tempfile::tempdir().unwrap();
+            let target = temp.path().join("private-target-name");
+            if !dangling {
+                fs::write(&target, b"private target contents").unwrap();
+            }
+            let artifact = temp.path().join(name);
+            std::os::unix::fs::symlink(&target, &artifact).unwrap();
+            assert_recovery_denied(temp.path());
+            assert!(!temp.path().join("profile.json").exists());
+            assert_eq!(fs::read_link(&artifact).unwrap(), target);
+            assert_eq!(
+                fs::read(&target).ok(),
+                (!dangling).then(|| b"private target contents".to_vec())
+            );
+        }
+    }
+}
+
+#[test]
+fn competing_owner_conflict_precedes_recovery_evidence() {
+    let temp = tempfile::tempdir().unwrap();
+    let owner = ProfileOwner::acquire(temp.path()).unwrap();
+    for name in JOURNALS {
+        fs::write(temp.path().join(name), b"private journal").unwrap();
+    }
+    let error = ProfileOwner::acquire(temp.path()).err().unwrap();
+    assert!(error.contains("already owned"), "{error}");
+    drop(owner);
+    assert_recovery_denied(temp.path());
+}

@@ -173,6 +173,15 @@ external Boundary state. Guard drop explicitly unlocks even if a concurrent subp
 briefly inherits the open file descriptor. Caddy retains this lock through foreground
 output drainage and direct-child cleanup.
 
+Owner/runtime acquisition also checks `settings-restore-journal.enc` and the reserved
+`scp-cli-restore-journal.enc` after locking, before loading or creating identity.
+Any object (including links, directories and desktop completion tombstones), or
+an inspection error, denies initialization/runtime with exit 1 and a fixed error.
+Contents are never read; identity, settings and artifacts remain unchanged. Keep
+recovery artifacts intact; CLI recovery and bypass are unavailable. Read-only
+`config show` and `server list` remain unchanged for this first acquisition fence;
+pending-recovery exclusion for those queries is a separate prerequisite.
+
 The core now provides a profile-bound credential store and a cache keyed by namespace
 and account. Its optional `os-keyring` feature uses the same persistent native stores as
 the desktop. Current CLI commands do not access credentials; the new adapter is a
@@ -598,8 +607,9 @@ CLI import; desktop supplies the expected credential accounts. Archive/restore
 planning, encryption, recovery and credential access remain desktop-owned. `scpctl` has no backup/import command yet.
 
 The [CLI import admission contract](docs/mcp/CLI_IMPORT_ADMISSION.md) defines the
-proposed target-namespace mapping and recovery gates. The ownership fence is still
-planned; desktop recovery journals cannot be used as CLI recovery files.
+proposed target-namespace mapping and recovery gates. A denial-only acquisition
+fence now blocks recovery artifacts; desktop recovery journals cannot be used as
+CLI recovery files. This does not enable coordinated import or crash-safe operation recovery.
 
 ### Servers page (SSH / Boundary / SCP)
 

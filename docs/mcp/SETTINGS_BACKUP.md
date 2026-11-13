@@ -128,3 +128,9 @@ npm run build
 The Windows file-I/O/ACL adapter was also cross-compiled for `x86_64-pc-windows-gnu` in an isolated type-check harness. Development verification was performed on Linux with fake credential stores for mutation/fault-injection tests, not a user's live OS credentials. Real OS unlock/denial scenarios, Windows ACL/replacement runtime behavior, macOS Keychain permissions and release-mode KDF timing on all three platforms still need native release qualification. The configured KDF suite takes about 13 seconds in this Linux debug build across repeated derivations; that is not a cross-platform release benchmark.
 
 References: [RustCrypto Argon2 API](https://docs.rs/argon2/0.5.3/argon2/struct.Argon2.html), [temporary-file persistence](https://docs.rs/tempfile/latest/tempfile/struct.NamedTempFile.html), [Windows write-through moves](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-movefileexw), [Windows owner-rights SID](https://learn.microsoft.com/en-us/windows/win32/secauthz/sid-strings).
+
+The CLI's [acquisition fence](CLI_IMPORT_ADMISSION.md#first-prerequisite-acquisition-fence-implemented)
+refuses any desktop journal object, including a completion tombstone, without
+reading it or accessing the desktop recovery key. Desktop recovery behavior is
+unchanged. The reserved CLI journal filename defines no wire format; CLI import
+and recovery remain unavailable, and read-only CLI queries are a later gate.

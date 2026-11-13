@@ -39,6 +39,13 @@ impl ProfileOwner {
     /// Initialize a local profile if needed, failing immediately on competing ownership.
     /// Callers must not acquire this for read-only inventory queries.
     pub fn acquire(config_dir: &Path) -> Result<Self, String> {
+        Self::acquire_with_inspector(config_dir, |path| fs::symlink_metadata(path))
+    }
+
+    fn acquire_with_inspector(
+        config_dir: &Path,
+        inspect: impl Fn(&Path) -> std::io::Result<fs::Metadata>,
+    ) -> Result<Self, String> {
         let mut directory = fs::DirBuilder::new();
         directory.recursive(true);
         #[cfg(unix)]
@@ -66,6 +73,17 @@ impl ProfileOwner {
             Err(e) => return Err(format!("lock CLI profile: {e}")),
         }
         let lock = OwnerLock(lock);
+        // Foreign desktop evidence and the reserved CLI journal both block ordinary
+        // ownership. Never follow links, read contents, or interpret tombstones.
+        for name in [
+            "settings-restore-journal.enc",
+            "scp-cli-restore-journal.enc",
+        ] {
+            match inspect(&config_dir.join(name)) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
+                _ => return Err("CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable".into()),
+            }
+        }
         let identity = load_or_create_identity(config_dir)?;
         Ok(Self {
             _lock: lock,
@@ -138,5 +156,36 @@ mod tests {
         assert!(ProfileOwner::acquire(temp.path()).is_err());
         drop(replacement);
         assert!(ProfileOwner::acquire(temp.path()).is_ok());
+    }
+
+    #[test]
+    fn inspection_errors_deny_before_identity_and_release_lock() {
+        for failing_name in [
+            "settings-restore-journal.enc",
+            "scp-cli-restore-journal.enc",
+        ] {
+            for kind in [
+                std::io::ErrorKind::PermissionDenied,
+                std::io::ErrorKind::Other,
+            ] {
+                let temp = tempfile::tempdir().unwrap();
+                let result = ProfileOwner::acquire_with_inspector(temp.path(), |path| {
+                    if path.file_name().unwrap() == failing_name {
+                        Err(std::io::Error::new(kind, "private native error and target"))
+                    } else {
+                        Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+                    }
+                });
+                assert_eq!(result.err().expect("inspection error must deny"), "CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable");
+                assert!(!temp.path().join("profile.json").exists());
+                let lock = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(temp.path().join("runtime-owner.lock"))
+                    .unwrap();
+                lock.try_lock().expect("inspection error releases lock");
+                lock.unlock().unwrap();
+            }
+        }
     }
 }

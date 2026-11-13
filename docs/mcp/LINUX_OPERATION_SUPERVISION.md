@@ -106,7 +106,7 @@ profile conflicts throughout cleanup/recovery. Windows/macOS need equivalent nat
 ownership/containment qualification. Keyring/elevation hosts remain gated.
 
 The [CLI import admission review](CLI_IMPORT_ADMISSION.md) audits every current
-profile acquisition route and proposes a denial-only settings-recovery artifact
-fence. That prerequisite is still unimplemented and does not prove guardian/tree
+profile acquisition route. Its denial-only settings-recovery artifact fence is
+implemented for ordinary owner/runtime acquisition. It does not prove guardian/tree
 recovery, retain a lock after death, or authorize reuse of desktop undo journals.
 Operation recovery needs its own qualified evidence and lifecycle authority.
