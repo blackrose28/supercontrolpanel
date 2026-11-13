@@ -29,6 +29,10 @@ fn check_error(value: &Value) {
 
 #[tokio::test]
 async fn official_custom_fallback_is_fixed_in_json_and_initialized_sse() {
+    check_official_custom_fallback(std::convert::identity).await;
+}
+
+async fn check_official_custom_fallback(hosting: fn(Router) -> Router) {
     for version in [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25] {
         for json_response in [true, false] {
             let mut probe = OfficialProbe::start(
@@ -36,7 +40,7 @@ async fn official_custom_fallback_is_fixed_in_json_and_initialized_sse() {
                 json_response,
                 &["read-only"],
                 "allow-with-token",
-                std::convert::identity,
+                hosting,
             )
             .await;
             for (method, params) in custom_cases() {

@@ -400,6 +400,14 @@ exact-size bodies up to 64 KiB; excluded bodies and HTTP 200 errors pass unchang
 Neither mapping prevents SDK logs. Composing with the HTTP-status experiment still
 removes error envelopes, in either order.
 
+A [standards-preserving HTTP response policy](docs/mcp/HTTP_ERROR_POLICY.md)
+now has one tested entry point in the isolated spike. It maps selected bounded
+negotiation errors while retaining modern HTTP 404 and legacy HTTP 200/SSE
+JSON-RPC envelopes. Raw and official-client tests verify decoding and session
+recovery. The blanket HTTP-error experiment must not wrap this policy in either
+order. Production hosting, authentication/session ownership and SDK logging
+remain separate integration gates.
+
 The same overview adapter also runs in a synthetic stdio subprocess: raw newline
 probes and the official SDK client cover legacy initialization and modern
 discovery, exact schemas/DTOs, fixed host errors, policy rejection and idle EOF

@@ -171,7 +171,11 @@ async fn fixed_negotiation_preserves_native_status_code_and_session() {
 }
 
 fn corrupt_list_headers(router: Router) -> Router {
-    with_fixed_negotiation_errors(router).layer(axum::middleware::from_fn(
+    with_fixed_negotiation_errors(mismatch_list_headers(router))
+}
+
+fn mismatch_list_headers(router: Router) -> Router {
+    router.layer(axum::middleware::from_fn(
         |mut request: axum::extract::Request, next: axum::middleware::Next| async move {
             // Only corrupt tools/list; real discovery/initialize and tool streaming survive.
             if request
@@ -215,6 +219,10 @@ async fn check_official_error(probe: &OfficialProbe, version: &ProtocolVersion) 
 
 #[tokio::test]
 async fn official_negotiation_error_is_decoded_and_stream_stays_live() {
+    check_official_negotiation(corrupt_list_headers).await;
+}
+
+async fn check_official_negotiation(hosting: fn(Router) -> Router) {
     for version in [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25] {
         for json_response in [true, false] {
             let mut probe = OfficialProbe::start(
@@ -222,7 +230,7 @@ async fn official_negotiation_error_is_decoded_and_stream_stays_live() {
                 json_response,
                 &["read-only"],
                 "allow-with-token",
-                corrupt_list_headers,
+                hosting,
             )
             .await;
             check_official_error(&probe, &version).await;
@@ -245,4 +253,62 @@ async fn official_negotiation_error_is_decoded_and_stream_stays_live() {
             probe.finish().await;
         }
     }
+}
+
+#[tokio::test]
+async fn shipping_policy_raw_negotiation_and_protocol_errors_preserve_live_sessions() {
+    use scp_mcp_sdk_spike::http_error_policy::with_http_error_policy;
+    for version in [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25] {
+        for json_response in [true, false] {
+            let mut probe =
+                RawProbe::start_hosted(version.clone(), json_response, with_http_error_policy)
+                    .await;
+            for case in cases() {
+                check_case(&mut probe, case, true).await;
+            }
+            for (method, params) in custom_cases() {
+                let response = probe.post(method, params).await;
+                assert_eq!(
+                    response.status().as_u16(),
+                    if version == ProtocolVersion::V_2026_07_28 {
+                        404
+                    } else {
+                        200
+                    }
+                );
+                assert_eq!(
+                    response.headers()["content-type"]
+                        .to_str()
+                        .unwrap()
+                        .starts_with("text/event-stream"),
+                    !json_response && version == ProtocolVersion::V_2025_11_25
+                );
+                let value = decode(response).await;
+                assert_eq!(
+                    value,
+                    json!({"jsonrpc":"2.0","id":42,
+                    "error":{"code":-32601,"message":"MCP method not supported"}})
+                );
+                assert!(probe.reads.try_recv().is_err());
+            }
+            let listed = decode(probe.post("tools/list", json!({})).await).await;
+            assert_eq!(listed["result"]["tools"][0]["name"], "app_get_overview");
+            probe.server.finish().await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn shipping_policy_official_client_decodes_protocol_errors_and_recovers() {
+    check_official_custom_fallback(scp_mcp_sdk_spike::http_error_policy::with_http_error_policy)
+        .await;
+}
+
+fn policy_with_mismatched_headers(router: Router) -> Router {
+    scp_mcp_sdk_spike::http_error_policy::with_http_error_policy(mismatch_list_headers(router))
+}
+
+#[tokio::test]
+async fn shipping_policy_official_negotiation_decodes_and_stream_stays_live() {
+    check_official_negotiation(policy_with_mismatched_headers).await;
 }

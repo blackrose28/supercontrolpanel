@@ -2616,6 +2616,31 @@ After every completed increment, STOP EDITING and start a NEW same-devbox
 continuation thread with notifications enabled and a self-contained handoff;
 no parent coordination/message/wait. Honor user stop/cancel/approval instructions.
 
+### Standards-preserving HTTP response policy (2026-11-13)
+
+Completed the focused response-policy slice following `9874de3`.
+The [reviewed contract](HTTP_ERROR_POLICY.md) selects the existing bounded
+negotiation mapper through a single `with_http_error_policy` entry point, without
+the destructive blanket HTTP-status wrapper. Modern 404 and legacy 200/SSE
+correlated errors retain native status, code, ID and envelope; selected finite
+HTTP 400 negotiation errors retain status/code/ID with fixed text and no data.
+Excluded responses pass through, so no general sanitization claim is made.
+
+Identity-policy behavioral RED exposed reflected negotiation sentinels and retained
+diagnostic headers. Minimal delegation gives GREEN. Five new tests exercise raw
+and official clients in both protocol revisions/response modes, ID forms, selected
+mapping and exclusions; shared helpers preserve prior characterization tests.
+Both blanket-wrapper order mutations fail official-client protocol decoding.
+The restored locked spike suite passes 67 tests; strict all-target Clippy, fmt
+and whitespace checks pass. No SDK/dependency/lock changes or production activation.
+Root/desktop/native/MSRV/UI/release checks are outside this isolated scope.
+
+Next: integrate the reviewed response contract with a separately qualified HTTP
+host admission/authentication, Origin/session and logging boundary. Do not label
+excluded parser/header/session errors sanitized or activate the desktop route
+without those gates. CLI operations, import serialization/recovery, production
+stdio and native cleanup remain independently actionable.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

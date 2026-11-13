@@ -1520,3 +1520,23 @@ errors and bounded selected negotiation handling. Do not compose blanket body
 erasure into a standards-ready claim, select broad parser/header/session secrecy
 without evidence, change the six custom HTTP routes or activate production MCP.
 Operations, import serialization/recovery and packaging remain independent work.
+
+
+## Standards-preserving HTTP response policy (2026-11-13)
+
+The next response-policy slice after `9874de3` is implemented as
+`http_error_policy::with_http_error_policy` in the isolated SDK package.
+See the [contract, pinned source review and acceptance evidence](HTTP_ERROR_POLICY.md).
+It reuses bounded negotiation mapping and preserves all excluded responses;
+blanket error-body erasure is excluded from this hosting path.
+
+Identity-policy RED fails on real negotiation sentinel reflection and retained
+selected-response headers; GREEN delegates to the existing mapper. Five new tests
+cover raw modern 404/legacy 200 and initialized SSE protocol errors, raw negotiation,
+official-client error decoding and continued session/host operation, all ID forms
+and selected/excluded responses. Shared helpers keep original experiment tests.
+Both destructive blanket-wrapper order mutations fail official protocol decoding.
+Restored locked suite: 67 tests, including unchanged 25 stdio tests. Strict
+all-target Clippy, fmt and whitespace checks pass. No dependency/lock, production
+host, desktop route or CLI command changes. Logging/authentication/session/native
+and broader parser/header/output qualification remain independent release gates.
