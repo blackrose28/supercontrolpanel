@@ -99,3 +99,24 @@ pub fn validate_sections(files: &BTreeMap<String, Option<Value>>) -> Result<(), 
     }
     Ok(())
 }
+
+/// Check a desktop backup credential map against an explicitly supplied inventory.
+/// The caller owns account generation and must validate sections/server IDs first.
+/// Inventory equality precedes the inclusive 65,536-byte UTF-8 limit per value.
+/// `None` is absence; `Some("")` is present and valid. Inputs are never rewritten.
+/// This neither selects a keyring service nor applies CLI account/profile policy,
+/// validates a complete archive, or authorizes credential access or restore.
+pub fn validate_credentials(
+    credentials: &BTreeMap<String, Option<String>>,
+    expected: &BTreeSet<String>,
+) -> Result<(), String> {
+    if credentials.keys().cloned().collect::<BTreeSet<_>>() != *expected {
+        return Err(
+            "Backup credential inventory does not match known app accounts and server IDs".into(),
+        );
+    }
+    if credentials.values().flatten().any(|s| s.len() > 65536) {
+        return Err("Backup credential is too large".into());
+    }
+    Ok(())
+}

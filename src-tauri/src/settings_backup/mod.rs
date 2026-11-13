@@ -105,16 +105,7 @@ impl Archive {
         )?;
         scp_core::settings_backup::validate_sections(&self.files)?;
         let expected: BTreeSet<_> = known_accounts(&self.server_ids()?).into_iter().collect();
-        if self.credentials.keys().cloned().collect::<BTreeSet<_>>() != expected {
-            return Err(
-                "Backup credential inventory does not match known app accounts and server IDs"
-                    .into(),
-            );
-        }
-        if self.credentials.values().flatten().any(|s| s.len() > 65536) {
-            return Err("Backup credential is too large".into());
-        }
-        Ok(())
+        scp_core::settings_backup::validate_credentials(&self.credentials, &expected)
     }
 }
 

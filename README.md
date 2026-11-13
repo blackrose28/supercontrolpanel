@@ -591,11 +591,11 @@ Config → **Export settings** creates a passphrase-encrypted `.scpbak` containi
 
 External certificate/key/OVPN/SSH-identity/Caddy files are referenced, not bundled. Boundary app tokens and telemetry queue keys remain encrypted in the archive but cannot be restored until their compatibility can be validated; the destination telemetry key stays intact, while a changed Boundary controller/auth identity clears the old app token for fresh login. Restore uses an encrypted crash-recovery journal. If recovery blocks startup, keep the journal/key, unlock the OS credential store and restart. See [backup scope, format and recovery](docs/mcp/SETTINGS_BACKUP.md) for details and platform qualification limits.
 
-The external-reference model, metadata/schema prefix, settings-section validation
-and exact desktop backup server-ID parser are shared in
+The external-reference model, metadata/schema prefix, settings-section validation,
+exact desktop backup server-ID parser and credential-map check are shared in
 `scp-core::settings_backup`. This is a pure internal foundation for coordinated
-CLI import; archive/restore planning, encryption, recovery and credential access
-remain desktop-owned. `scpctl` has no backup/import command yet.
+CLI import; desktop supplies the expected credential accounts. Archive/restore
+planning, encryption, recovery and credential access remain desktop-owned. `scpctl` has no backup/import command yet.
 
 ### Servers page (SSH / Boundary / SCP)
 

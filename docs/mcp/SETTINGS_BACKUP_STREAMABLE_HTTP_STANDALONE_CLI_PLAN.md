@@ -2111,6 +2111,74 @@ IPC/MCP and no CLI import is enabled. HTTP shipping policy, production stdio
 logging, other operation contracts and packaging remain independently actionable;
 unchanged cgroup qualification must not be repeated.
 
+### Pure backup credential-map validation extraction (2026-11-13)
+
+`scp-core::settings_backup::validate_credentials` checks only a borrowed credential
+map against an explicitly supplied expected account set. Desktop `Archive::validate`
+still generates that set using desktop constants and validated server IDs, after
+manifest/section/server checks. Exact case-sensitive inventory equality comes
+before the inclusive 65,536 UTF-8-byte limit on each present value. Missing keys
+are invalid even for absent accounts; `None` and present empty strings are both
+valid and retain their distinct meanings. Neither input is rewritten. Errors and
+validation order are unchanged and never echo names or values.
+
+No CLI CredentialAccount conversion, namespace selection, OS reads, restore
+planning/apply/recovery, wire/schema, dependency or lockfile change. Desktop's
+fixed keyring service, telemetry account and colon-permitting server IDs remain
+explicitly separate from CLI's owner-bound profile namespace, missing telemetry
+variant and colon-excluding account validation. The pure check trusts the supplied
+expected inventory; success does not establish full archive validity, authorize
+accounts or admit restore. Archive/Changes stay backend-only and off IPC/MCP;
+portable restore, identity reset, paths, journals/recovery, runtime gates, stale
+previews and absent-versus-unavailable keyring behavior remain intact.
+
+TDD: core first fails on the missing export (`/tmp/scp-credentials-red.log`).
+Four shared contracts pass against original desktop Archive validation before
+extraction (`/tmp/scp-credentials-before.log`), then pass in core plus a fifth
+core-only test proving caller-supplied opaque/empty inventories are accepted
+(`/tmp/scp-credentials-green.log`). The desktop adapter verifies the explicit
+seven static accounts plus `server_ssh_password:node:one` against actual desktop
+account generation before calling Archive validation. Cases cover missing/extra/
+replaced/case-changed inventories, absence/empty values, ASCII/two-byte/four-byte
+UTF-8 exact/over limits for every account, input preservation and inventory-before-
+size errors. Existing desktop outer-precedence tests still pass. Refactor reuses
+the fixture's existing server section; all four adapter contracts pass again.
+
+Linux validation: locked all-feature workspace **149 pass**, seven ignored fixture
+entries exercised by parent tests; locked explicit desktop **183 unit + 1 SDK
+dependency test pass**. Strict workspace all-feature/all-target Clippy, locked CLI
+release build, workspace fmt, targeted desktop module/new adapter formatting and
+whitespace checks pass. Existing desktop warnings and unrelated test formatting
+are retained. Root excludes desktop and isolated SDK spike. Native Windows/macOS,
+live keyring/ACL/UI, MSRV and isolated spike suites were not rerun; no native release
+claim.
+
+Ripwire impact/uses identify snapshot, preview and restore compilation feeding
+export/import/preview; affected cannot model a test runner for this seam. Explicit
+Cargo suites supply evidence. Archive validation edit-check reports unchanged
+contract, zero incompatible calls. Quality delta exits 0, no gating regressions,
+suppressions or baseline changes: eight nongating new-symbol reachability findings
+include Cargo tests and the qualified shared call missed statically, plus one
+minor existing-symbol self-churn row. An initial duplicated fixture setup was
+removed before final validation. The staged static test gate exits 4: two new Cargo
+test files have unknown runners and eight desktop paths (including archive server
+parsing, snapshot, compile/credential planning and export/describe/import/preview)
+lack modelled reach. Explicit suites pass; this is no static coverage or UI claim.
+
+Next focused increment: qualify a bounded coordinated CLI import ownership/mapping
+contract before moving another secret-bearing model or enabling mutation. Inspect
+all ProfileOwner acquisition paths and desktop journal/recovery artifacts; specify
+how target identity/namespace are retained, desktop colon IDs and telemetry/token
+accounts are mapped or rejected, unavailable credentials fail closed, and pending
+recovery prevents ordinary ownership/configuration/credential operations. Record
+an explicit admission matrix and the first testable gate; implement only a small
+qualified prerequisite if appropriate. Keep desktop complete/portable restore and
+CLI profile isolation intact, Archive/Changes off IPC/MCP, and filesystem/keyring
+apply/recovery separate until qualified. HTTP shipping policy, production stdio
+logging, other operation contracts and packaging remain independently actionable.
+Do not repeat unchanged cgroup qualification or create a blocked successor while
+independent plan work remains.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

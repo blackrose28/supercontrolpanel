@@ -764,3 +764,38 @@ fn backup_wire_null_is_an_absent_file_not_a_present_null_value() {
         .insert("config.json".into(), Some(Value::Null));
     assert_eq!(archive.validate(), Err("Invalid settings section".into()));
 }
+
+mod backup_credential_contracts {
+    use super::*;
+
+    fn validate_credentials(
+        credentials: &BTreeMap<String, Option<String>>,
+        expected: &BTreeSet<String>,
+    ) -> Result<(), String> {
+        let mut archive = super::fixture();
+        archive
+            .files
+            .get_mut("servers.json")
+            .unwrap()
+            .as_mut()
+            .unwrap()["servers"] = json!([{
+            "id": "node:one", "name": "server", "host": "host",
+            "connectionMethod": "ssh", "sshPort": 22, "sshUser": "user"
+        }]);
+        assert_eq!(
+            *expected,
+            known_accounts(&archive.server_ids().unwrap())
+                .into_iter()
+                .collect()
+        );
+        archive.credentials = credentials.clone();
+        archive.validate()
+    }
+
+    mod contracts {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../crates/scp-core/tests/contracts/backup_credentials.rs"
+        ));
+    }
+}
