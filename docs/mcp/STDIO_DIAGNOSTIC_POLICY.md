@@ -1,9 +1,10 @@
 # Standalone stdio diagnostics: reviewed boundary
 
-Status: source-backed contract review, 2026-11-13, baseline `ef1e88b`.
-**Not implemented or production-qualified.** The next increment is an isolated
-policy fixture with behavioral RED/GREEN tests. `scpctl` has no MCP command;
-desktop/custom HTTP hosting and the raw SDK fixtures remain unchanged.
+Status: source-backed contract review, 2026-11-13, baseline `ef1e88b`;
+five-row isolated policy fixture implemented against review commit `3a7e702`.
+**Not production-qualified.** Behavioral RED/GREEN evidence is recorded below.
+`scpctl` has no MCP command; desktop/custom HTTP hosting and the raw SDK fixtures
+remain unchanged.
 
 ## Evidence and boundary selection
 
@@ -101,31 +102,80 @@ exists; fixed handling of that JoinError cannot retract those bytes.
 
 ## Acceptance and next implementation slice
 
-These are requirements, not results of this docs-only increment. Keep policy
-subprocesses separate from raw-debug/input-errors/startup-eof and the fixed EOF
-observer. Test sentinels are synthetic; do not load profiles, real credentials,
-native runtime operations or desktop state.
+The five isolated rows now pass in a separate policy executable; later rows remain
+requirements. Raw-debug/input-errors/startup-eof and the fixed EOF observer retain
+their original semantics. Test sentinels are synthetic; no profiles, real
+credentials, native runtime operations or desktop state are loaded.
 
 | Boundary | Required behavioral evidence |
 | --- | --- |
-| Next slice: startup forwarding | New isolated policy mode: unsolicited idless peer Error with message/data sentinels retains its actual typed ExpectedInitializeRequest error internally; exact single fixed startup line, no raw Termination suffix, empty protocol stdout and unsuccessful actual child.wait |
-| Next slice: preselection EOF | No input and modern discover-then-EOF each fail with the same fixed startup line; discover retains its exact correlated result and does not select service. Legacy initialize reaches service and closes normally; do not infer this from discovery alone |
-| Next slice: tracing suppression | With `RUST_LOG=trace` and targeted rmcp directives, malformed numeric-method input containing a sentinel still gets the exact idless -32600/Invalid request/no data; active peer Error produces no reply; malformed string arguments get correlated -32601/MCP method not supported then catalog recovery. Exact stderr excludes SDK records at every stage; every stdout line checked through EOF |
-| Next slice: level/span reach | Test-only emissions with synthetic fields at TRACE/DEBUG/INFO/WARN/ERROR and spans, on main and spawned worker tasks, yield no bytes under the installed policy. Real parser/request probes above establish SDK paths; absence of DEBUG alone is insufficient |
-| Next slice: setup conflict | Separate process preinstalls a silent test subscriber; policy install fails before any SDK input/transport/service/host entry. Fixed startup line and failure; no unknown subscriber debug formatting |
+| Implemented isolated: startup forwarding | New isolated policy mode: unsolicited idless peer Error with message/data sentinels retains its actual typed ExpectedInitializeRequest error internally; exact single fixed startup line, no raw Termination suffix, empty protocol stdout and unsuccessful actual child.wait |
+| Implemented isolated: preselection EOF | No input and modern discover-then-EOF each fail with the same fixed startup line; discover retains its exact correlated result and does not select service. Legacy initialize reaches service and closes normally; do not infer this from discovery alone |
+| Implemented isolated: tracing suppression | With `RUST_LOG=trace` and targeted rmcp directives, malformed numeric-method input containing a sentinel still gets the exact idless -32600/Invalid request/no data; active peer Error produces no reply; malformed string arguments get correlated -32601/MCP method not supported then catalog recovery. Exact stderr excludes SDK records at every stage; every stdout line checked through EOF |
+| Implemented isolated: level/span reach | Test-only emissions with synthetic fields at TRACE/DEBUG/INFO/WARN/ERROR and spans, on main and spawned worker tasks, yield no bytes under the installed policy. Real parser/request probes above establish SDK paths; absence of DEBUG alone is insufficient |
+| Implemented isolated: setup conflict | Separate process preinstalls a silent test subscriber; policy install fails before any SDK input/transport/service/host entry. Fixed startup line and failure; no unknown subscriber debug formatting |
 | Later before activation: internal outcome/error writer | Test outer waiting error, inner JoinError and non-exhaustive fallback, expected vs unexpected cancellation, fallible diagnostic sink failure, exact single-line precedence and cleanup ownership. Avoid panic payload assertions as proof of panic sanitization |
 | Preservation | Existing raw-debug tests still require original sentinel values; original typed raw startup and EOF observer tests retain their exact diagnostics. Raw characterization is never rewritten into suppression evidence |
 
-Implement the **five next-slice rows only** in the isolated SDK package, starting
-with failing subprocess expectations and then a separate policy runner/module.
-Reuse pinned NoSubscriber rather than invent a visitor/filter. Add a dedicated
-policy binary if needed to keep its ExitCode boundary separate from the raw
-fixture's Result main; do not route raw modes through it. The worker/level probe
-and setup-conflict injection are fixture-only seams. Keep lifecycle proof via wire
-catalog/initialization and actual child.wait, concurrent bounded stderr drainage
-and watchdogs; watchdog expiry is failure, not a cleanup guarantee. Refactor only
-after GREEN, run the full isolated spike suite plus locked strict Clippy/fmt, and
-retain existing wire checkers. No production activation in that increment.
+The [policy binary](../../spikes/mcp-sdk/src/bin/stdio-policy-fixture.rs) uses a
+synchronous ExitCode main, installs the pinned NoSubscriber before building its
+multi-thread runtime, and only then constructs stdio_pipes and the adapter. It
+never reads RUST_LOG or installs another dispatcher. Private failures distinguish
+setup, boxed original typed SDK startup error, and active failure. Boxing retains
+the actual enum without formatting it; the process drops it after classification.
+The fallible stderr write ignores its I/O error and retains failure status, with
+no recursive diagnostic or stdout fallback. Writer faults are not tested yet.
+
+The [typed unit test](../../spikes/mcp-sdk/src/bin/stdio_policy/runner.rs) directly
+matches ExpectedInitializeRequest(Some(Error(...))) and checks absent ID, code,
+message and password data, without invoking the error's Debug/Display. The
+[subprocess tests](../../spikes/mcp-sdk/tests/stdio/policy.rs) check exit 1 and the
+exact startup line for unsolicited errors and both preselection EOF cases. Modern
+discovery is compared as a complete correlated envelope; legacy initialize followed
+by EOF closes normally even without notifications/initialized.
+
+Active tests run both lifecycles under RUST_LOG=trace and targeted rmcp directives.
+Catalog replies establish actual service selection, then numeric method 17 gets
+only the exact idless -32600/Invalid request error; an idless peer Error produces
+no reply before the correlated fixed custom-request error and catalog recovery.
+A fixture-only host tripwire detects unintended invocation. Stderr must be empty;
+the unchanged correlated checker and exact idless checker inspect every stdout
+line through EOF. Concurrent stderr drainage starts before input and is bounded
+to 64 KiB with a watchdog; actual child.wait is checked, not inferred from pipe
+closure. The five-second watchdog is a test failure boundary, not a lifetime promise.
+
+The fixture-only levels mode emits TRACE/DEBUG/INFO/WARN/ERROR events with synthetic
+fields, enters/records spans at each level, and checks disabled callsites/spans on
+the synchronous main thread and an awaited spawned Tokio worker task. It also runs
+the real wire probes. Conflict mode preinstalls silent NoSubscriber; the required
+second install fails. A tripwire immediately after installation precedes runtime
+construction and therefore transport/input/service/host entry. The child must exit
+1 with only the fixed startup line while its parent retains open stdin, so even
+waiting for input fails the watchdog. This does not qualify arbitrary preexisting
+subscriber behavior before installation, alternate dispatchers, or panic hooks.
+
+TDD: all five subprocess tests first failed against a success-only placeholder
+(missing replies or incorrect successful exit), and the typed unit test separately
+failed at the missing original error. Logs: /tmp/scp-policy-red.log and
+/tmp/scp-policy-typed-red.log. GREEN preceded refactoring: shared active matrix,
+exact discovery envelope, removal of a racy conflict-test write, and boxing the
+368-byte SDK error after strict Clippy identified the private enum size.
+Full locked spike: **53 tests**, including 24 stdio integration tests and the typed
+policy unit test. Strict all-target Clippy, fmt and whitespace checks pass. Raw
+DEBUG tests still require original synthetic parser/request passwords and peer
+message/data, and raw startup/EOF observer tests retain exact diagnostics.
+No dependency, lockfile, schema, production core/CLI/desktop or HTTP changes.
+Unchanged root/native/UI/MSRV/release suites were not rerun; no cgroup reprobe.
+
+Next focused isolated increment: behavioral RED/GREEN qualification of active
+outcome classification and diagnostic-writer failures. Cover outer waiting error
+and inner JoinError independently, unexpected versus explicitly owned cancellation,
+fixed single-line precedence and fallible sinks. Review how to test the
+non-exhaustive fallback honestly without claiming construction of a future SDK
+variant. Any cleanup seam must remain synthetic and must not imply native teardown
+or panic sanitization. Current minimal active handling accepts only Closed and
+fails all other outcomes; those failure branches and writer faults remain separate
+gates. No production activation, new host authority or SDK upgrade.
 
 ## Independent HTTP and release gates
 

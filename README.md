@@ -433,9 +433,11 @@ logs contain supplied data: this is characterization, and production logging/err
 policy remains unqualified.
 A [source-backed stdio diagnostic contract](docs/mcp/STDIO_DIAGNOSTIC_POLICY.md)
 now specifies executable-owned tracing suppression at every level and fixed
-startup/service failure lines, with typed errors kept internal. This is design
-only; a separate isolated policy fixture is the next implementation slice. The
-existing raw fixtures still deliberately expose synthetic inputs, and production
+startup/service failure lines, with typed errors kept internal. A separate isolated
+policy executable now tests fixed startup failures, preselection EOF, both active
+wire lifecycles, all-level/span worker suppression and installation conflicts.
+The existing raw fixtures still deliberately expose synthetic inputs. Active
+failure classification and diagnostic sink faults remain unqualified; production
 stdio remains unavailable. HTTP response/error policy is a separate release gate.
 The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
 enabled. Production host ownership/authentication,

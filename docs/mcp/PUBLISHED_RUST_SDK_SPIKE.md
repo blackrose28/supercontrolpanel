@@ -1405,3 +1405,55 @@ all raw characterization tests. Active outcome/writer fault injection and produc
 activation stay separate. Validation for this review is diff/whitespace, local
 Markdown targets/fragments and Ripwire quality delta; unchanged Cargo/native/UI
 suites are not rerun or claimed.
+
+## Isolated stdio diagnostic policy fixture (2026-11-13)
+
+Implemented the [review's five isolated acceptance rows](STDIO_DIAGNOSTIC_POLICY.md#acceptance-and-next-implementation-slice)
+in a separate [stdio-policy-fixture binary](../../spikes/mcp-sdk/src/bin/stdio-policy-fixture.rs).
+Its synchronous ExitCode main installs pinned tracing NoSubscriber globally before
+runtime construction or stdio_pipes. No environment verbosity, alternate dispatcher,
+new visitor, dependency or production activation. Original typed startup errors
+remain boxed internally until classification/drop; no Debug/Display conversion or
+Rust Result termination path. Setup/startup failures write only the fixed startup
+line with fallible stderr I/O and return exit 1.
+
+Five subprocess tests plus one typed unit test passed after expected behavioral
+RED. Unsolicited idless errors retain actual ExpectedInitializeRequest fields
+internally, but produce empty stdout and only the fixed stderr line. Empty input
+and complete modern discovery followed by EOF fail before service selection; the
+exact discovery envelope remains intact. Legacy initialize then EOF closes normally.
+Active parser/peer/custom-request wire probes run both lifecycles with RUST_LOG=trace
+and targeted rmcp directives. A numeric-method sentinel gets exact idless -32600,
+peer Error gets no reply, string arguments get correlated fixed -32601/no data,
+then catalog recovery. Catalog replies establish actual service selection.
+Every stdout line through EOF and actual process exit are checked; concurrent
+stderr drainage has a 64 KiB test budget and watchdog.
+
+Fixture-only probes exercise all five tracing levels plus entered/recorded spans
+on synchronous main and an awaited spawned runtime task. Stderr stays empty while
+real wire probes also run. A separately preinstalled silent subscriber causes the
+required install to fail; a tripwire before runtime construction detects crossing
+that rejection. The child exits while stdin remains open, without transport input
+or service/host entry. This bounds the fixture evidence; it does not sanitize
+arbitrary subscribers, direct writes, panic hooks, native output or successful data.
+
+Validation: locked full spike **53 tests** (24 stdio plus one typed policy test),
+strict all-target Clippy, fmt and whitespace pass. Clippy's private enum-size finding
+was resolved by boxing the original typed SDK error, with the unit test matching
+its original variant/fields after unboxing. Raw-debug/input-errors/startup-eof and
+fixed EOF observer source/tests remain unchanged and pass with their original
+synthetic values. Ripwire quality has nine new-symbol reachability rows, no gating
+or preexisting regressions, suppressions or public surface. Static analysis does
+not model all Cargo tests/subprocess/trait calls; full Cargo execution supplies that
+evidence. The explicit-file test gate exits 4 listing 14 unknown-runner Cargo
+files/modules (all exercised by the suite) and three unchanged desktop OIDC /
+documentation-heading rows; it cannot certify subprocess or trait dispatch.
+Local documentation checks pass for 50 targets and 14 fragments across four docs.
+No desktop/root/native/UI/MSRV/release rerun or cgroup reprobe.
+
+Next: isolated behavioral tests for active outer waiting error, inner JoinError,
+non-exhaustive fallback strategy, cancellation classification, diagnostic-writer
+faults and single-line precedence, preserving synthetic cleanup limits. Current
+minimal active handling accepts Closed only and emits a fixed service failure for
+other outcomes; those failures are not yet fault-injection qualified. Production
+stdio, independent HTTP shipping policy, native ownership and packaging stay gated.

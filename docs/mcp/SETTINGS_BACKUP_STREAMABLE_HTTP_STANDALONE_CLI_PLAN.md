@@ -2482,6 +2482,48 @@ After each completed increment, STOP EDITING and start a NEW same-devbox
 continuation thread, notifications enabled, no parent coordination/message/wait.
 Honor user stop/cancel/approval instructions.
 
+### Isolated stdio diagnostic policy acceptance (2026-11-13)
+
+Completed the five focused rows in [the controlling diagnostic policy](STDIO_DIAGNOSTIC_POLICY.md)
+using a separate spike-only ExitCode executable. Pinned NoSubscriber installs
+synchronously before runtime/transport construction. Typed startup errors remain
+internal without formatting; setup/startup failures emit exactly one fixed line
+and exit 1. Both preselection EOF cases, full correlated discovery, legacy service
+closure, active parser/peer/custom-request wire preservation in both lifecycles,
+all-level/span main/worker probes and preinstalled-subscriber conflict pass.
+The conflict tripwire precedes runtime construction; the parent retains open stdin
+until actual failed child.wait. Active probes require catalog dispatch before
+malformed input, exact idless/correlated responses and recovery, and empty stderr.
+Concurrent bounded stderr drainage, unchanged strict stdout checkers through EOF
+and actual child.wait qualify only small synthetic pipe completion on this host.
+
+Behavioral RED: five subprocess tests fail with incorrect success or missing
+protocol response; typed unit separately fails at missing actual startup error.
+GREEN precedes refactoring, including boxing the SDK error for Clippy and sharing
+the active matrix. Final locked spike **53 tests**, including 24 stdio and one
+typed policy unit; strict all-target Clippy, fmt and diff checks pass. Ripwire
+quality: nine non-gating new-symbol reachability rows, zero preexisting regressions
+or suppressions. Raw characterization retains exact sentinel contents and fixed
+EOF observer diagnostics. No SDK/dependency/lock/schema/production command, desktop,
+CC/admin or custom HTTP route change. Unchanged root/native/UI/MSRV/release checks
+not rerun; no cgroup reprobe. Suppression is not a generic sanitizer or cleanup
+proof; blocked stderr and native work may block, and panic hooks remain outside.
+
+Next focused increment: in the isolated package under strict RED/GREEN, qualify
+active outcome handling and diagnostic-writer faults: outer waiting failure, inner
+JoinError, unexpected versus explicitly owned cancellation, fixed-line precedence
+and fallible stderr sinks. Review non-exhaustive fallback testability without
+claiming an actual future SDK variant. Keep cleanup seams synthetic and ownership
+claims narrow; native/panic/output audits and production activation remain gates.
+Current minimal active handling accepts only Closed; other paths fail with the
+fixed service line but are not yet fault-injection qualified. Independent HTTP
+shipping, operation contracts, serialized import/recovery and packaging remain
+available. Do not repeat cgroup probes or change custom HTTP policies.
+
+After every completed increment, STOP EDITING and start a NEW same-devbox
+continuation thread with notifications enabled and a self-contained handoff;
+no parent coordination/message/wait. Honor user stop/cancel/approval instructions.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

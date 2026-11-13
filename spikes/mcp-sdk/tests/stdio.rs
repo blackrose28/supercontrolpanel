@@ -22,6 +22,8 @@ mod eof;
 mod input_errors;
 #[path = "stdio/parser_errors.rs"]
 mod parser_errors;
+#[path = "stdio/policy.rs"]
+mod policy;
 #[path = "stdio/raw_diagnostics.rs"]
 mod raw_diagnostics;
 #[path = "stdio/startup_eof.rs"]
