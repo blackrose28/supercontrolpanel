@@ -2219,6 +2219,51 @@ remain separate qualifications. HTTP shipping policy, coordinated CLI import,
 other operation contracts and packaging remain independently actionable; do not
 repeat unchanged cgroup qualification.
 
+### Subprocess startup EOF qualification (2026-11-13)
+
+Published rmcp =3.10.0 server/client lifecycle and transport receive paths were
+inspected before choosing three raw subprocess probes. Discovery remains in the
+server's bootstrap loop even with complete inline metadata; the first valid
+non-discover service request selects the modern lifecycle. Legacy InitializeResult
+enters the service loop immediately, without waiting for `initialized`.
+
+| State before actual stdin closure | Observed outcome |
+| --- | --- |
+| No bytes or first message | Typed `ServerInitializeError::ConnectionClosed("initialize request")`; no stdout response; unsuccessful process exit |
+| Modern discovery response, complete metadata, no service request | Same typed startup error; discovery is the only stdout response; unsuccessful process exit |
+| Legacy initialize response, no initialized notification | Explicit RunningService creation before stdin closure, SDK service-loop EOF, waiting returns Closed, external wrapper token cancelled; successful exit |
+
+The new `startup-eof` fixture mode checks the typed startup variant/context and
+external-token state while propagating the original error. Rust's raw termination
+diagnostic is exactly `Error: ConnectionClosed("initialize request")` for the two
+startup errors. There is no service-loop EOF/drain marker or wrapper in those
+paths. The harness checks every stdout line with the existing newline/64 KiB
+JSON-RPC validator, observes EOF, waits for the actual child, and requires exact
+stderr diagnostics (zero host reads). It uses five-second test watchdogs, no
+arbitrary sleeps, release/cancellation command, or stdin reader competing with MCP.
+Fixed fixture observations are test instrumentation, not production sanitization.
+
+TDD: all three tests first failed against the old fixture's missing stage/token
+observations. The minimal mode passed; removing the typed-error observation made
+both startup-error probes fail. Restored/refactored code passes the locked full
+spike suite (37 tests), strict all-target Clippy, formatting and whitespace checks.
+The locked desktop dependency probe passes with 18 existing warnings, and the
+normal-edge SDK reverse graph remains empty. No production/dependency/lock changes
+or root/core/full desktop/native/MSRV/UI/release reruns. Quality delta exits 0
+after separating this experiment's lifecycle handling from active-gate fixture
+main; it retains minor main churn and four non-gating new-symbol dead-code rows
+for Cargo/module-dispatched code. No suppressions or baseline edits.
+See [source evidence and limits](PUBLISHED_RUST_SDK_SPIKE.md#startup-stdio-eof-before-service-selection-2026-11-13).
+
+Next focused increment: characterize malformed stdio input/error boundaries with
+synthetic sentinels and raw stdout/stderr/process evidence, starting with startup
+versus service dispatch. Inspect pinned parser/lifecycle paths before choosing
+fixtures; do not infer sanitization from the fixed EOF observer or HTTP layers.
+Preserve typed source errors before choosing shipping policy. Backpressure,
+signals, native Windows/macOS stdio and production ownership remain unqualified.
+HTTP shipping policy, coordinated CLI import, other operation contracts and
+packaging remain independently actionable. Do not repeat unchanged cgroup probes.
+
 ### stdio MCP contract
 
 - Use the same SDK adapter, operation schemas, policy, and redaction as desktop MCP, hosted directly on the headless runtime.

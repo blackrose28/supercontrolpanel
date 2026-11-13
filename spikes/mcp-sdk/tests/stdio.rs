@@ -18,6 +18,8 @@ const LEGACY: &str = "2025-11-25";
 mod cancellation;
 #[path = "stdio/eof.rs"]
 mod eof;
+#[path = "stdio/startup_eof.rs"]
+mod startup_eof;
 
 async fn bounded<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(5), future)

@@ -372,6 +372,12 @@ cancellation, and checks no response and successful exit. The fixture retains th
 service wrapper until gate completion so its external-token drop guard cannot
 supply that cancellation. This is synthetic cooperation; handler joining and
 native cleanup remain unqualified.
+Startup EOF probes distinguish three earlier states: no first message and modern
+discovery without a service request return the SDK's typed startup connection
+error; legacy initialization already creates a running service before the
+`initialized` notification and closes successfully on EOF. Each probe checks
+strict protocol stdout and actual process exit. These raw synthetic error/exit
+observations do not select production EOF or diagnostic policy.
 The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
 enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified

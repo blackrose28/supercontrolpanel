@@ -1010,3 +1010,96 @@ legacy initialization and modern discovery/inline selection. Malformed input,
 backpressure, signals, native Windows/macOS stdio, production host ownership,
 HTTP shipping policy, coordinated CLI import, other operations and packaging
 remain open. The unchanged cgroup gate is not retried.
+
+## Startup stdio EOF before service selection (2026-11-13)
+
+The isolated `startup-eof` mode keeps the same synthetic overview adapter and
+`stdio_pipes()` transport, with rmcp pinned exactly to 3.10.0. It adds no tool,
+production host/config/keyring/profile wiring, or scpctl MCP command.
+
+Source inspection before fixture selection:
+
+- `service/server.rs::expect_next_message` maps receive-None to typed
+  `ServerInitializeError::ConnectionClosed(context)`. The bootstrap loop always
+  supplies `initialize request` as context, including after modern discovery.
+  Complete inline-metadata discovery requests are dispatched/replied inline and
+  continue that loop; only the first valid supported non-discover request enters
+  `serve_inner`. Thus a discovery response does not prove RunningService exists.
+- Legacy initialization sends InitializeResult then immediately calls
+  `serve_inner`; `notifications/initialized` is handled as a regular notification,
+  without a startup gate. EOF after that response is service-loop closure.
+- `service/client.rs` similarly maps receive-None to typed client ConnectionClosed
+  with the response context. Initialize mode sends the initialized notification
+  after the response; Discover mode sets peer info/per-request metadata after the
+  discovery response, then creates its own service loop. These client semantics
+  are why the new server-stage probes use raw pipes, not official-client startup.
+  Auto fallback remains unqualified.
+- `transport/async_rw.rs` returns None on complete input EOF (also on read/error
+  reply failures). Its startup caller does not preserve that transport distinction.
+  Here the harness deliberately closes stdin after valid messages or no bytes,
+  with stdout still open; no transport fault is injected. Incomplete EOF tails,
+  syntax/shape failures, oversized lines and raw SDK logs remain separate cases.
+  Linux FIFO reopening versus blocking non-Linux/non-FIFO stdio is unchanged.
+
+Three tests in `tests/stdio/startup_eof.rs` launch separate real subprocesses:
+
+| Stage established before EOF | Exact evidence after stdin closure |
+| --- | --- |
+| Fixed started marker, no bytes ever written | Typed server ConnectionClosed with context `initialize request`, external token still active; no stdout response, raw Rust termination diagnostic, unsuccessful actual child wait |
+| Correlated modern discovery result, exact tools capabilities and both supported revisions; request had complete inline metadata | Same startup error/token/diagnostic/wait evidence, no further stdout response; no RunningService or service-loop EOF marker |
+| Correlated legacy InitializeResult with exact revision/tools capabilities, then fixed RunningService-created marker; no initialized notification | Exact SDK service-loop EOF marker, waiting returns Closed, consumed wrapper's external token cancelled, fixed stopped marker and successful child wait |
+
+The legacy creation marker is awaited **before** closing stdin, avoiding a race
+between its diagnostic and the SDK loop's EOF event. Startup error instrumentation
+matches the actual typed variant/context and asserts the external token remains
+active; `inspect_err` forwards the original error unchanged. The fixture returns
+it through Rust's Result termination path, producing exactly
+`Error: ConnectionClosed("initialize request")` on stderr. This is a raw synthetic
+characterization, not a decision to print arbitrary SDK errors in production.
+There is no wrapper drop guard/service-loop drain in those two startup paths.
+The legacy waiting/drop guard observation retains its existing meaning; it does
+not prove that the EOF loop itself cancels the external token.
+
+Every stdout line, including final EOF, uses the shared strict newline/64 KiB
+JSON-RPC checker; all responses are correlated before closure. Exact stderr
+comparison also excludes host reads, unexpected markers and raw sentinel output.
+Five-second fixture watchdogs bound each test step; no sleep establishes stage
+or EOF and no cancellation command substitutes for stdin closure. No native work
+is launched, and these are not production shutdown deadlines or hard cleanup
+claims. The fixed observer remains unchanged test-only instrumentation, not a
+shipping diagnostic layer or general redactor.
+
+TDD: the three behavioral probes first fail against the previous fixture at the
+missing typed-startup/RunningService observations, after checking protocol output,
+EOF and actual wait. Adding the mode passes all three. Removing only the fixed
+typed-startup observation makes both startup-error probes fail while the legacy
+probe passes; the original source is restored. Refactoring moves the startup
+experiment's separate error/exit handling into its own fixture module and splits
+protocol-stage setup from EOF checks. Main's existing active-work handling stays
+unchanged; the legacy marker is explicitly consumed before closure.
+
+Validation: locked full spike suite **37 pass** (11 adapter, 5 error boundary,
+5 HTTP, 4 lifecycle, 3 negotiation boundary, 9 stdio); strict all-target Clippy,
+formatting and whitespace pass. Locked desktop SDK dependency probe: 1 pass,
+18 existing warnings; normal-edge SDK reverse graph empty. No dependency/lock
+changes. Root/core/full desktop, native Windows/macOS, MSRV, release and UI suites
+were not rerun for this synthetic-only scope.
+
+Ripwire reports no direct fixture-main callers/uses; subprocess source/tests
+establish use. Main edit check preserves signature with no incompatible callers.
+Initial quality flagged main growth; separating startup-mode lifecycle handling
+and test protocol setup removes verbosity findings. Final quality delta exits 0
+with one minor main churn finding and four new non-gating dead-code rows (three
+Cargo test functions and module-dispatched fixture run); no suppressions/baseline
+changes. The staged test gate exits 4 for ten unknown-runner files/modules
+(executed by Cargo), unchanged desktop `run_boundary_oidc_automation` and two
+unrelated documentation headings. This is not a static coverage claim for OIDC
+or native cleanup; the Cargo suite is the executed evidence for this slice.
+
+Next: characterize malformed stdio input/errors at startup versus service dispatch
+with synthetic sentinels and raw protocol/diagnostic evidence before choosing
+shipping error policy. Neither HTTP error experiments nor the fixed EOF observer
+qualifies that boundary. Backpressure, signals, native Windows/macOS stdio,
+production ownership, HTTP shipping policy, coordinated CLI import, other
+operation contracts and packaging remain actionable; unchanged cgroup delegation
+is not reprobed.

@@ -2,6 +2,8 @@
 //! Stdout belongs exclusively to the SDK. No production scpctl entry point.
 #[path = "stdio_fixture/eof_observer.rs"]
 mod eof_observer;
+#[path = "stdio_fixture/startup_eof.rs"]
+mod startup_eof;
 
 use rmcp::ServiceExt;
 use scp_core::mcp_dto::McpAppOverviewResult;
@@ -114,6 +116,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
     eprintln!("fixture started");
+    if mode == "startup-eof" {
+        return startup_eof::run(adapter).await;
+    }
     let external = CancellationToken::new();
     let service = adapter
         .serve_with_ct(rmcp::transport::stdio_pipes(), external.clone())
