@@ -1740,13 +1740,53 @@ The staged full test gate exits 4: two executed test files have unknown runners,
 scope (including documentation). This is not full static coverage or evidence
 that production CC/PTY/HTTP handlers were exercised by this synthetic probe.
 
-Next focused increment: controlled in-flight cancellation/disconnect, concurrent
-requests and shutdown evidence for both revisions in this same pinned spike,
-then scope the injected host adapter. Real schema/policy/result mapping, production
-hosting and compatibility routes, backpressure/subscriptions, token rotation,
-third-party clients and Windows/macOS remain unqualified. Coordinated CLI import,
-other operation contracts, stdio MCP and packaging remain actionable independently
-of unchanged supervision/keyring/elevation gates. Do not repeat host cgroup checks.
+### Published SDK in-flight cancellation and shutdown probe (2026-11-13)
+
+Four additional gated lifecycle tests qualify the same registry-pinned release.
+Modern SSE close after a consumed progress event cancels the request token.
+Legacy stateful SSE close leaves that token unset during a 200 ms observation;
+explicit cancellation by request ID then cancels it. An unrelated concurrent
+request survives and completes in both revisions. Pre-response disconnect cancels
+both revisions in JSON/stateless mode. Server shutdown with two active handlers
+cancels both tokens in JSON and SSE configurations for both revisions.
+
+Crucially, deliberately non-cooperative handlers remain gated for a 100 ms
+observation after cancellation, even after the listener task joins. Tests release
+each gate and observe handler drop separately. Neither idle shutdown, token
+cancellation nor listener completion proves application work cleanup or hard bounds.
+Test-only five-second watchdogs and shared listener abort fallback bound fixture
+cleanup; they are not production deadlines. Details, limitations and current
+specification links are in [the evidence document](PUBLISHED_RUST_SDK_SPIKE.md).
+No production transport, SDK pin, core/CLI dependency or operation execution changes.
+
+RED/GREEN verifies the missing gate after correcting the raw modern tool-name
+header; a separate compile RED/GREEN makes the synthetic fixture available for
+composition. Refactoring reuses exact fixture metadata and one listener owner.
+All nine isolated tests, strict spike all-target Clippy and formatting pass;
+the desktop dependency smoke test passes. Full desktop/core/CLI suites from the
+preceding increment are not rerun for these test-only lifecycle additions.
+
+Final Ripwire quality: zero gates/preexisting regressions/acknowledgments and nine
+non-gating new reachability findings for test functions/trait dispatch. The static
+affected selection names support modules rather than resolving SDK dispatch; the
+whole isolated suite and desktop dependency test supply runtime evidence. The
+staged test gate exits 4 with four executed test/support files of unknown runner
+and two unmodeled documentation symbols; 12 of 13 hunks are unlocated and all
+eight files use file scope. Edit-check finds no incompatible callers; it reports
+Fixture unchanged but does not model the intentional visibility widening in this
+non-production test library. No full static-coverage claim.
+
+Next focused increment: an isolated injected host-handler adapter for the single
+read-only `app_get_overview` operation, using fake host work, the shared policy/
+catalog and public DTO mapping. Prove policy rejection precedes host entry,
+redacted errors, cooperative cancellation and unaffected concurrent requests.
+This is independent of operation-supervision gates; production desktop listener
+wiring remains later. Host-owned work tracking/drain, admission limits and explicit
+accepted-operation ownership must precede any claim of production shutdown safety.
+Real operation schemas, compatibility routes, backpressure/subscriptions, token
+rotation, third-party clients and Windows/macOS remain unqualified. Coordinated CLI
+import, other operation contracts, stdio MCP and packaging remain actionable. Do not
+repeat unchanged cgroup qualification.
 
 ## Work 1: complete settings export/import
 

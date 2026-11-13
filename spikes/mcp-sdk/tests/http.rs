@@ -10,14 +10,11 @@ use rmcp::{
 };
 use scp_mcp_sdk_spike::fixture_router;
 use serde_json::{json, Value};
-use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-struct Host {
-    url: String,
-    stop: CancellationToken,
-    task: JoinHandle<std::io::Result<()>>,
-}
+#[path = "support/server.rs"]
+mod server;
+use server::BoundServer as Host;
 
 impl Host {
     async fn start(json_response: bool) -> Self {
@@ -30,24 +27,7 @@ impl Host {
                 .enforce_origin_validation()
                 .with_cancellation_token(stop.child_token()),
         );
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
-        let shutdown = stop.clone();
-        let task = tokio::spawn(async move {
-            axum::serve(listener, router)
-                .with_graceful_shutdown(shutdown.cancelled_owned())
-                .await
-        });
-        Self { url, stop, task }
-    }
-
-    async fn finish(mut self) {
-        self.stop.cancel();
-        tokio::time::timeout(Duration::from_secs(5), &mut self.task)
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
+        Self::bind(router, stop).await
     }
 
     fn post(&self, version: &str, method: &str, params: Value) -> reqwest::RequestBuilder {
@@ -60,13 +40,6 @@ impl Host {
             .header("MCP-Protocol-Version", version)
             .header("Mcp-Method", method)
             .json(&json!({"jsonrpc":"2.0", "id":7, "method":method, "params":params}))
-    }
-}
-
-impl Drop for Host {
-    fn drop(&mut self) {
-        self.stop.cancel();
-        self.task.abort();
     }
 }
 

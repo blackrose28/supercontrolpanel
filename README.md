@@ -329,8 +329,12 @@ A separate [published Rust SDK spike](docs/mcp/PUBLISHED_RUST_SDK_SPIKE.md) pins
 `2025-11-25`, with JSON/SSE fixtures. Run
 `cargo test --locked --manifest-path spikes/mcp-sdk/Cargo.toml` to reproduce it.
 The desktop has a dev-only dependency probe; production still uses the routes above.
-Cancellation, production policy/hosting, third-party clients and native OS builds
-remain to be qualified before standard `/mcp` is available.
+Gated tests also distinguish modern stream-close cancellation from legacy explicit
+cancellation and verify an unrelated request survives. A cancelled request token
+or joined listener does not stop the fixture's non-cooperative handler; tests
+release and observe handler cleanup separately. Production host ownership/policy,
+shutdown bounds, third-party clients and native OS builds remain to be qualified
+before standard `/mcp` is available.
 
 The desktop's existing 40-tool discovery catalog now lives in
 `scp-core::mcp_catalog`, with unchanged names, titles, categories and `readOnly`

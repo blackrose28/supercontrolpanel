@@ -25,8 +25,9 @@ use rmcp::{
 };
 use serde_json::{json, Value};
 
+/// Synthetic handler shared by isolated HTTP and lifecycle probes.
 #[derive(Clone)]
-struct Fixture;
+pub struct Fixture;
 
 impl ServerHandler for Fixture {
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {

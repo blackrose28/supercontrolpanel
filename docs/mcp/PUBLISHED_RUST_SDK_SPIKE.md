@@ -67,7 +67,7 @@ and IPv6 sockets were not exercised. No core/CLI dependency or executable change
 
 ## Observed compatibility matrix
 
-Five HTTP integration tests run the actual published Rust SDK client over TCP,
+Five compatibility HTTP integration tests run the actual published Rust SDK client over TCP,
 plus raw HTTP probes. The desktop adds one dependency smoke test.
 
 | Mode | Lifecycle and response selection | Observed |
@@ -135,9 +135,80 @@ redacted audits. Choose explicit body/concurrency/queue/time limits and token
 rotation/shutdown semantics. The 4 KiB fixture limit is not a production policy.
 Do not replace the current listener with this synthetic router.
 
-**Next focused increment:** extend this published-SDK spike with controlled
-in-flight cancellation/disconnect and concurrent-request/shutdown tests for both
-protocol revisions, then use that evidence to define the host-handler boundary.
+## Controlled in-flight lifecycle evidence (2026-11-13)
+
+Four additional tests in `tests/lifecycle.rs` use raw reqwest HTTP requests and a
+synthetic gated handler. Compatibility tests above still use the official client.
+The lifecycle handler reuses the fixture's exact supported versions/capabilities;
+no SDK, lockfile or advertised protocol upgrade. Current official
+[modern cancellation rules](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http#cancellation)
+and [legacy cancellation rules](https://modelcontextprotocol.io/specification/2025-11-25/basic/utilities/cancellation)
+were rechecked. Tests execute registry-published 3.10.0 rather than treating those
+rules or upstream comments as proof of implementation.
+
+Each handler reports entry, exposes its `RequestContext.ct`, owns a drop guard,
+and waits on an independently owned oneshot release. It deliberately ignores the
+cancellation token. A separate release test proves the gate holds the request and
+that releasing it produces the expected structured result. For the SSE disconnect
+probe, the handler emits a progress notification and the client consumes it before
+closing the stream (including any legacy priming event). A second request remains
+gated during cancellation, then completes successfully with its token unaffected.
+
+| Probe | 2026-07-28 | 2025-11-25 |
+| --- | --- | --- |
+| Close SSE response after progress | Request token cancels | Stateful session request token remains unset during 200 ms observation; explicit `notifications/cancelled` for its ID then cancels it |
+| Disconnect before any response, JSON/stateless configuration | Request token cancels | Request token cancels; this is **not** the legacy stateful session case |
+| Cancel configured server token with two handlers active before any response, JSON and SSE configurations | Both request tokens cancel; listener task joins while handlers remain gated | Same observed behavior, including stateful SSE session |
+| Handler ignores cancellation | Remains alive during a 100 ms observation after cancellation; explicit release is required for fixture cleanup | Same |
+
+Thus modern stream closure, legacy explicit cancellation, and legacy stateless
+transport loss are distinct exercised paths. The negative observations are finite
+windows, not a claim that a token/future can never change later. Cancellation does
+not stop a non-cooperative future in these probes. In particular, joining the Axum
+listener does **not** prove SDK handler tasks have joined. Tests explicitly release
+every gate and observe each drop guard afterward, including after listener shutdown.
+No native work or child operation is involved.
+
+All listener tasks share test-only ownership with a five-second graceful-join
+watchdog and cancel+abort fallback on drop. Network/event waits are also bounded
+by five-second fixture watchdogs. Releasing/dropping the gate senders unblocks the
+synthetic handler; these bounds are not production cancellation deadlines. The
+lifecycle listener binds an ephemeral IPv4 loopback socket without the compatibility
+fixture's bearer middleware; it serves only synthetic data. Existing bearer tests
+remain separate. No production authentication or transport path changes.
+
+TDD: after correcting the raw probe's missing modern `Mcp-Name` header, removing
+the gate produced the expected failing entry/watchdog test; restoring the gate
+passed. A separate RED rejects reuse of the private fixture type; GREEN exposes
+that synthetic handler for test composition. Initial expectations that cancellation
+would drop a non-cooperative handler were disproved and replaced with observations,
+not SDK modifications. Shared listener ownership removes duplicate fixture cleanup.
+
+Validation: all nine isolated HTTP tests pass; strict all-target spike Clippy and
+spike formatting pass. The desktop dependency smoke test verifies the reused public
+fixture against its dependency graph. No production desktop/core/CLI source changes,
+native OS/minimum-Rust, UI/E2E, event-store resume, post-progress shutdown, request
+queue saturation or hard shutdown bounds are qualified here.
+
+## Next injected boundary
+
+**Next focused increment:** build a testable injected host-handler adapter in this
+isolated workspace for one read-only operation (`app_get_overview`), with a fake
+host, shared fail-closed policy/catalog and public DTO/result mapping. Test denied
+and unknown requests never enter the host, errors remain redacted, and request
+cancellation reaches cooperative read work without affecting unrelated requests.
+Keep the existing production listener functional; defer desktop wiring and
+compatibility-route hosting until that adapter contract is reviewable.
+
+The hosting owner must track/drain its own accepted work independently of Axum's
+listener task, supply cancellation to cooperative request-scoped work, and enforce
+admission/concurrency/queue limits before dispatch. Do not infer forced cancellation
+of `spawn_blocking`, keyring/native calls or app-owned operations from this SDK.
+For any later operation start, define when ownership transfers to app runtime,
+status/operation IDs, loss-of-response and duplicate-start semantics explicitly;
+request cancellation must not silently discard that ownership. The current tests
+supply no production task registry, timeout policy or operation supervisor.
+
 Backpressure/subscriptions, bounded blocking work, real operation/result schema
 validation, token rotation, actual compatibility-route hosting, client setup UX,
 third-party clients and native OS builds remain unqualified. No prompts, sampling,
