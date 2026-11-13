@@ -3,8 +3,8 @@ use super::*;
 use rmcp::{
     model::{
         CallToolRequest, CallToolRequestParams, CallToolResponse, ClientConfig, ClientRequest,
-        ListToolsResult, PaginatedRequestParams, ProgressNotificationParam, ProtocolVersion,
-        ServerConfig,
+        CustomRequest, CustomResult, ListToolsResult, PaginatedRequestParams,
+        ProgressNotificationParam, ProtocolVersion, ServerConfig,
     },
     service::{
         NotificationContext, PeerRequestOptions, RequestContext, RequestHandle, RunningService,
@@ -30,6 +30,7 @@ async fn official_catalog_dto_and_host_error_matrix() {
                 json_response,
                 &["read-only"],
                 "require-ui-approval",
+                with_fixed_http_errors,
             )
             .await;
             check_catalog(&probe.client).await;
@@ -82,8 +83,14 @@ async fn official_rejections_filter_catalog_and_do_not_enter_host() {
                 (vec!["read-only"], "allow-with-token"),
             ] {
                 let permitted = categories == ["read-only"] && policy == "allow-with-token";
-                let mut probe =
-                    OfficialProbe::start(version.clone(), json_response, &categories, policy).await;
+                let mut probe = OfficialProbe::start(
+                    version.clone(),
+                    json_response,
+                    &categories,
+                    policy,
+                    with_fixed_http_errors,
+                )
+                .await;
                 assert_eq!(
                     bounded(probe.client.list_tools(None))
                         .await
@@ -114,8 +121,14 @@ async fn official_rejections_filter_catalog_and_do_not_enter_host() {
 #[tokio::test]
 async fn official_cancel_after_consumed_progress_preserves_concurrent_read() {
     for version in [ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25] {
-        let mut probe =
-            OfficialProbe::start(version.clone(), false, &["read-only"], "allow-with-token").await;
+        let mut probe = OfficialProbe::start(
+            version.clone(),
+            false,
+            &["read-only"],
+            "allow-with-token",
+            with_fixed_http_errors,
+        )
+        .await;
         let first = probe
             .call(CallToolRequestParams::new("app_get_overview"))
             .await;
@@ -173,6 +186,14 @@ struct ProgressAdapter {
 }
 
 impl ServerHandler for ProgressAdapter {
+    async fn on_custom_request(
+        &self,
+        request: CustomRequest,
+        context: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, ErrorData> {
+        self.adapter.on_custom_request(request, context).await
+    }
+
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         self.adapter.supported_protocol_versions()
     }
@@ -238,6 +259,7 @@ impl OfficialProbe {
         json_response: bool,
         categories: &[&str],
         policy: &str,
+        host_router: fn(Router) -> Router,
     ) -> Self {
         let (tx, reads) = mpsc::unbounded_channel();
         let handler = ProgressAdapter {
@@ -262,10 +284,10 @@ impl OfficialProbe {
                     .with_cancellation_token(stop.child_token()),
             );
         let wire = Arc::new(Mutex::new(Vec::new()));
-        // The separately named boundary leaves all successful streaming bodies alone.
-        // Raw SDK characterization remains in http.rs and error_boundary.rs.
+        // Explicit hosting choice: existing success tests retain the HTTP experiment;
+        // protocol tests use identity to preserve modern error envelopes.
         let router = record_requests(Router::new().nest_service("/mcp", service), wire.clone());
-        let server = BoundServer::bind(with_fixed_http_errors(router), stop).await;
+        let server = BoundServer::bind(host_router(router), stop).await;
         let transport = StreamableHttpClientTransport::from_config(
             StreamableHttpClientTransportConfig::with_uri(server.url.clone()),
         );
@@ -363,3 +385,6 @@ fn record_requests(router: Router, recorded: Arc<Mutex<Vec<WireRequest>>>) -> Ro
         },
     ))
 }
+
+#[path = "protocol.rs"]
+mod protocol;

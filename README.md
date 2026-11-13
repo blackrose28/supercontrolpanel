@@ -344,7 +344,12 @@ named isolated HTTP boundary now replaces 4xx/5xx diagnostics with fixed text,
 preserving status and known method guidance without buffering JSON/SSE responses.
 Raw parser probes remain separate. HTTP 200 protocol errors and SDK logging are
 outside that boundary; legacy unknown-method errors can still reflect input, so
-protocol-error/logging policy remains a shipping gate. The SDK dependency remains
+protocol-error/logging policy remains a shipping gate. A separate unwrapped protocol
+adapter now returns fixed `MCP method not supported` / `-32601` for custom requests,
+including malformed known-method fallback. Raw and official clients preserve modern
+404 and legacy 200 envelopes, including initialized legacy SSE. This does not cover
+pre-dispatch parser/header/session errors; composing with the HTTP-status experiment
+still removes modern error envelopes. The SDK dependency remains
 isolated; no desktop wiring or CLI MCP command is enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified
 before standard `/mcp` is available.

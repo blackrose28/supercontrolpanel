@@ -5,8 +5,8 @@ use std::{borrow::Cow, future::Future};
 use rmcp::{
     model::{
         object, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
-        ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
-        Tool,
+        CustomRequest, CustomResult, ErrorCode, ListToolsResult, PaginatedRequestParams,
+        ProtocolVersion, ServerCapabilities, ServerConfig, Tool,
     },
     service::RequestContext,
     ErrorData, RoleServer, ServerHandler,
@@ -66,6 +66,20 @@ impl<H: OverviewHost> OverviewAdapter<H> {
 }
 
 impl<H: OverviewHost> ServerHandler for OverviewAdapter<H> {
+    // Includes malformed typed requests accepted by the SDK's CustomRequest fallback.
+    // Retain the native code/status mapping without reflecting method or params.
+    async fn on_custom_request(
+        &self,
+        _: CustomRequest,
+        _: RequestContext<RoleServer>,
+    ) -> Result<CustomResult, ErrorData> {
+        Err(ErrorData::new(
+            ErrorCode::METHOD_NOT_FOUND,
+            "MCP method not supported",
+            None,
+        ))
+    }
+
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
         crate::Fixture.supported_protocol_versions()
     }

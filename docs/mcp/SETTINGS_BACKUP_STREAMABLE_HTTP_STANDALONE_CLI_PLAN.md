@@ -1869,16 +1869,35 @@ through unchanged. No claim that returned host strings cover these paths. Detail
 HTTP/protocol table, SDK source/logging limits, TDD and verification appear in
 [PUBLISHED_RUST_SDK_SPIKE.md](PUBLISHED_RUST_SDK_SPIKE.md).
 
-Next focused increment: establish a fixed-message **protocol-level** unknown/custom
-request boundary in the isolated injected adapter, informed by published
-`ServerHandler::on_custom_request` and malformed-known-method fallback. Preserve
-raw SDK characterization and exact modern/legacy protocol error codes/statuses;
-cover unknown secret methods and typed deserialization fallback using official and
-raw clients, including initialized legacy SSE. HTTP 200 errors must not require
-buffering successful SSE. SDK logging policy and other native errors remain separate
-shipping decisions; do not claim comprehensive redaction. Coordinated CLI import,
-other operation contracts, stdio MCP and packaging remain independently actionable.
-Do not repeat unchanged cgroup qualification.
+### Isolated custom-request protocol boundary (2026-11-13)
+
+`OverviewAdapter::on_custom_request` now returns exactly `-32601` / `MCP method
+not supported`, with no error data. Published rmcp 3.10.0 uses an untagged
+`ClientRequest` enum whose final custom fallback accepts some malformed typed
+known-method payloads; these bypass `call_tool`. The override discards method,
+params and context without host entry or logging. It preserves the native code,
+modern HTTP 404 and legacy HTTP 200 rather than relabeling fallback as `-32602`.
+`OverviewHost`, production routes, raw SDK fixtures and dependencies are unchanged.
+
+Two new raw/official-client matrix tests explicitly host this protocol adapter
+**without** the experimental HTTP-status layer. They cover unknown synthetic secret
+methods, string tool arguments, object tool names and string initialize capabilities,
+both exact revisions, JSON and SSE configurations, and initialized stateful legacy
+SSE. They check fixed errors without data, no host entry and usable discovery after
+rejection. Raw requests additionally assert native status, JSON/SSE content type,
+JSON-RPC ID/envelope and actual enum fallback. Existing official-client success,
+progress, cancellation and concurrent-read tests explicitly retain the HTTP-status
+layer. That composition still removes modern 404 envelopes; neither layer nor their
+composition is final standards-ready error mapping. Parser/header/session errors,
+SDK logging/native failure policies and success-value redaction remain separate.
+
+TDD and verification are recorded in [the SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md).
+Next qualify secret-bearing pre-dispatch protocol/header negotiation errors in the
+isolated spike and establish a narrowly scoped standards-preserving mapping, keeping
+raw evidence and successful SSE streaming. Do not silently reuse the all-4xx/5xx
+plain-text experiment as final hosting. Coordinated CLI import, other operation
+contracts, stdio MCP and packaging remain independently actionable; do not repeat
+unchanged cgroup qualification.
 
 ## Work 1: complete settings export/import
 

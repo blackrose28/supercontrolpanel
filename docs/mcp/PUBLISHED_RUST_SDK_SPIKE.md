@@ -459,3 +459,98 @@ injected adapter, retaining error codes/statuses and covering malformed-known-me
 fallback plus legacy initialized SSE. Do not solve HTTP 200 errors by buffering SSE.
 Logging and other native failure policies remain shipping gates; CLI import, other
 operations, stdio MCP and packaging remain independently actionable.
+
+
+## Isolated custom-request protocol boundary (2026-11-13)
+
+Source inspected before implementation: published rmcp 3.10.0
+`handler/server.rs::ServerHandler::on_custom_request` returns `METHOD_NOT_FOUND`
+with the untrusted method as message. Its handler dispatch sends
+`ClientRequest::CustomRequest` directly to that hook. `model.rs::ts_union` derives
+an untagged enum; `ClientRequest` ends with `CustomRequest`, which preserves raw
+method/params. Some invalid typed known-method payloads therefore never reach
+`OverviewAdapter::call_tool`. This is native fallback behavior, not generic argument
+validation. In `streamable_http_server/tower.rs`, negotiated direct handling maps
+`METHOD_NOT_FOUND` to HTTP 404 and sends terminal errors as JSON even when configured
+for SSE. Legacy direct/session paths bypass this status mapper; initialized session
+requests use request-wise SSE with HTTP 200.
+
+The adapter now overrides only `on_custom_request`: `ErrorData::new` with native
+`METHOD_NOT_FOUND` (`-32601`), exact `MCP method not supported`, and `None` data.
+Method, params and context are ignored; no host call, error-string formatting,
+body polling or logging is added. This intentionally retains `-32601` for malformed
+known-method fallback instead of asserting all invalid arguments produce `-32602`.
+The host seam and all existing operation validation remain unchanged. This is not
+redaction for parser/header/session failures, SDK tracing, native failures, panics
+or successful output values. The SDK remains exactly 3.10.0.
+
+Hosting is an explicit test choice. New `tests/adapter/protocol.rs` raw probes mount
+the adapter directly, and its official probes use identity hosting (no HTTP-status
+replacement). The test-only progress wrapper delegates custom handling to the actual
+adapter. Existing three official-client tests explicitly choose
+`with_fixed_http_errors`; their successful JSON/SSE, decoded progress, explicit
+cancellation and concurrent read paths retain the prior composition. The new
+protocol tests do **not** claim that composition preserves modern error envelopes:
+mounting the HTTP-status experiment over these requests still replaces modern 404
+with plain text and removes its JSON-RPC code/envelope. Legacy 200 errors pass that
+layer unchanged. Neither hosting choice establishes a final production error policy.
+Original raw `http.rs`, `lifecycle.rs`, `error_boundary.rs`, `fixture_router`, and
+raw overview probes remain unchanged, preserving the native reflection evidence.
+
+| New synthetic custom/fallback case | 2026-07-28, JSON or SSE configured | 2025-11-25 stateless JSON | 2025-11-25 initialized stateful SSE |
+| --- | --- | --- | --- |
+| Unknown secret method and secret params | 404 JSON / -32601 | 200 JSON / -32601 | 200 SSE / -32601 |
+| tools/call string arguments | Same | Same | Same |
+| tools/call object name | Same | Same | Same |
+| initialize string capabilities, after valid lifecycle | Same | Same | Same |
+
+All errors have only fixed code/message, no error data or raw arguments/native text.
+The raw matrix additionally deserializes every case as `ClientRequest::CustomRequest`,
+asserts response status/content type, JSON-RPC 2.0 and exact request ID, and checks
+host non-entry. Modern metadata uses the SDK client-context builder; method headers
+match the body and string tool names carry matching `Mcp-Name`. The legacy SSE probe
+asserts a session ID from real initialize, posts initialized with that ID, and sends
+subsequent requests with it. Its small synthetic SSE decoder skips native empty
+priming, consumes only to a terminal event, and checks a 64 KiB pending-frame bound;
+it never collects an entire live SSE response. This is test-only parsing, not a
+production framing implementation. The official matrix requires decoded
+`ServiceError::McpError` with the same fixed error, rather than accepting transport
+failure. Both matrices verify discovery remains usable after rejection. Fixtures
+use ephemeral IPv4 loopback, five-second waits and existing listener cleanup without
+bearer middleware; they do not qualify production authentication or native cleanup.
+
+TDD: after correcting a test-only SDK metadata builder call, both tests fail against
+the default hook because the error message reflects the synthetic secret method.
+The override makes both pass. Raw fixture corrections supply required modern tool
+name headers and skip the native legacy SSE empty priming event; no implementation
+or expected native status/code changes are needed. Refactoring separates terminal
+SSE event parsing from stream framing and makes hosting explicit at every official
+probe call site. No synthetic progress is added to the adapter or host.
+
+Validation: locked isolated suite **22 pass** (8 adapter, 5 boundary, 5 HTTP,
+4 lifecycle), strict all-target Clippy, formatting and diff whitespace checks pass.
+No dependency/lockfile or production desktop/core/CLI source changes; root/desktop,
+native OS/MSRV and UI suites are not rerun for this isolated adapter increment.
+
+Ripwire impact/uses before editing identify the adapter's raw/official test hosts
+and three existing official start callers. SDK trait dispatch is approximate;
+affected selection for the new hook resolves no transitive test edge but names
+three adapter construction sites. Edit-check reports the new hook and the intentional
+four-to-five-argument test start contract with zero incompatible callers; all four
+call sites explicitly supply hosting. Final quality exits 2 with one verbosity gate
+on that test start (60 → 61 lines from the explicit hosting parameter), four minor
+churn rows, and four new non-gating reachability findings for the exercised hooks
+and test entries. This small test-only growth is retained without suppressions;
+initial wrapper-clone and decoder complexity/nesting findings were removed by the
+focused refactors above. Staged test gate exits 4: three executed adapter files/
+modules have unknown runners and two documentation symbols are unmodeled; eight
+unlocated hunks use six file-scope seeds (133 symbols, six impacted). This is not a
+clean static coverage or quality-gate claim. Executed Cargo tests provide the
+runtime dispatch evidence.
+
+Next: characterize pre-dispatch protocol/header negotiation errors with synthetic
+secret markers and preserve native standards status/code when adding a separately
+reviewed scoped mapping. Keep original raw evidence and successful SSE unbuffered;
+this custom hook cannot sanitize errors emitted before dispatch. SDK logging and
+native failure policy remain shipping decisions. Independent coordinated CLI import,
+other operation contracts, stdio MCP and packaging remain actionable.
