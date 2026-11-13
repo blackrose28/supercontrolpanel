@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 has a pinned published-SDK HTTP feasibility spike; production migration remains proposed. Work 3 has a headless workspace, shared config and device-local settings schemas, desktop MCP discovery metadata and shared fail-closed execution policy/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 has a pinned published-SDK HTTP feasibility spike; production migration remains proposed. Work 3 has a headless workspace, shared config and device-local settings schemas, desktop MCP discovery metadata and shared fail-closed execution policy/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and production stdio MCP remain. The isolated SDK spike now qualifies the overview adapter in a synthetic stdio subprocess for both supported lifecycles.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -2066,6 +2066,41 @@ scpctl mcp serve --stdio
 | CC agent/telemetry | Remains desktop-hosted initially; CLI must not duplicate enrolled device identity or emit duplicate telemetry |
 
 Expose capability availability/reasons rather than promising identical behavior on a machine without a browser, desktop, keyring, or elevation mechanism. Document this matrix as the deliberate limit of parity.
+
+### Isolated subprocess stdio adapter qualification (2026-11-13)
+
+The unchanged injected overview adapter now runs on `rmcp 3.10.0`
+`stdio_pipes()` in a synthetic spike binary, with the official SDK client on real
+subprocess pipes. Registry source confirms legacy initialization and modern
+bootstrap discovery followed by inline-metadata requests; HTTP headers/session
+settings are not used to infer stdio lifecycle. Raw probes inspect every stdout
+line through idle EOF, check exact catalog/schema/DTO and fixed host-error output,
+and verify policy/argument rejection before host entry. Official-client probes
+check both revisions and successful process exit after idle transport closure.
+The stdout-diagnostic mutation fails the raw probes even though the SDK client
+silently skips the invalid line; this guards a boundary client success misses.
+
+Three new tests cover 16 subprocesses, using only synthetic data and fixed stderr
+markers. No runtime/config/keyring/profile, production command, native operation,
+progress or active-work cleanup is introduced. The SDK remains exactly pinned;
+only isolated IO/process features and the Tokio process lock edge are added.
+See [SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#subprocess-stdio-overview-qualification-2026-11-13)
+for source paths, TDD and qualification limits. HTTP diagnostic layers remain
+separate experiments and do not sanitize stdio parser/service errors or logs.
+
+Validation: locked spike suite 31 pass, strict Clippy/fmt/whitespace pass,
+locked desktop dependency probe 1 pass (18 existing warnings), selected core
+credentials/foreground/sessions 30 pass (one ignored fixture). Quality delta
+exits 2 for an unchanged HTTP fake-host trait method newly marked dead by the
+approximate resolver; existing entry-gated adapter tests prove it remains live.
+Four new reachability findings are non-gating. Test gate exits 4 with unknown
+runners/coarse untested paths; see SDK evidence for the exact limits.
+
+Next focused increment: gated cooperative stdio cancellation/concurrent-read and
+active EOF qualification. Account for the SDK response-drain interval and
+blocking-stdio fallback; do not equate idle EOF exit with bounded native cleanup.
+Coordinated CLI import, other operations and packaging remain actionable without
+repeating the unchanged cgroup-delegation probe.
 
 ### stdio MCP contract
 

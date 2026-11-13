@@ -354,8 +354,15 @@ preserving native status, code and ID while dropping diagnostics/data. Raw and o
 probes cover negotiation rejection and subsequent live JSON/SSE use. It inspects only
 exact-size bodies up to 64 KiB; excluded bodies and HTTP 200 errors pass unchanged.
 Neither mapping prevents SDK logs. Composing with the HTTP-status experiment still
-removes error envelopes, in either order. The SDK dependency remains isolated; no desktop
-wiring or CLI MCP command is enabled. Production host ownership/authentication,
+removes error envelopes, in either order.
+
+The same overview adapter also runs in a synthetic stdio subprocess: raw newline
+probes and the official SDK client cover legacy initialization and modern
+discovery, exact schemas/DTOs, fixed host errors, policy rejection and idle EOF
+exit. Direct stdout checks catch diagnostic corruption the SDK client can ignore.
+This does not qualify active-work shutdown or native cleanup. The SDK dependency
+remains isolated; no desktop wiring or CLI MCP command is enabled. Production
+host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified
 before standard `/mcp` is available.
 

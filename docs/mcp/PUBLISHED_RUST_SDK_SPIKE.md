@@ -1,4 +1,4 @@
-# Published Rust MCP SDK / desktop HTTP spike
+# Published Rust MCP SDK / HTTP and stdio spike
 
 Checked 2026-11-13. This is a reproducible feasibility probe, not a replacement
 for the working desktop HTTP listener or a claim of complete MCP compliance.
@@ -47,11 +47,12 @@ cargo tree --locked --manifest-path src-tauri/Cargo.toml -i rmcp -e normal
 
 `spikes/mcp-sdk` has its own workspace/lock. It is not a member of the headless
 core/CLI workspace. Its library supplies one synthetic echo tool and one text
-resource, plus a separate injected overview adapter described below; it has no
-binary or persistent listener. Tests bind ephemeral IPv4
-loopback sockets, use a public fixture bearer constant and shut down their hosts.
-They never read app configuration/keyring, execute a desktop operation or launch
-external programs. A test watchdog is not a production shutdown guarantee.
+resource, plus a separate injected overview adapter described below. HTTP tests
+bind ephemeral IPv4 loopback sockets, use a public fixture bearer constant and
+shut down their hosts. The synthetic `stdio-fixture` binary added below hosts the
+same adapter on subprocess pipes. Tests never read app configuration/keyring or
+execute a desktop operation; stdio tests launch only that synthetic binary. A test
+watchdog is not a production shutdown guarantee.
 
 The desktop adds only a **dev-dependency** on the fixture library and a router
 construction test. This compiles the pinned SDK server and Axum against the real
@@ -64,7 +65,8 @@ repository's existing convention; the isolated spike lock is committed.
 
 Validation here uses Linux and rustc 1.99.1. The declared SDK MSRV is not a test of
 our entire graph on Rust 1.88/1.89. Windows/macOS builds, native desktop interaction
-and IPv6 sockets were not exercised. No SDK dependency is added to core/CLI, and no executable changes.
+and IPv6 sockets were not exercised. No SDK dependency is added to core/CLI, and
+no production executable changes.
 
 ## Observed compatibility matrix
 
@@ -661,3 +663,108 @@ Do not assume these HTTP layers sanitize stdio protocol errors or SDK logs. HTTP
 logging/admission/session/native error policies remain shipping decisions. Coordinated
 CLI import, other operation contracts and packaging remain actionable independently
 of the unchanged Linux containment qualification gate.
+
+## Subprocess stdio overview qualification (2026-11-13)
+
+The same unchanged `OverviewAdapter` now runs in the isolated spike's synthetic
+`stdio-fixture` binary. It uses `ServiceExt::serve(stdio_pipes())`, waits for the
+service to finish, and writes fixed entry/exit/host-read markers only to stderr.
+Five explicit test modes inject successful DTOs, a secret-bearing host failure,
+an empty category allowlist, an unknown category, or an unknown policy. There is
+no runtime, keyring, configuration, profile owner, HTTP listener/token, child
+operation, tracing subscriber, or production `scpctl mcp` command.
+
+The lifecycle choice comes from the **registry-published rmcp 3.10.0 source**:
+
+- `transport/io.rs`: `stdio()` uses blocking Tokio stdin; a pending read cannot
+  be cancelled and can delay runtime shutdown. `stdio_pipes()` reopens FIFO
+  descriptors through `/proc/self/fd` on Linux with private nonblocking flags;
+  other platforms/non-FIFO handles fall back to blocking stdio.
+- `service/server.rs::serve_server_with_ct_inner`: legacy `initialize` selects
+  the handshake path. Modern `server/discover` with complete metadata is a
+  bootstrap probe and leaves lifecycle selection open; the first non-discover
+  request with complete inline metadata establishes the modern service loop.
+- `service/client.rs`: explicit `ClientLifecycleMode::Initialize` and
+  `Discover { preferred_versions }` work over generic transports. Default
+  `ServiceExt::serve` on a client still initializes; no Auto fallback is tested.
+- `transport/async_rw.rs`: newline framing, a default 16 MiB incoming line cap,
+  discard of incomplete trailing lines at EOF, skipped syntax failures and
+  invalid-request responses for some structurally invalid JSON. An official
+  client can ignore non-JSON stdout, so client success alone cannot prove clean
+  stdout. `service.rs` closes the transport after draining responses; source
+  allows up to five seconds for EOF drain and two for cancellation, then cancels
+  the internal serve token. This is not a native-work joining guarantee.
+- The SDK child-process wrapper was inspected too. These tests instead retain
+  explicit Tokio child ownership/wait plus the official SDK client over the
+  `(ChildStdout, ChildStdin)` async transport. That observes real process exit
+  rather than treating the wrapper's termination fallback as graceful EOF.
+
+`tests/stdio.rs` adds three tests (16 subprocesses in total):
+
+1. Raw newline JSON-RPC probes run both `2025-11-25` initialization and
+   `2026-07-28` discovery/inline metadata. Each checks tools-only discovery,
+   the one overview tool, exact schemas, omitted/empty arguments, exact DTO
+   structured/text output and revision-specific resultType presence. Failed
+   host results expose only `App overview unavailable`, no structured content.
+2. Raw policy probes cover disabled/unknown categories, unknown policy, unknown
+   and unimplemented tools, and nonempty arguments. Rejections retain `-32602`,
+   omit error data/secrets, and produce no host-entry marker.
+3. The official SDK client runs both lifecycle modes against the same process,
+   checks negotiated revision/capabilities, exact catalog/schema, DTO and fixed
+   host errors. Cancelling the idle client closes its write pipe; the test waits
+   for successful subprocess exit and the fixed stop marker.
+
+Raw probes validate **every** stdout line as a newline-terminated JSON-RPC
+response with the expected correlation ID, including checking for no trailing
+output after closing stdin. Their 64 KiB line cap and five-second waits are
+fixture bounds. All reads are completed before EOF; active-work cancellation,
+concurrent work, progress, backpressure, malformed input, signal cleanup and
+EOF before lifecycle selection remain separate tests. No PTY output isolation,
+production hard shutdown bound or Windows/macOS native qualification is claimed.
+No HTTP error layer is mounted or relevant to these pipes. Native SDK parser,
+service errors/logging, panics and successful DTO values remain outside the
+adapter's returned-host-error boundary.
+
+TDD: an unhosted binary stub made all three behavioral tests fail at protocol EOF
+or official initialization. Minimal hosting passes. A subsequent mutation wrote
+the startup diagnostic to stdout: both raw tests failed on invalid protocol JSON,
+while the official client test still passed, confirming the need for direct line
+inspection. The mutation was restored before final checks.
+
+The exact SDK pin/checksum is unchanged. The spike enables `transport-io`, adds
+normal Tokio runtime features for its fixture binary and dev-only Tokio process
+support for the harness. The committed isolated lock adds only
+`signal-hook-registry 1.4.8` via Tokio process support; existing versions are
+unchanged. Root core/CLI dependencies and production desktop commands are unchanged.
+
+Validation: the locked isolated suite passes **31 tests** (11 adapter, 5 boundary,
+5 HTTP, 4 lifecycle, 3 negotiation boundary, 3 stdio). Strict all-target Clippy,
+format and staged whitespace checks pass. The locked desktop SDK dependency
+probe passes with 18 existing warnings; its normal-edge SDK reverse graph remains
+empty. The ignored desktop lock was refreshed from its saved original with only
+the new spike→Tokio edge, preserving all versions. A discarded full-lock
+regeneration selected unrelated upgrades; that check was intentionally stopped
+before the minimal refresh and successful rerun. The three additional core targets
+selected by Ripwire pass 30 tests (one ignored foreground subprocess fixture).
+Full root/desktop suites, release/MSRV/native-OS and UI checks are not rerun.
+
+Ripwire before reuse reports three direct adapter constructors and 16 downstream
+symbols; no existing constructor/adapter/test-host source changed. Edit-check
+recognizes the new synthetic host method with no incompatible callers. Final
+quality delta exits **2**: adding another `OverviewHost::read_overview` implementor
+makes its approximate trait resolver mark the unchanged HTTP `FakeHost` method
+as dead. The existing HTTP adapter tests exercise that method, including their
+entry/release gates, and all 11 pass; this is a static reachability limitation,
+not a removed implementation. Four other new, non-gating reachability findings
+cover the synthetic trait method and three test entries. No suppression or
+baseline changes are added. The staged test gate exits **4**, selecting 14 test
+files/modules with unknown runners and 113 untested symbols across a coarse
+file-scope/ambiguous `main` blast radius. The complete spike suite and three core
+targets exercise those selected test modules; this is not a clean static coverage
+verdict for unchanged desktop/runtime paths.
+
+Next: add a gated cooperative synthetic stdio host and qualify cancellation plus
+an unrelated concurrent read, then distinguish EOF during active work from idle
+EOF using the published service drain behavior. Keep native non-cooperative
+cleanup and the blocking-stdin fallback limitations explicit. CLI coordinated
+import, other operations and packaging remain independent actionable work.
