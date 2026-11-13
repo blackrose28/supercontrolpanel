@@ -20,6 +20,8 @@ mod cancellation;
 mod eof;
 #[path = "stdio/input_errors.rs"]
 mod input_errors;
+#[path = "stdio/parser_errors.rs"]
+mod parser_errors;
 #[path = "stdio/startup_eof.rs"]
 mod startup_eof;
 

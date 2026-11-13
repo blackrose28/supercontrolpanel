@@ -384,8 +384,15 @@ the typed SDK error and reflects synthetic message/data in Rust's raw terminatio
 diagnostic; active services drop that peer error and return fixed `-32601` for a
 malformed `tools/call`, without invoking the overview host. Exact stdout/stderr and
 real process waits are checked. This characterizes the unsanitized startup path;
-it does not qualify SDK logs or choose production error policy. Syntax-invalid
-lines and structural parser errors remain separate probes.
+it does not qualify SDK logs or choose production error policy. Additional raw
+probes now distinguish skipped complete syntax-invalid lines from valid JSON with
+an invalid typed envelope: the latter emits exactly fixed `-32600` / `Invalid
+request` with no ID, even for an input containing ID 77. Bootstrap remains open
+through discovery; active legacy/modern services recover. A separate strict
+idless-error checker preserves newline/64 KiB integrity and rejects any extra
+fields, data or ID; the existing correlated-response checker stays unchanged.
+These tests characterize pinned SDK behavior, including the legacy idless reply;
+raw SDK logging and production error policy remain unqualified.
 The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
 enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified

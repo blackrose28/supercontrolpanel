@@ -2309,6 +2309,51 @@ Backpressure, signals, native Windows/macOS and production ownership remain open
 HTTP shipping policy, coordinated CLI import, other operations and packaging are
 independently actionable. Do not repeat unchanged cgroup qualification.
 
+### Complete syntax versus typed-envelope stdio qualification (2026-11-13)
+
+The isolated rmcp =3.10.0 spike adds four raw subprocess probes and one strict
+stdout-checker regression test. One complete trailing-comma JSON line is skipped;
+one valid JSON envelope with numeric method 17 produces exactly fixed `-32600` /
+`Invalid request`, no data and no ID despite input ID 77. Neither is the malformed
+known-method CustomRequest fallback or an unsolicited incoming Error envelope.
+Pinned transport parsing/compatibility, pending Queue/Flush error-response handling,
+bootstrap, service dispatch and published error semantics were inspected first.
+
+Each input is tested before first discovery and after complete discovery (still
+bootstrap), then separately after correlated tools/list establishes active legacy
+and modern service dispatch. Correlated discovery/catalog results prove recovery;
+actual stdin EOF, strict stdout/EOF checks, exact diagnostics and bounded actual
+child waits prove completion. Bootstrap preserves the existing actual typed
+ConnectionClosed("initialize request") with external token active and unsuccessful
+wait. Active service returns Closed, consumes its token-owning wrapper and exits
+successfully, without host reads. This does not qualify native cleanup or joining.
+
+The correlated-response validator is unchanged. A separate full-envelope checker
+accepts only the exact SDK idless error with newline/64 KiB integrity; its test
+rejects twelve framing/envelope variants, including null/correlated IDs, data,
+result, extra fields and changed version/code/message. Modern MCP permits omitted
+error IDs when unreadable; base JSON-RPC uses null. The observed legacy idless reply
+is SDK characterization, not a full legacy compliance claim. No fixture, production,
+dependency or lock changes, and no stdin interception or real host/config/keyring
+wiring. Clean fixed-observer/no-subscriber stderr does not qualify raw SDK logs.
+
+TDD: 3 expected required-ID RED failures and 2 existing syntax-characterization
+passes; separate checker implementation yields 5 GREEN. Weakening full-envelope
+checking fails the regression test; restored code passes the locked full spike:
+45 tests, including 17 stdio. Strict Clippy, formatting and whitespace pass.
+Quality delta exits 0 with five non-gating new-symbol reachability findings for
+Cargo-executed tests; no existing-symbol regressions or suppressions. No root/core/
+desktop/native/MSRV/UI/release reruns for test-only scope. See
+[SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#complete-stdio-syntax-errors-versus-typed-envelope-failures-2026-11-13).
+
+Next focused increment: characterize raw SDK DEBUG parser/dispatch diagnostics
+with an explicit test-only subscriber and synthetic sentinels, strict stdout and
+stage/process evidence. Preserve original typed errors; production logging/error
+policy remains separate. Backpressure, signals, native Windows/macOS and production
+ownership remain open. HTTP shipping policy, coordinated CLI import, other
+operations and packaging are independently actionable. Do not repeat unchanged
+cgroup qualification.
+
 ### stdio MCP contract
 
 - Use the same SDK adapter, operation schemas, policy, and redaction as desktop MCP, hosted directly on the headless runtime.

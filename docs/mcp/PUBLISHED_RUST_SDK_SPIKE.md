@@ -1204,3 +1204,104 @@ policy. Backpressure, signals, native Windows/macOS stdio and hard native cleanu
 remain unqualified. HTTP shipping policy, production ownership, coordinated CLI
 import, other operations and packaging remain independently actionable. Do not
 repeat unchanged cgroup qualification.
+
+## Complete stdio syntax errors versus typed envelope failures (2026-11-13)
+
+`tests/stdio/parser_errors.rs` adds four subprocess probes and one stdout-checker
+regression test, retaining rmcp =3.10.0 and the existing synthetic binary/adapter
+unchanged. The bounded input set is deliberately two complete newline-terminated
+lines, both carrying only `SYNTHETIC_STDIO_SECRET`:
+
+- Syntax-invalid JSON: an object containing ID 77 and a password-shaped sentinel
+  field, with a trailing comma. It is not an incomplete EOF tail.
+- Valid JSON, invalid typed request: `jsonrpc: "2.0"`, ID 77, numeric method 17,
+  and a password-shaped sentinel in params. A numeric method cannot deserialize
+  into CustomRequest or match the compatibility notification bypass. This differs
+  from string-arguments `tools/call`, which the previous probes show becomes
+  CustomRequest and gets a correlated fixed -32601 from the adapter.
+
+Before selecting these lines, the pinned published `transport/async_rw.rs`,
+`model.rs` / `model/serde_impl.rs`, `service/server.rs`, and `service.rs` were
+inspected. `receive` treats serde Syntax/Eof classifications as skipped input;
+Data/Io classifications queue fixed `ErrorData::invalid_request("Invalid
+request", None)` with no ID. `pending_error_response` feeds then flushes that
+response before reading the next line, preserving the Queue/Flush state across
+receive cancellation. These small probes demonstrate ordinary sequential flushing
+and recovery, not cancellation while a write is blocked. Compatibility parsing
+tries the typed message first, then recognizes selected notifications to ignore;
+its DEBUG diagnostic can include the entire supplied raw line. Numeric method
+avoids that notification path. Service dispatch is downstream of this parser;
+invalid typed envelopes are not delivered as unsolicited incoming Error messages.
+
+The [published MCP error response shape](https://modelcontextprotocol.io/specification/2026-07-28/basic#error-responses)
+allows the ID to be absent when a malformed request prevents reading it. The SDK
+`JsonRpcError.id` is optional and omitted on serialization. The observed reply is
+exactly `{"jsonrpc":"2.0","error":{"code":-32600,"message":"Invalid request"}}`,
+including omission of ID even though the invalid input contains numeric ID 77.
+The same pinned transport emits it after legacy initialization. This records
+SDK behavior, not a claim of full legacy protocol compliance: the
+[base JSON-RPC specification](https://www.jsonrpc.org/specification#response_object)
+requires a null ID when the request ID cannot be detected. No transport policy or
+SDK version changes are made in response to this observation.
+
+| Stage | Syntax-invalid complete line | Valid JSON with numeric method |
+| --- | --- | --- |
+| Before first discovery, then again after complete discovery | No reply before each correlated discovery result | One exact fixed idless error before each correlated discovery result |
+| Active legacy and modern service, established by tools/list | No reply before subsequent correlated catalog result | One exact fixed idless error, then subsequent correlated catalog result |
+| Actual stdin EOF after bootstrap probes | No RunningService; original typed ConnectionClosed("initialize request"), active external token, exact raw diagnostic and unsuccessful child wait | Same |
+| Actual stdin EOF after active probes | No remaining stdout; exact service-created/waiting-Closed/external-cancelled/stopped markers and successful child wait | Same |
+
+Bootstrap uses the unchanged `startup-eof` mode, whose inspect_err asserts the
+actual typed error and active token and forwards the original error with `?`.
+Repeated discovery responses establish consumption/recovery without selecting a
+service; active probes use correlated tools/list before injecting either line.
+No arbitrary sleeps or stolen stdin reads are used. Exact final stderr comparisons
+exclude host reads and extra diagnostics. The existing EOF observer in startup
+mode admits only its fixed INFO/WARN lifecycle events; active `input-errors` mode
+has no subscriber. Clean stderr therefore does **not** qualify raw parser/dispatch
+log redaction. Source inspection still identifies raw DEBUG input and service
+DEBUG/TRACE payload logging as a separate shipping concern. No generic error,
+panic, diagnostic or production sanitizer is introduced.
+
+The shared `read_response_line` remains byte-for-byte unchanged and still requires
+an ID. A separate checker permits only the exact fixed error envelope above:
+full JSON value equality rejects any ID (including null), extra top-level fields,
+result, changed version/code/message or any data field. It retains the 64 KiB
+newline bound, rejects empty output and parses every observed line. Its regression
+test accepts the expected line and rejects twelve malformed/framing/envelope
+variants. Ordinary responses and final EOF still use the existing shared checker.
+The [stdio binding](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/stdio)
+requires protocol-only stdout and client shutdown by closing input then waiting;
+these probes use real pipes, actual EOF and bounded actual child waits. The
+five-second watchdogs remain test limits, not production shutdown guarantees.
+
+TDD: with the new checker initially delegating to the unchanged correlated-response
+checker, both structural subprocess probes and its acceptance test fail at the
+required-ID assertion (3 RED); syntax characterization already passes (2 tests).
+Implementing the separate exact checker makes all five pass. A mutation retaining
+framing/JSON/version checks but removing full envelope equality fails the checker
+regression at an incorrectly accepted null-ID error; the original file is restored
+before the final full suite. No fixture or production implementation changes.
+
+Validation: locked full spike suite **45 pass** (11 adapter, 5 error boundary,
+5 HTTP, 4 lifecycle, 3 negotiation boundary, 17 stdio); strict all-target Clippy,
+formatting and whitespace checks pass. No dependency/lock/binary-source changes;
+root/core/desktop/native Windows/macOS/MSRV/UI/release suites are not rerun for this
+test-only scope. Ripwire checker impact/uses identify only the new probe helpers
+and regression test; affected selection identifies the new test module with an
+unknown runner, so Cargo executes it plus the full spike. Quality delta exits 0,
+with five non-gating new-symbol dead-code findings for the five Cargo-executed
+tests; no existing-symbol regressions or suppressions/baseline changes. Edit-check
+reports the checker as a new symbol with no incompatible uses. The staged static
+test gate exits 4: twelve unknown-runner test files/modules (all executed by Cargo),
+unchanged desktop `run_boundary_oidc_automation` and two unrelated documentation
+headings. This is not a static/native coverage claim.
+
+Next focused increment: characterize raw SDK DEBUG parser/dispatch diagnostics
+using an explicit test-only subscriber with synthetic sentinels, fixed stage
+observations and strict stdout/actual process completion checks. Keep that raw
+observation separate from the fixed EOF observer and a later production logging/
+error policy. Backpressure, signals, native Windows/macOS stdio and hard native
+cleanup remain unqualified. HTTP shipping policy, production ownership, coordinated
+CLI import, other operation contracts and packaging remain independently actionable.
+Do not repeat unchanged cgroup qualification.
