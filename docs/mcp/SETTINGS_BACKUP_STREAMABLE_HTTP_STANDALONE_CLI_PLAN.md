@@ -724,6 +724,52 @@ profile lock; safe crash retention needs an external owner or a recovery interlo
 in every acquisition path. Do not retry unchanged native gates or claim bounded
 release. Windows/macOS foreground hosts remain explicitly unsupported.
 
+### EOF cancellation and explicit bounded-shutdown admission (2026-11-13)
+
+The Linux Caddy preview now accepts `--shutdown-on-stdin-eof`. The default remains
+stdin-independent. The opt-in observer uses finite 20 ms `poll` calls on an owned,
+close-on-exec duplicate of stdin, with no blocking read, input buffering or descriptor
+mode changes. Pipe closure or socket write-half closure monotonically sets the same
+cancellation flag as INT/TERM/HUP, even with unread input. `/dev/null` cancels before
+child launch. Regular files, terminals and other descriptors fail before log/child
+creation; profile acquisition may already have initialized metadata. The observer
+joins before profile release on success, cancellation, errors and unwinding. Native
+PTY/output/cleanup failures retain precedence over observer failures. Observer faults
+request cancellation and prevent a successful completion result.
+
+`--require-bounded-shutdown` fails with a fixed unsupported-capability error and
+exit 1 before profile/log/child creation. It does not probe or mutate the managed
+cgroup, silently fall back to cooperative cleanup, or imply that delegation alone
+qualifies confinement. This is an admission gate, not a bounded native supervisor.
+The existing detached-descendant acceptance test still proves that cooperative
+cancellation may release the profile with a descendant alive. **Runtime ownership
+and bounded cleanup of children, PTYs and output workers remains unfinished.**
+
+TDD: actual CLI EOF and bounded-admission tests first failed on the absent flags;
+socket/idle-observer tests then failed on the missing private file-based constructor.
+After implementation, real-child tests cover pending pipe input, preexisting EOF,
+all three signals with input held open, completion, output-creation/launch failure,
+unsupported input, direct-child reaping, profile release and no artifacts on bounded
+admission denial. Socket tests check write-half closure without consuming bytes and
+an explicit idle observer join without cancellation. Existing default-EOF behavior,
+output/error contracts and controlled descendant evidence remain covered.
+
+Validation: locked workspace all-feature tests, the focused CLI suite after test
+refactoring, strict all-target/all-feature workspace Clippy, formatting and diff
+whitespace checks pass. Ripwire confirms the private Caddy adapter's intentional
+four-to-five-argument change and updated dispatcher, with no incompatible callers;
+the main dispatcher signature stays unchanged. Quality delta has zero gating
+findings; remaining new findings are test/Drop reachability and one multi-scenario
+test complexity row, plus minor existing-file churn. No acknowledgments were added.
+Desktop production code is unchanged; desktop and native Windows/macOS tests were
+not rerun for this CLI-only increment.
+
+No production stdio host, guardian, containment, hard deadline, crash-retention or
+Windows/macOS qualification is added. Next: provision and qualify the independent
+Linux containment/guardian/recovery boundary described in
+[Linux operation supervision](LINUX_OPERATION_SUPERVISION.md); do not mark the full
+runtime-shutdown release gate complete based on this increment.
+
 ### Shared configuration schema and read-only projection (2026-11-11)
 
 With native containment unavailable here, this increment advances independent

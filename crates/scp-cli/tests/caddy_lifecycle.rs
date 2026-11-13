@@ -106,6 +106,20 @@ fn wait_until(mut ready: impl FnMut() -> bool) {
     }
 }
 
+fn assert_result(output: &Output, code: i32, expected: Value) {
+    assert_eq!(output.status.code(), Some(code), "{output:?}");
+    assert_eq!(
+        serde_json::from_slice::<Value>(&output.stdout).unwrap(),
+        expected
+    );
+}
+
+fn assert_no_completion(output: &Output) {
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(output.stdout.is_empty());
+    assert!(!output.stderr.is_empty());
+}
+
 #[test]
 fn real_cli_signals_cancel_reap_and_release_with_stdin_closed() {
     for signal in ["-INT", "-TERM", "-HUP"] {
@@ -371,4 +385,133 @@ fn real_cli_recovery_evidence_denies_caddy_before_log_or_child_creation() {
         assert!(!fixture.path("profile/profile.json").exists());
         assert_eq!(fs::read(&artifact).unwrap(), b"private journal contents");
     }
+}
+
+#[test]
+fn requested_bounded_shutdown_fails_before_any_runtime_artifact() {
+    let fixture = CaddyFixture::new();
+    let output =
+        CliChild::spawn(fixture.command("wait").arg("--require-bounded-shutdown")).finish();
+    assert_no_completion(&output);
+    assert!(String::from_utf8_lossy(&output.stderr).contains("bounded shutdown is unavailable"));
+    for path in ["profile", "log", "pid"] {
+        assert!(
+            !fixture.path(path).exists(),
+            "created {path} before admission"
+        );
+    }
+}
+
+#[test]
+fn stdin_eof_opt_in_cancels_reaps_and_releases_with_pending_input() {
+    let fixture = CaddyFixture::new();
+    let mut child = CliChild::spawn(
+        fixture
+            .command("wait")
+            .arg("--shutdown-on-stdin-eof")
+            .stdin(Stdio::piped()),
+    );
+    let pid = wait_for_child(&fixture.path("pid"), &mut child);
+    assert!(ProfileOwner::acquire(&fixture.path("profile")).is_err());
+    // Unused input must not fill an output queue or prevent EOF observation.
+    use std::io::Write;
+    child
+        .0
+        .as_mut()
+        .unwrap()
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(b"unused input")
+        .unwrap();
+    drop(child.0.as_mut().unwrap().stdin.take());
+    let output = child.finish();
+    assert_result(&output, 1, json!({"outcome":"cancelled"}));
+    assert!(!Path::new("/proc").join(pid.to_string()).exists());
+    fixture.assert_released();
+}
+
+#[test]
+fn stdin_eof_watcher_joins_on_completion_signals_and_preexisting_eof() {
+    for mode in ["success", "-INT", "-TERM", "-HUP", "already-eof"] {
+        let fixture = CaddyFixture::new();
+        let mut command = fixture.command(if mode == "success" { "success" } else { "wait" });
+        command.arg("--shutdown-on-stdin-eof");
+        if mode != "already-eof" {
+            command.stdin(Stdio::piped());
+        }
+        let mut child = CliChild::spawn(&mut command);
+        if mode.starts_with('-') {
+            wait_for_child(&fixture.path("pid"), &mut child);
+            assert!(Command::new("/bin/kill")
+                .args([mode, &child.0.as_ref().unwrap().id().to_string()])
+                .status()
+                .unwrap()
+                .success());
+        }
+        // Keep the input writer open through process exit: joining a blocking
+        // stdin reader here would deadlock both completion and signal shutdown.
+        let output = child.finish();
+        let success = mode == "success";
+        assert_result(
+            &output,
+            if success { 0 } else { 1 },
+            if success {
+                json!({"outcome":"completed", "exitCode":0})
+            } else {
+                json!({"outcome":"cancelled"})
+            },
+        );
+        if mode == "already-eof" {
+            assert!(!fixture.path("pid").exists());
+        }
+        fixture.assert_released();
+    }
+}
+
+#[test]
+fn stdin_watcher_joins_on_output_setup_and_launch_errors() {
+    for existing_log in [true, false] {
+        let fixture = CaddyFixture::new();
+        if existing_log {
+            fs::write(fixture.path("log"), b"preserve existing output").unwrap();
+        } else {
+            fs::remove_file(fixture.path("bin/caddy")).unwrap();
+        }
+        let output = CliChild::spawn(
+            fixture
+                .command("wait")
+                .arg("--shutdown-on-stdin-eof")
+                .stdin(Stdio::piped()),
+        )
+        .finish();
+        assert_no_completion(&output);
+        assert!(!fixture.path("pid").exists());
+        if existing_log {
+            assert_eq!(
+                fs::read(fixture.path("log")).unwrap(),
+                b"preserve existing output"
+            );
+        }
+        fixture.assert_released();
+    }
+}
+
+#[test]
+fn eof_mode_rejects_regular_file_stdin_before_output_or_child_creation() {
+    let fixture = CaddyFixture::new();
+    let input = fs::File::open(fixture.path("folder/Caddyfile")).unwrap();
+    let output = CliChild::spawn(
+        fixture
+            .command("wait")
+            .arg("--shutdown-on-stdin-eof")
+            .stdin(input),
+    )
+    .finish();
+    assert_no_completion(&output);
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("stdin EOF monitoring requires a pipe, socket, or /dev/null"));
+    assert!(!fixture.path("log").exists());
+    assert!(!fixture.path("pid").exists());
+    fixture.assert_released();
 }

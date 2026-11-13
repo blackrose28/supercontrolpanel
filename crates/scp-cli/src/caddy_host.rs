@@ -3,8 +3,23 @@
 
 use std::path::Path;
 
+pub(super) struct ShutdownPolicy {
+    pub stdin_eof: bool,
+    pub require_bounded: bool,
+}
+
+#[cfg(target_os = "linux")]
+mod stdin_eof;
+
 #[cfg(not(target_os = "linux"))]
-pub(super) fn run(_: &Path, _: &str, _: &Path, _: bool) -> Result<(), String> {
+pub(super) fn run(
+    _: &Path,
+    _: &str,
+    _: &Path,
+    _: bool,
+    policy: ShutdownPolicy,
+) -> Result<(), String> {
+    let _ = (policy.stdin_eof, policy.require_bounded);
     Err("Caddy foreground host is available only in the Linux preview; Windows/macOS supervision is not qualified".into())
 }
 
@@ -21,14 +36,35 @@ use {
 };
 
 #[cfg(target_os = "linux")]
-pub(super) fn run(profile: &Path, folder: &str, output: &Path, json: bool) -> Result<(), String> {
+pub(super) fn run(
+    profile: &Path,
+    folder: &str,
+    output: &Path,
+    json: bool,
+    policy: ShutdownPolicy,
+) -> Result<(), String> {
+    // No fallback to cooperative cleanup when the caller requires containment.
+    // Delegation alone would not qualify workload confinement or crash retention.
+    if policy.require_bounded {
+        return Err("bounded shutdown is unavailable: Linux operation containment and guardian recovery are not qualified; no child was launched".into());
+    }
     // Validate without creating a profile or log. Keep the desktop's path checks.
     let command = scp_core::caddy::build_caddy_command(folder)?;
     // Install before starting PTYs/worker threads, and retain through output reporting.
     let shutdown = Shutdown::install()?;
     let mut runtime = ProfileRuntime::acquire(profile)?;
+    // Declared after runtime: every exit/unwind joins this observer before the
+    // profile can be released. It neither reads stdin nor owns any PTY handles.
+    let mut eof = if policy.stdin_eof {
+        Some(stdin_eof::EofWatch::start(Arc::clone(&shutdown.cancelled))?)
+    } else {
+        None
+    };
     let mut output = create_output(output)?;
-    let outcome = run_prepared(&mut runtime, command, &mut output, &shutdown)?;
+    let result = run_prepared(&mut runtime, command, &mut output, &shutdown);
+    let observed = eof.as_mut().map_or(Ok(()), stdin_eof::EofWatch::finish);
+    // Preserve a PTY/output/cleanup failure over an observer failure.
+    let outcome = result.and_then(|outcome| observed.map(|()| outcome))?;
     report(outcome, json, &mut io::stdout().lock())
 }
 

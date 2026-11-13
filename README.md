@@ -283,9 +283,20 @@ leave the newly initialized profile and an empty log; errors do not remove those
 SIGINT, SIGTERM and SIGHUP set a monotonic cancellation flag. Repeated signals do not force
 exit past cleanup guards. This is **cooperative direct-child cleanup**, with no hard
 shutdown deadline or process-tree guarantee: file I/O, native calls or descendants holding
-the PTY can still block indefinitely. Cancellation may discard remaining output. Stdin is
-unused, including EOF, and there is no input forwarding. This policy is for foreground
-Caddy only; the future stdio MCP host must separately handle EOF/client shutdown.
+the PTY can still block indefinitely. Cancellation may discard remaining output.
+Stdin is unused by default. Add `--shutdown-on-stdin-eof` to request cancellation
+when a pipe/socket input closes (including a socket write-half closure); `/dev/null`
+requests cancellation before launch. Pending input is ignored without reading or
+buffering it. This opt-in mode rejects regular files, terminals and other input types
+before creating the log or launching. Its polling observer is stopped and joined on
+completion, signals and errors before profile ownership is released; keeping input
+open does not delay that join. There is no input forwarding. The future stdio MCP host
+still needs its own protocol cancellation/ownership adapter.
+
+Add `--require-bounded-shutdown` when cooperative cleanup is insufficient. It currently
+returns exit 1 before creating a profile/log or launching a child: operation containment,
+guardian recovery and native shutdown bounds remain unqualified. It never falls back
+to cooperative cleanup or treats a timeout as evidence of stopped children/workers.
 
 `--json` writes one completion result to stdout: `{"outcome":"completed","exitCode":0}`
 (or the actual child exit code), or `{"outcome":"cancelled"}`. Diagnostics use stderr.

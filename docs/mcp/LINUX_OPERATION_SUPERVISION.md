@@ -1,8 +1,16 @@
 # Linux operation supervision: qualification gate and proposed contract
 
-Status: design only, 2026-11-11. No production supervisor, cgroup adapter, output
+Status: native supervision design only; admission/EOF update 2026-11-13. No production supervisor, cgroup adapter, output
 limit, watchdog, or new cleanup guarantee is implemented. The foreground Caddy
 preview retains its documented cooperative direct-child behavior.
+
+The preview now provides `--require-bounded-shutdown` as an explicit fail-closed
+admission option: it refuses before profile/log/child creation because this contract
+is unqualified. It performs no cgroup mutation or automatic privilege acquisition.
+`--shutdown-on-stdin-eof` separately adds cooperative pipe/socket closure cancellation
+and a stoppable, joined polling observer; it does not bound native PTY, output or
+child cleanup. The default still ignores stdin EOF. The full supervision work item
+remains open; these options do not implement the guardian or containment below.
 
 ## Capability spike on this devbox
 

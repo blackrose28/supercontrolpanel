@@ -51,7 +51,7 @@ enum Command {
 
 #[derive(Subcommand)]
 enum CaddyCommand {
-    /// Run with raw PTY output in a new file; stdin is unused, including EOF
+    /// Run with raw PTY output in a new file; stdin is unused unless EOF monitoring is requested
     Run {
         /// Explicitly retain ownership until completion or signal cancellation
         #[arg(long, required = true)]
@@ -62,6 +62,12 @@ enum CaddyCommand {
         /// New raw output file; existing files are never overwritten (may grow without limit)
         #[arg(long)]
         output: PathBuf,
+        /// Cancel on stdin closure (pipe, socket, or /dev/null); cleanup remains cooperative
+        #[arg(long)]
+        shutdown_on_stdin_eof: bool,
+        /// Refuse launch unless bounded process-tree cleanup is qualified (currently unavailable)
+        #[arg(long)]
+        require_bounded_shutdown: bool,
     },
 }
 
@@ -106,8 +112,24 @@ fn run(cli: Cli) -> Result<(), String> {
             command: ConfigCommand::Show,
         } => show_config(&config_dir, cli.json),
         Command::Caddy {
-            command: CaddyCommand::Run { folder, output, .. },
-        } => caddy_host::run(&config_dir, &folder, &output, cli.json),
+            command:
+                CaddyCommand::Run {
+                    folder,
+                    output,
+                    shutdown_on_stdin_eof,
+                    require_bounded_shutdown,
+                    ..
+                },
+        } => caddy_host::run(
+            &config_dir,
+            &folder,
+            &output,
+            cli.json,
+            caddy_host::ShutdownPolicy {
+                stdin_eof: shutdown_on_stdin_eof,
+                require_bounded: require_bounded_shutdown,
+            },
+        ),
         Command::Profile {
             command: ProfileCommand::Init,
         } => initialize_profile(&config_dir, cli.json),
