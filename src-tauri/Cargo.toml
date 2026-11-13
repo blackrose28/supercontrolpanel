@@ -49,3 +49,5 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# Published-SDK dependency/build probe only; no production listener wiring.
+scp-mcp-sdk-spike = { path = "../spikes/mcp-sdk" }

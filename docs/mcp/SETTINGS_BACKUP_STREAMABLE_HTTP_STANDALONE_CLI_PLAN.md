@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 is proposed. Work 3 has a headless workspace, shared config and device-local settings schemas, desktop MCP discovery metadata and shared fail-closed execution policy/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 has a pinned published-SDK HTTP feasibility spike; production migration remains proposed. Work 3 has a headless workspace, shared config and device-local settings schemas, desktop MCP discovery metadata and shared fail-closed execution policy/read-only shared file projection and config-show CLI, inventory/profile CLI, profile-bound credentials, and shared function-status state/transitions, and PTY session handles/launch/I/O/close with launch-bound exit polling, and a profile-owned runtime context with synchronous output drainage and scoped cooperative foreground cancellation; shared Caddy launch preparation and a Linux-only foreground Caddy CLI host with signal cancellation and file output are implemented; hard shutdown bounds/process-tree supervision, Windows/macOS host qualification, other operation execution and stdio MCP remain.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility
@@ -1698,6 +1698,55 @@ Replace `AppHandle` dependencies in shared behavior with explicit config paths, 
 One operation registry defines names, argument/result schemas, categories, sensitivity, capability requirements, and handlers. Both MCP transports and CLI commands use these operations, but not every local operation must be exposed through MCP. Pass a trusted host-created execution context for policy and runtime ownership; never derive authority from caller-supplied tool arguments. Transport-specific tokens and session metadata belong to adapters, not business logic.
 
 Put Tauri and its build script in the desktop package only. A separate CLI binary inside the current package is insufficient isolation. The first extraction gate is a core/CLI dependency graph and build that require no Tauri, GTK/WebKit, frontend build, or Tauri build script. Platform keyring and SSH libraries may still require native dependencies; document these separately.
+
+### Published Rust SDK / desktop HTTP spike (2026-11-13)
+
+[Evidence and reproduction](PUBLISHED_RUST_SDK_SPIKE.md) pin registry-published
+`rmcp = "=3.10.0"` (November 12 release) with a committed isolated spike lock.
+Current official sources still identify `2026-07-28` as current; the published
+package, not just upstream main, implements its discovery/per-request lifecycle
+and `2025-11-25` initialization compatibility. Five loopback HTTP tests exercise
+the actual official Rust client in JSON and SSE configurations for both eras,
+plus raw version/header/method/session, bearer/Origin/Host/body-size/error probes.
+They expose one synthetic echo tool/resource, no real operations or app state.
+The desktop dev-only router-construction test checks the real Tauri dependency
+boundary; no production listener, core/CLI dependency or public command changes.
+
+Strict RED first failed solely for missing fixture_router, then GREEN implemented
+the synthetic SDK handler/router. A second RED failed solely for the missing
+desktop spike dependency, then GREEN added its dev-dependency. Initial probe
+assumptions were corrected from evidence: malformed JSON returns SDK HTTP 415/plain
+text, not 400/JSON-RPC; Origin checks require explicit enablement. The compatibility
+document records those limits rather than claiming complete compliance. Refactoring
+splits tool/resource assertions and shares the protocol-mode loop without losing
+cases. SDK version/Rust MSRV alone does not prove native OS/minimum-toolchain support.
+
+Linux validation: locked isolated spike tests pass 5; locked full desktop tests
+pass 162 existing tests plus the new dependency test (163), with 17 existing test
+warnings and 18 ordinary-bin warnings. Locked all-feature workspace tests pass
+126 plus the credential compile-fail doctest (127 aggregate); seven existing
+subprocess fixtures remain ignored in the direct runner and run through their
+acceptance tests. Strict spike and workspace all-target/all-feature Clippy,
+locked release CLI build, workspace/spike/changed-desktop formatting and diff
+whitespace checks pass. No UI/E2E/native OS claim is added.
+
+Ripwire identifies three test-only downstream symbols/one direct caller for each
+new fixture list handler; affected selection finds the HTTP test with unknown
+runner. New router edit-check has no incompatible callers. Final quality has zero
+gates/preexisting regressions/acknowledgments and ten non-gating new reachability
+findings. Refactoring removed the initial new test duplication/verbosity findings.
+The staged full test gate exits 4: two executed test files have unknown runners,
+83 untested/unmodeled downstream symbols, and all 10 hunks fall back to file
+scope (including documentation). This is not full static coverage or evidence
+that production CC/PTY/HTTP handlers were exercised by this synthetic probe.
+
+Next focused increment: controlled in-flight cancellation/disconnect, concurrent
+requests and shutdown evidence for both revisions in this same pinned spike,
+then scope the injected host adapter. Real schema/policy/result mapping, production
+hosting and compatibility routes, backpressure/subscriptions, token rotation,
+third-party clients and Windows/macOS remain unqualified. Coordinated CLI import,
+other operation contracts, stdio MCP and packaging remain actionable independently
+of unchanged supervision/keyring/elevation gates. Do not repeat host cgroup checks.
 
 ## Work 1: complete settings export/import
 

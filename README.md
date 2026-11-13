@@ -324,6 +324,14 @@ Current HTTP routes:
 
 This is still a **repo-local minimal transport**, not a final spec-polished MCP server.
 
+A separate [published Rust SDK spike](docs/mcp/PUBLISHED_RUST_SDK_SPIKE.md) pins
+`rmcp 3.10.0` and exercises official-client HTTP calls for `2026-07-28` and
+`2025-11-25`, with JSON/SSE fixtures. Run
+`cargo test --locked --manifest-path spikes/mcp-sdk/Cargo.toml` to reproduce it.
+The desktop has a dev-only dependency probe; production still uses the routes above.
+Cancellation, production policy/hosting, third-party clients and native OS builds
+remain to be qualified before standard `/mcp` is available.
+
 The desktop's existing 40-tool discovery catalog now lives in
 `scp-core::mcp_catalog`, with unchanged names, titles, categories and `readOnly`
 fields. This is discovery metadata only: it does not enable these operations in

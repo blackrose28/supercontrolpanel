@@ -152,3 +152,12 @@ This is a **minimal localhost HTTP transport** for the current implementation ph
   - `data: {}`
   - `warnings: []`
   - `timestamp`
+
+## Published SDK feasibility probe (2026-11-13)
+
+The [pinned rmcp 3.10.0 spike](PUBLISHED_RUST_SDK_SPIKE.md) verifies a bounded
+modern/legacy tools/resources HTTP subset using the official Rust client and
+compiles its server alongside desktop dependencies through a dev-only probe.
+It records lifecycle, Origin defaults and malformed-body compatibility limits.
+The six current REST routes, bearer/settings behavior and helper remain unchanged.
+Use its follow-up gates before replacing the production listener.
