@@ -7,6 +7,7 @@ mod references;
 mod transaction;
 
 use crate::services::config_service::*;
+use scp_core::settings_backup::ExternalFile;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -45,13 +46,6 @@ pub struct Archive {
     files: BTreeMap<String, Option<Value>>,
     credentials: BTreeMap<String, Option<String>>,
     external_files: Vec<ExternalFile>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct ExternalFile {
-    kind: String,
-    path: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -127,19 +121,12 @@ impl Archive {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.app_version.len() > 64
-            || self.platform.len() > 64
-            || self.external_files.len() > 10000
-            || self
-                .external_files
-                .iter()
-                .any(|file| file.kind.len() > 128 || file.path.len() > 4096)
-        {
-            return Err("Backup manifest metadata exceeds size limits".into());
-        }
-        if self.schema != 1 {
-            return Err("Unsupported settings schema; update the application".into());
-        }
+        scp_core::settings_backup::validate_manifest(
+            self.schema,
+            &self.app_version,
+            &self.platform,
+            &self.external_files,
+        )?;
         if self.files.len() != FILES.len()
             || FILES.iter().any(|name| !self.files.contains_key(*name))
         {

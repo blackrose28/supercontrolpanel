@@ -1938,6 +1938,60 @@ admission/session/native failure policy and production hosting remain open. Coor
 CLI import, other operation contracts and packaging are independently actionable.
 Do not repeat unchanged cgroup qualification or claim native cleanup from token tests.
 
+### Pure backup manifest prefix extraction (2026-11-13)
+
+`scp-core::settings_backup` now owns the external-reference model and pure
+`validate_manifest` prefix, reused by desktop `Archive::validate`. The archive,
+changes, section/server/credential checks, restore compiler, crypto, keyring,
+filesystem transaction, recovery and runtime gates remain desktop-owned. Nothing
+is registered with IPC/MCP or enabled in the CLI. Successful prefix validation
+alone does not establish archive validity or authorize mutation.
+
+This deliberately small prerequisite preserves the exact metadata-before-schema
+error order ahead of all section/account validation. Limits remain inclusive
+UTF-8 byte lengths (64 app version/platform, 128 reference kind, 4096 path) and
+10000 references. Unknown/empty reference kinds and foreign/relative/empty paths
+remain accepted without normalization or existence checks. Required string fields,
+unknown-field rejection, nested `externalFiles`, all seven archive fields and
+round-trip values remain unchanged. Errors remain fixed strings.
+
+Inspection found an important later boundary: backup server IDs accept `:`, but
+CLI credential account IDs do not. CLI profile-bound namespaces also differ from
+the desktop fixed namespace and have no telemetry-key account. Keep these
+contracts separate until coordinated ownership, account mapping and recovery
+interlocks are qualified. Complete/portable import, path preservation, identity
+reset, absent versus unavailable credentials and stale-preview checks are unchanged.
+
+TDD: the four new core tests first fail on the absent shared module
+(`/tmp/scp-manifest-red.log`), then pass (`/tmp/scp-manifest-green.log`). A desktop
+characterization passes against the original implementation before extraction,
+checking metadata/schema errors before invalid sections/accounts. The second
+desktop test checks archive nesting/round-trip and strict reference fields.
+Root workspace checks exclude the desktop and SDK spike, so the desktop suite
+is run explicitly. Locked Linux workspace tests: **131 pass**, seven ignored
+subprocess fixtures exercised by their parent tests. Explicit locked desktop
+suite: **164 unit tests + 1 SDK dependency coexistence test pass**. Strict workspace
+all-feature/all-target Clippy, standalone release build, root formatting and
+whitespace checks pass. Existing desktop warnings remain. Native Windows/macOS,
+real keyring prompts/ACLs, UI and standalone spike suites are not rerun for this
+pure extraction; no platform release qualification is claimed.
+
+Ripwire quality delta reports zero gating regressions or suppressions; its six
+new-symbol dead-code rows are the six Cargo-executed tests. `Archive::validate`
+edit-check reports unchanged contract and zero incompatible calls. Static affected
+selection does not model these Cargo tests; explicit suites above are the evidence.
+The staged static test gate exits 4: one Cargo-executed core test file has an
+unknown runner and four desktop command/preview dispatch boundaries lack modelled
+coverage; this extraction does not claim to close that UI gap.
+
+Next focused increment: extract the pure backup server-ID parsing/validation seam
+with characterization tests for exact server deserialization, sorted IDs, size
+bounds, duplicate rejection and error precedence. Preserve colon-containing IDs;
+do not route through CLI credential accounts. Keep archive/changes private to the
+desktop and leave credential mapping, filesystem/keyring apply/recovery and CLI
+command enablement for separately qualified increments. HTTP shipping policy,
+production stdio logging, other operation contracts and packaging remain actionable.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

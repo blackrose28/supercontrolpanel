@@ -595,3 +595,46 @@ fn backup_rejects_server_ids_that_could_escape_ui_attributes() {
     source.credentials.insert(keyring_server_ssh_password_account(id), None);
     assert!(source.validate().is_err());
 }
+
+#[test]
+fn backup_manifest_precedes_sections_and_credential_checks() {
+    let mut archive = fixture();
+    archive.files.clear();
+    archive.credentials.clear();
+    archive.schema = 2;
+    archive.platform = "x".repeat(65);
+    assert_eq!(
+        archive.validate(),
+        Err("Backup manifest metadata exceeds size limits".into())
+    );
+    archive.platform.clear();
+    assert_eq!(
+        archive.validate(),
+        Err("Unsupported settings schema; update the application".into())
+    );
+    archive.schema = 1;
+    assert_eq!(
+        archive.validate(),
+        Err("Backup must declare all settings sections".into())
+    );
+}
+
+#[test]
+fn backup_external_reference_serialization_remains_nested_and_strict() {
+    let mut archive = fixture();
+    archive.external_files.push(ExternalFile {
+        kind: "foreign".into(),
+        path: "../key".into(),
+    });
+    let mut wire = serde_json::to_value(&archive).unwrap();
+    assert_eq!(
+        wire["externalFiles"],
+        json!([{"kind":"foreign","path":"../key"}])
+    );
+    assert_eq!(wire.as_object().unwrap().len(), 7);
+    let decoded: Archive = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(decoded.validate(), Ok(()));
+    assert_eq!(serde_json::to_value(decoded).unwrap(), wire);
+    wire["externalFiles"][0]["contents"] = json!("must-reject");
+    assert!(serde_json::from_value::<Archive>(wire).is_err());
+}

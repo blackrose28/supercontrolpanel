@@ -16,3 +16,4 @@ pub mod runtime;
 pub mod scp_transfer;
 pub mod servers;
 pub mod sessions;
+pub mod settings_backup;

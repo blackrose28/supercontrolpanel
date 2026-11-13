@@ -34,6 +34,20 @@ The exporter offers complete export only. It never silently substitutes cached/m
 
 `src-tauri/src/settings_backup/` owns the feature. `Archive` and `Changes` are backend-only and are not IPC DTOs. Only redacted summaries, paths and executable configuration reach the frontend. No backup tool/resource is registered in MCP or CC. Passphrases cross the narrow Tauri commands, are not logged, and are wrapped in zeroizing buffers; input fields clear after IPC submission. Plaintext serialized payloads, derived keys, decrypted archives, staged settings and journal buffers are cleared where practical. JavaScript/IPC copies and allocator/OS copies cannot be guaranteed erased.
 
+`scp-core::settings_backup` owns only `ExternalFile` and `validate_manifest`.
+The reference retains required string `kind`/`path` fields and denies unknown
+fields; it performs no path normalization, file access or bundling. Validation
+keeps the desktop prefix order: metadata byte/count bounds, then supported schema,
+then the desktop's unchanged section/server/credential validation. This prefix
+alone does not establish archive validity or authorize restore. `Archive` and
+`Changes` remain desktop-only; no IPC/MCP registration or CLI import is added.
+
+A later credential extraction must reconcile the desktop archive's server-ID
+alphabet (which includes `:`) with CLI `CredentialAccount::ServerSshPassword`
+(which currently excludes `:`), as well as the desktop telemetry account and CLI
+profile namespace. Do not substitute CLI credential validation for archive
+validation or weaken either ownership contract as part of this model extraction.
+
 Version 1 consists of `SCPBAK01`, a little-endian 32-bit JSON-header length, the exact header bytes, and AES-256-GCM ciphertext/tag. The magic, length and header are associated data. The header declares format version, `argon2id-19`, `aes-256-gcm`, memory/iterations/parallelism, a fresh random 16-byte salt and 12-byte nonce. The encrypted payload has its own schema version, app version, platform, timestamp, file/credential inventory and external references. There is no compression or machine-bound decryption key.
 
 Exports use Argon2id v19, 64 MiB, three iterations, one lane, deriving 32 bytes. Before running the KDF, imports enforce a 1 KiB header limit, a 32 MiB file limit, supported algorithms/version, fixed salt/nonce lengths, 8–64 MiB memory, 1–3 iterations and one lane. Decryption/authentication and schema, unique server-ID (ASCII letters/digits plus `-_.:`), account-map and size checks precede all mutations. Newer schema versions are rejected; v1 is the only currently supported schema. Future versions require explicit migrations.
