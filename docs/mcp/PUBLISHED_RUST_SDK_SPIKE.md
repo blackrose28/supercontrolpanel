@@ -1376,3 +1376,32 @@ keep filesystem/keyring apply/recovery and CLI command enablement separate until
 their ownership contracts are qualified. HTTP shipping policy, stdio production
 logging policy, other operation contracts and packaging remain independently
 actionable. Do not repeat unchanged cgroup qualification.
+
+## Production stdio diagnostic contract review (2026-11-13)
+
+The [diagnostic policy review](STDIO_DIAGNOSTIC_POLICY.md) revisits installed pinned
+rmcp 3.10.0, tracing 0.1.44 and tracing-core 0.1.36 sources alongside fixture
+entry/observers, raw startup/parser/DEBUG tests and production core/CLI boundaries.
+It selects an executable-owned global NoSubscriber before SDK construction, no
+environment-driven verbosity, fixed startup/service stderr failure lines and an
+ExitCode process boundary retaining typed errors internally. INFO/WARN/ERROR also
+contain peer/native fields; disabling only DEBUG/TRACE is insufficient. A global
+subscriber can be overridden by thread/task dispatchers, so trusted host code must
+not install those. This is suppression, not a generic sanitizer.
+
+Docs-only: no fixtures, dependencies, SDK version, wire replies, core errors,
+production stdio or HTTP routes change. Raw DEBUG and Rust termination tests
+continue to characterize unsanitized behavior. The review separates protocol
+correlation/status from stderr and HTTP-body boundaries, and explicitly excludes
+native output, panic hooks and success-data sanitization. Outer waiting errors and
+inner QuitReason::JoinError both require typed failure handling; clean closure is
+not native cleanup proof.
+
+Next: implement only the review's five next-slice acceptance rows in a separate
+isolated policy runner/binary under strict behavioral RED/GREEN: typed startup
+peer error, preselection EOF, active wire preservation with tracing suppressed,
+all-level/span worker probes and fail-closed subscriber-install conflict. Preserve
+all raw characterization tests. Active outcome/writer fault injection and production
+activation stay separate. Validation for this review is diff/whitespace, local
+Markdown targets/fragments and Ripwire quality delta; unchanged Cargo/native/UI
+suites are not rerun or claimed.

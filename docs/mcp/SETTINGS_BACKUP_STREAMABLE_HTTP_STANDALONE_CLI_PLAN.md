@@ -2441,6 +2441,47 @@ remain independently actionable. Continue in a NEW same-devbox thread after ever
 completed increment while actionable work remains, notifications enabled and no
 parent messaging/wait. Honor stop/cancel/approval instructions.
 
+### Production stdio diagnostics boundary review (2026-11-13)
+
+Completed a docs-only [source-backed policy review](STDIO_DIAGNOSTIC_POLICY.md)
+against pinned rmcp 3.10.0, tracing 0.1.44/tracing-core 0.1.36, current stdio
+fixture entry/observers, raw DEBUG and typed startup evidence, overview adapter,
+and production core/CLI error boundaries. Severity-only filtering is insufficient:
+INFO/WARN/ERROR also record peer/native values. The selected future executable
+policy installs global NoSubscriber before SDK construction, rejects installation
+conflicts, forbids alternate dispatchers/environment verbosity, and writes fixed
+startup/service failure lines directly to stderr from an ExitCode boundary.
+Typed SDK errors stay internal without Debug/Display/source-chain formatting.
+Outer waiting errors and inner QuitReason::JoinError must both fail; lifecycle
+closure alone does not qualify native cleanup. The review includes exact
+diagnostic bytes, precedence, acceptance matrix and honest output/lifetime limits.
+
+No code/SDK/dependency/schema/desktop/CC/admin/HTTP change, production stdio command
+or generic logging/native/panic/success-data sanitizer. Raw characterization tests
+retain their original semantics. The independent HTTP shipping policy still must
+preserve modern envelopes; status-body erasure and selected negotiation wrappers
+do not become production-ready through stdio suppression. Import admission and
+maintenance/restricted recovery contracts remain unchanged.
+
+Validation: documentation diff/whitespace passes; 44 local Markdown targets and 13
+fragments across four documents pass; Ripwire quality delta exits 0 with zero
+regressions, gating findings or suppressions. No changed symbols requiring impact/uses/affected or
+behavioral RED/GREEN; no unchanged Cargo/desktop/root/native/UI suites rerun.
+No cgroup reprobe. Implementation evidence is not claimed for this design.
+
+Next focused increment: isolated policy runner/binary implementing the review's
+five next-slice rows under strict behavioral TDD: typed startup peer failure,
+preselection EOF, active parser/peer/custom-request wire preservation while logs
+are suppressed, all-level/span worker probes and subscriber-install conflict.
+Keep raw-debug/input-errors/startup-eof and the EOF observer unchanged, use pinned
+NoSubscriber, and qualify actual child.wait with concurrent bounded stderr capture.
+Do not enable scpctl MCP, change HTTP routes, or expand into native/panic/generic
+sanitization. Active outcome/error-writer tests and host activation remain later
+gates. Independent HTTP shipping, operation and packaging work remains available.
+After each completed increment, STOP EDITING and start a NEW same-devbox
+continuation thread, notifications enabled, no parent coordination/message/wait.
+Honor user stop/cancel/approval instructions.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.
