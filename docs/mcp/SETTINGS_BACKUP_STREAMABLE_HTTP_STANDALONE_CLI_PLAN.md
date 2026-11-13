@@ -2293,6 +2293,47 @@ recovery remain gated. HTTP shipping policy, production stdio logging, other
 operations and packaging remain independently actionable; do not start a blocked
 successor while independent work remains. Do not reprobe unchanged cgroup controls.
 
+### CLI in-process maintenance and revocation audit (2026-11-13)
+
+Completed a docs-only [source/lifetime audit](CLI_MAINTENANCE_LIFETIMES.md) against
+`92a10b2`. The matrix traces every current owner acquisition, runtime launch/input,
+foreground cleanup/output handle, credential adapter/cache method and ordinary
+profile file read. Owner borrowing retains the lock but does not revoke cached
+secrets or PTY input; public raw session/keyring primitives are trusted host
+building blocks, not CLI authority. A copied namespace/secret or issued raw reader
+cannot be retracted. Desktop maintains separate gates/loaders and is unchanged.
+
+Specified fixed runtime denial, per-owner monotonic state, inspection ordering,
+pre-cancel/error precedence and unconditional cleanup access. Close/poll/drop,
+cache clear and worker joins must remain available; deleting keyring values or
+replaying journals is mutation, not ordinary cleanup. Active-loop observation and
+blocked native work require separate host qualification, not a check in cleanup.
+
+A future cooperating publisher needs cross-process reader exclusion as well as
+exclusive runtime ownership. Reusing runtime-owner.lock breaks clean reads during
+Caddy; process-local locks and stat retries do not serialize other processes.
+Recorded a separate persistent admission-lock candidate and lock order with no
+shared-to-exclusive upgrade or runtime locks across keyring/join. That future
+protocol necessarily changes today's no-created-lock read behavior on existing
+profiles and needs native/provisioning/alias/mixed-version qualification. No lock
+filename/protocol or publisher is implemented/approved for shipping by this audit.
+
+Next focused increment: implement only **runtime entry denial after acquisition**
+under strict TDD, using the audit's acceptance matrix. Retain selected directory
+and a private monotonic owner latch; crate-private evidence check before spawn,
+write and both foreground entries (including pre-cancel), fixed runtime error,
+no PTY/input effects under denial, removal never re-enables that owner. Preserve
+namespace/ID inspection, close/poll/drop, join/error ordering and desktop contracts.
+Do not add active recovery monitoring, credential error API, maintenance locks,
+recovery constructor, import/mutation command, keyring probe or bypass. Credential
+entry fencing, serialized readers/publisher, authenticated restricted recovery and
+source mapping remain gates. Active output readers/native calls are not revoked.
+
+Validation for this audit: source/fixture review, local Markdown target/fragment
+checks, diff review and Ripwire quality delta; no Rust code/schema/dependency change,
+so no Rust/desktop/UI/SDK/native/keyring/MSRV/release reruns are claimed. No cgroup
+reprobe. Independent HTTP shipping/logging/operation/packaging work remains available.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

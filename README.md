@@ -187,6 +187,10 @@ absence; any object or other inspection error returns exit 1, no stdout, and
 defaults and settings parse/I/O errors. Clean missing directories remain absent,
 and clean reads still work while another ordinary CLI process owns the profile.
 The stat-only check is not a coordinated snapshot or protection against filesystem races.
+An already acquired runtime is not revoked when evidence appears later. The
+[maintenance lifetime audit](docs/mcp/CLI_MAINTENANCE_LIFETIMES.md) specifies the
+planned entry checks and cleanup exceptions; no maintenance or recovery authority
+is enabled.
 
 The core now provides a profile-bound credential store and a cache keyed by namespace
 and account. Its optional `os-keyring` feature uses the same persistent native stores as

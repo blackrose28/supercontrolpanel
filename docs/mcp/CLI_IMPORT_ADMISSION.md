@@ -4,6 +4,10 @@ Status: admission design reviewed 2026-11-13; denial-only acquisition and ordina
 No CLI import, recovery implementation or secret-bearing model ships. Except for
 the acquisition and ordinary-read fences described below, the matrices specify required future behavior.
 Passing the shared desktop archive validators does not admit CLI import.
+The [in-process lifetime audit](CLI_MAINTENANCE_LIFETIMES.md) traces existing
+capabilities, denial/cleanup precedence and future cross-process read exclusion;
+its selected next slice is runtime entry denial after acquisition, not maintenance
+or recovery authority.
 
 ## Ownership acquisition audit
 

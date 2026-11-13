@@ -112,3 +112,8 @@ reads. The latter neither acquires nor retains ownership. These checks do not pr
 guardian/tree
 recovery, retain a lock after death, or authorize reuse of desktop undo journals.
 Operation recovery needs its own qualified evidence and lifecycle authority.
+
+The [CLI maintenance lifetime audit](CLI_MAINTENANCE_LIFETIMES.md) separates future
+ordinary-entry denial from permitted close/poll/drop and worker joins. Its proposed
+owner latch neither observes blocked native work nor retains ownership after death;
+it does not satisfy the independent operation supervision/crash-retention gates.

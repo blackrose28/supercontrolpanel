@@ -137,3 +137,7 @@ and recovery remain unavailable. Ordinary CLI config/inventory queries now deny
 observed recovery evidence before settings reads, without initialization, locking
 or keyring access; see the [read contract](CLI_IMPORT_ADMISSION.md#second-prerequisite-stat-only-ordinary-read-exclusion-implemented).
 This is not a coordinated snapshot or in-process maintenance/revocation gate.
+
+The [CLI lifetime audit](CLI_MAINTENANCE_LIFETIMES.md) specifies future in-process
+revocation, permitted cleanup and reader/publisher exclusion. These are design
+requirements; desktop gate/recovery and CLI behavior are unchanged by the audit.
