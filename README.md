@@ -364,9 +364,11 @@ An official-client cancellation probe also checks both revisions: a separate
 synthetic control channel proves cooperative cancellation reaches one overview
 read while another stays active and completes after release. Every stdout line
 is validated, including the absence of a response for the cancelled request.
-Active EOF shutdown and native cleanup remain unqualified. The SDK dependency
-remains isolated; no desktop wiring or CLI MCP command is enabled. Production
-host ownership/authentication,
+A raw subprocess probe also observes the SDK service loop receiving EOF while an
+overview is active, then releases it and checks the drained response and process
+exit for both revisions. EOF drain expiry and native cleanup remain unqualified.
+The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
+enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified
 before standard `/mcp` is available.
 

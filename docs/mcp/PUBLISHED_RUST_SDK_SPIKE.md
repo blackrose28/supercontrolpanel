@@ -850,3 +850,89 @@ token cancellation is not a host join; keep non-cooperative/native limitations
 explicit. EOF before lifecycle selection, malformed input, backpressure, signals,
 production stdio ownership, HTTP shipping policy, CLI coordinated import, other
 operations and packaging remain open; the unchanged cgroup gate is not retried.
+
+## Active stdio EOF with controlled drain completion (2026-11-13)
+
+The next focused slice qualifies successful completion during EOF drain, using
+`tests/stdio/eof.rs` and the same injected overview adapter/host gate. It does not
+qualify drain expiry. Both legacy Initialize (2025-11-25) and modern Discover /
+inline metadata (2026-07-28) run in real subprocesses, with no production CLI,
+runtime, keyring, config, profile, HTTP host or new MCP tool.
+
+Fixture selection rechecked the published 3.10.0 source:
+
+- `transport/io.rs::stdio_pipes` retains Linux FIFO reopening and the blocking
+  fallback on other platforms/non-FIFO streams. `async_rw.rs` owns newline parsing
+  and returns no message on input EOF. The harness never reads subprocess stdin.
+- `service/server.rs` and `service/client.rs` retain the existing lifecycle
+  selection. The harness reuses `Wire`'s checked handshake; modern calls supply
+  complete inline metadata, so EOF follows lifecycle selection and host entry.
+- `service.rs::serve_inner` emits `input stream terminated` only after its actual
+  `transport.receive()` returns None, immediately before selecting Closed. It
+  drops its response sender, joins already spawned response-send tasks and drains
+  remaining handler responses for up to five seconds. Only afterward does it
+  cancel the internal token and close the transport. Cancellation uses a separate
+  two-second drain. EOF does not cancel an externally supplied service token.
+  The response drain is not a join of all handler tasks or native work.
+
+A fixture-only `gated-eof` mode installs a minimal tracing subscriber. It enables
+only INFO events targeted at `rmcp::service`, recognizes that exact fixed message,
+and emits only `fixture sdk input eof` on stderr. It forwards no raw event fields,
+errors or SDK diagnostics and writes no stdout. Other fixture modes retain their
+previous behavior. This is pinned-source test instrumentation, not a production
+logging policy or general sanitizer. It reuses the already locked `tracing` crate
+as a direct spike dependency; the spike lock adds only that dependency edge.
+rmcp remains exactly 3.10.0 with the same checksum. The ignored local desktop lock
+also required an offline metadata refresh for this dev-dependency edge; no package
+versions changed and no tracked desktop source/lock changes were made.
+
+The test requires gate entry and active acknowledgment before closing stdin.
+It consumes stderr through the actual SDK EOF marker, confirms the process has
+not exited, and obtains another active acknowledgment before releasing work.
+Release/finished/gate EOF must precede the exact correlated shared DTO response,
+including text, structured content and revision-specific resultType. The raw
+validator checks every stdout line through EOF; no extra response or diagnostic
+line is allowed. Successful child wait, one host read, one SDK EOF marker and the
+final stop marker complete the evidence. No arbitrary sleep establishes EOF.
+The marker identifies the loop's EOF branch, not a separately instrumented drain
+entry; source ordering plus work still held until the post-marker release and
+the subsequent response establish completion through the EOF drain path.
+
+Five-second per-step watchdogs and kill-on-drop remain test safeguards. This
+prompt-release case does not wait for the SDK's five-second drain expiry and
+makes no maximum process/native cleanup claim. An expiry test needs a separately
+scoped bound exceeding the SDK window, plus explicit internal-token/handler
+completion evidence; it must not race the existing five-second watchdog. Blocking
+stdio fallback is still not qualified on native Windows/macOS.
+
+TDD: the new behavioral test compiled against the prior fixture and failed at
+host entry (unsupported gated-eof mode). Minimal gated hosting plus the fixed
+observer passed both revisions. Mutating away the observer's EOF marker then
+failed at the EOF-evidence watchdog; restoring it passed the full suite. The raw
+harness connection setup is shared with the existing tests, and gate methods are
+visible only to their parent test module for reuse. No adapter or host operation
+semantics changed.
+
+Validation: locked full spike suite **33 pass** (11 adapter, 5 error boundary,
+5 HTTP, 4 lifecycle, 3 negotiation boundary, 5 stdio), strict all-target Clippy,
+format and whitespace checks pass. The locked desktop dependency probe passes
+with 18 existing warnings; the normal-edge SDK reverse graph remains empty.
+Root/core/full desktop, native OS, MSRV, release and UI suites were not rerun for
+this synthetic-only slice. Ripwire sees no callers of fixture main; source and
+subprocess tests establish its use. The Wire setup refactor affects the two raw
+stdio tests and the new EOF probe, all executed in the full suite. Edit checks
+retain signatures with no incompatible callers. Static test reach remains
+approximate for Cargo tests and tracing trait dispatch. Quality delta exits 0:
+seven new non-gating dead-code findings concern the test/tracing trait methods,
+with two minor short-horizon churn findings and no gating regression. No
+suppressions or baseline changes were added. The staged test gate exits 4 for
+nine unknown-runner test files/modules (all exercised by Cargo) and three
+unrelated untested paths: desktop `run_boundary_oidc_automation` and two doc
+headings. Its file/name graph is not a clean coverage claim for unchanged OIDC.
+
+Next: qualify EOF drain expiry/internal-token cancellation with explicit evidence
+and an appropriately scoped watchdog, while distinguishing it from joining
+handlers/native cleanup. EOF before lifecycle selection, malformed input,
+backpressure and signals remain separate. Production stdio ownership, HTTP
+shipping policy, coordinated CLI import, other operation contracts and packaging
+remain actionable; do not repeat unchanged cgroup qualification.

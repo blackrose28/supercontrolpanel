@@ -2142,6 +2142,43 @@ malformed input, backpressure and signals remain unqualified. HTTP shipping
 policy, coordinated CLI import, other contracts and packaging remain independently
 actionable; do not repeat the unchanged cgroup gate.
 
+### Active subprocess EOF drain completion qualification (2026-11-13)
+
+The same injected overview adapter now has a raw subprocess EOF test over both
+supported lifecycles. A fixture-only observer recognizes the pinned SDK service
+loop's exact input-EOF event and emits one fixed stderr marker, without forwarding
+SDK diagnostics or reading MCP stdin. After gate entry/active evidence the test
+closes stdin, waits for that marker, checks work still active, then releases it.
+Gate completion/EOF, the exact correlated DTO response, clean stdout EOF,
+successful process wait and the final stop marker are all required. No sleep is
+used as EOF evidence; no real runtime or production MCP command is introduced.
+
+Source ordering places the marker immediately before Closed selects a response
+drain of up to five seconds. Successful completion during that drain is qualified;
+drain expiry and native/handler joining are not. Internal cancellation follows
+the drain, does not cancel an external service token, and differs from the SDK's
+two-second service-cancellation drain. The existing per-step five-second watchdog
+is suitable only for prompt controlled release; expiry needs a separate bound.
+
+TDD: unsupported fixture mode first fails the new test at host entry; the gated
+EOF observer passes. Removing its marker fails at the explicit EOF watchdog.
+After restoration the locked full spike suite passes 33 tests; strict Clippy,
+format/whitespace and the locked desktop dependency probe pass (18 existing
+warnings). The normal SDK reverse graph remains empty. rmcp stays exactly 3.10.0;
+only a direct dependency edge to the already locked tracing crate is added to the
+isolated spike. No tracked desktop/runtime source changes. See
+[SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#active-stdio-eof-with-controlled-drain-completion-2026-11-13)
+for observer scope, source ordering and qualification limits. Ripwire quality
+delta has no gating regressions; test-gate retains unknown-runner/unrelated
+untested-path findings, so static reach is not a clean coverage claim.
+
+Next focused increment: EOF drain expiry/internal-token cancellation with explicit
+evidence and a scoped watchdog beyond five seconds. Do not claim handler/native
+joining or hard cleanup bounds. EOF before lifecycle selection, malformed input,
+backpressure, signals, native Windows/macOS stdio, production host ownership,
+HTTP shipping policy, coordinated CLI import, other contracts and packaging
+remain open. The unchanged cgroup qualification is not retried.
+
 ### stdio MCP contract
 
 - Use the same SDK adapter, operation schemas, policy, and redaction as desktop MCP, hosted directly on the headless runtime.

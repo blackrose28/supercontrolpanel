@@ -16,6 +16,8 @@ const LEGACY: &str = "2025-11-25";
 
 #[path = "stdio/cancellation.rs"]
 mod cancellation;
+#[path = "stdio/eof.rs"]
+mod eof;
 
 async fn bounded<T>(future: impl Future<Output = T>) -> T {
     tokio::time::timeout(Duration::from_secs(5), future)
@@ -87,7 +89,10 @@ struct Wire {
 
 impl Wire {
     async fn start(version: &'static str, mode: &str) -> Self {
-        let mut child = spawn(mode);
+        Self::connect(version, spawn(mode)).await
+    }
+
+    async fn connect(version: &'static str, mut child: Child) -> Self {
         let input = child.stdin.take().unwrap();
         let output = BufReader::new(child.stdout.take().unwrap());
         let mut wire = Self {

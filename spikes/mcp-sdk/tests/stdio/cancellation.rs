@@ -6,10 +6,10 @@ use rmcp::{
 };
 use tokio::net::{TcpListener, TcpStream};
 
-struct Gate(BufReader<TcpStream>);
+pub(super) struct Gate(BufReader<TcpStream>);
 
 impl Gate {
-    async fn entered(listener: &TcpListener) -> Self {
+    pub(super) async fn entered(listener: &TcpListener) -> Self {
         let mut gate = bounded(async {
             loop {
                 let (stream, _) = listener.accept().await.unwrap();
@@ -36,7 +36,7 @@ impl Gate {
         assert_eq!(line, format!("{expected}\n"));
     }
 
-    async fn send(&mut self, command: &str) {
+    pub(super) async fn send(&mut self, command: &str) {
         bounded(
             self.0
                 .get_mut()
@@ -46,12 +46,12 @@ impl Gate {
         .unwrap();
     }
 
-    async fn active(&mut self) {
+    pub(super) async fn active(&mut self) {
         self.send("check").await;
         self.expect("active").await;
     }
 
-    async fn finished(&mut self, outcome: &str) {
+    pub(super) async fn finished(&mut self, outcome: &str) {
         self.expect(outcome).await;
         self.expect("finished").await;
         let mut byte = [0];

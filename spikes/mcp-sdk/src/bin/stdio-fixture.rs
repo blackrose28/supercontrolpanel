@@ -1,5 +1,8 @@
 //! Synthetic subprocess only; never reads real configuration or credentials.
 //! Stdout belongs exclusively to the SDK. No production scpctl entry point.
+#[path = "stdio_fixture/eof_observer.rs"]
+mod eof_observer;
+
 use rmcp::ServiceExt;
 use scp_core::mcp_dto::McpAppOverviewResult;
 use scp_mcp_sdk_spike::overview::{OverviewAdapter, OverviewHost, OverviewPolicy};
@@ -71,6 +74,9 @@ async fn gated_read(address: SocketAddr, cancellation: CancellationToken) -> std
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mode = std::env::args().nth(1).unwrap_or_default();
+    if mode == "gated-eof" {
+        eof_observer::install();
+    }
     let allowed_categories = match mode.as_str() {
         "denied" => vec![],
         "bad-category" => vec!["read-only".into(), "SECRET_CATEGORY".into()],
@@ -84,7 +90,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let adapter = OverviewAdapter::new(
         SyntheticHost {
             fail: mode == "error",
-            gate: if mode == "gated" {
+            gate: if matches!(mode.as_str(), "gated" | "gated-eof") {
                 Some(
                     std::env::args()
                         .nth(2)
