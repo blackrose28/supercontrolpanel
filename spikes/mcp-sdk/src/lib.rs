@@ -1,5 +1,8 @@
 //! Test-only SDK feasibility spike, not a production desktop transport.
-//! Synthetic handlers never read app state or execute operations.
+//! The synthetic compatibility fixture never reads app state or executes operations.
+//! The separate overview module defines an injected, request-scoped host seam.
+
+pub mod overview;
 
 use std::borrow::Cow;
 

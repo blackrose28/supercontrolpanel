@@ -47,7 +47,8 @@ cargo tree --locked --manifest-path src-tauri/Cargo.toml -i rmcp -e normal
 
 `spikes/mcp-sdk` has its own workspace/lock. It is not a member of the headless
 core/CLI workspace. Its library supplies one synthetic echo tool and one text
-resource; it has no binary or persistent listener. Tests bind ephemeral IPv4
+resource, plus a separate injected overview adapter described below; it has no
+binary or persistent listener. Tests bind ephemeral IPv4
 loopback sockets, use a public fixture bearer constant and shut down their hosts.
 They never read app configuration/keyring, execute a desktop operation or launch
 external programs. A test watchdog is not a production shutdown guarantee.
@@ -63,7 +64,7 @@ repository's existing convention; the isolated spike lock is committed.
 
 Validation here uses Linux and rustc 1.99.1. The declared SDK MSRV is not a test of
 our entire graph on Rust 1.88/1.89. Windows/macOS builds, native desktop interaction
-and IPv6 sockets were not exercised. No core/CLI dependency or executable changes.
+and IPv6 sockets were not exercised. No SDK dependency is added to core/CLI, and no executable changes.
 
 ## Observed compatibility matrix
 
@@ -190,30 +191,101 @@ fixture against its dependency graph. No production desktop/core/CLI source chan
 native OS/minimum-Rust, UI/E2E, event-store resume, post-progress shutdown, request
 queue saturation or hard shutdown bounds are qualified here.
 
-## Next injected boundary
+## Injected overview boundary (2026-11-13)
 
-**Next focused increment:** build a testable injected host-handler adapter in this
-isolated workspace for one read-only operation (`app_get_overview`), with a fake
-host, shared fail-closed policy/catalog and public DTO/result mapping. Test denied
-and unknown requests never enter the host, errors remain redacted, and request
-cancellation reaches cooperative read work without affecting unrelated requests.
-Keep the existing production listener functional; defer desktop wiring and
-compatibility-route hosting until that adapter contract is reviewable.
+`src/overview.rs` adds `OverviewAdapter<H>` and the `OverviewHost` async read seam
+inside the isolated spike only. The adapter depends on `scp-core` without optional
+features to reuse the exact `McpAppOverviewResult`, catalog and independent
+fail-closed policy. This justifies the spike-to-core edge and its lockfile additions
+(including the core's existing PTY dependencies); core and CLI gain no SDK edge.
+`tokio-util` moves from dev-only to normal spike dependency to name the SDK request
+cancellation token at the host seam. The registry pin remains exactly 3.10.0.
+The existing echo/resource router and production custom listener are unchanged.
 
-The hosting owner must track/drain its own accepted work independently of Axum's
-listener task, supply cancellation to cooperative request-scoped work, and enforce
-admission/concurrency/queue limits before dispatch. Do not infer forced cancellation
-of `spawn_blocking`, keyring/native calls or app-owned operations from this SDK.
-For any later operation start, define when ownership transfers to app runtime,
-status/operation IDs, loss-of-response and duplicate-start semantics explicitly;
-request cancellation must not silently discard that ownership. The current tests
-supply no production task registry, timeout policy or operation supervisor.
+The host supplies immutable `OverviewPolicy` settings independently of arguments
+or request metadata. Discovery filters the shared catalog to the one implemented,
+permitted operation; no resources capability or other catalog tool is advertised.
+Dispatch checks shared policy first, then the implemented-operation allowlist,
+then manually validates this operation's empty arguments. Omitted arguments are
+accepted; nonempty objects fail. The dedicated input schema is an empty object
+with `additionalProperties: false`. This standard adapter is deliberately stricter
+than the existing custom dispatcher's ignored arguments; that compatibility path
+is unchanged. This is not a generic schema validator; SDK deserialization/parser
+failures, including its previously recorded raw error text, remain outside this
+host-error boundary.
 
-Backpressure/subscriptions, bounded blocking work, real operation/result schema
-validation, token rotation, actual compatibility-route hosting, client setup UX,
-third-party clients and native OS builds remain unqualified. No prompts, sampling,
-elicitation, tasks or subscriptions are advertised by the fixture.
+The output schema requires `appVersion` (string), `activeFunctions` and
+`knownFunctionCount` (nonnegative integers), with no additional properties.
+A host constructs the shared DTO from its own version/status snapshot; the adapter
+serializes it directly into structured content and the SDK's JSON text content.
+It adds no custom five-field envelope. Tests check modern `resultType: complete`
+and its absence in legacy responses. No automatic arbitrary output validation is
+claimed. Returned host failure strings are discarded without logging: the public
+result has `isError: true`, text `App overview unavailable`, and no structured data.
+Policy/unknown/unimplemented/argument errors are protocol `-32602` errors with fixed
+messages and no caller data; there is no host panic/native error redaction claim.
 
-Coordinated CLI import, other operation contracts, stdio MCP and packaging remain
-independently actionable. Linux operation-supervision/keyring/elevation gates are
-unchanged; this spike does not rerun or resolve them.
+Three raw-HTTP integration tests exercise discovery/initialization, tools/list and
+tools/call against the injected adapter for both exact protocol revisions. Fake
+host reads report entry and await individual release gates. Denied categories,
+unknown policy/category, unknown names, a known but unimplemented tool, and extra
+arguments all return before host entry. Success maps the public DTO exactly;
+secret-bearing fake host errors return only fixed public text. All exposed adapter
+capabilities are tools-only. Existing five official-client compatibility tests and
+four lifecycle tests remain separate and continue exercising the original fixture.
+
+For cancellation, two JSON/stateless requests enter independently for each
+revision. Aborting and joining the first client request cancels the token received
+by that host read; the cooperative fake observes it, exits its select and reports
+completion. The other token stays unset at the check and its read completes
+successfully after explicit release. This proves token propagation and cooperative
+fake read completion, not hard shutdown/native work cleanup or accepted background
+operation cancellation. It does **not** qualify legacy stateful SSE cancellation
+for this new adapter. As in the earlier lifecycle tests, each listener binds only
+an ephemeral IPv4 loopback socket, has no bearer middleware and uses synthetic data;
+five-second watchdogs bound fixture waits, not production latency or cleanup.
+
+TDD: initial compile RED reports only the missing core dependency/overview module.
+After GREEN, separate deliberate mutations remove dispatch authorization, expose
+the raw host failure, and replace the request token with an unrelated token. Each
+fails its focused test (entry watchdog, exact redacted message, cancellation
+watchdog respectively); all mutations are restored. Refactoring reuses the exact
+fixture protocol-version declaration and separates result assertions. Short SDK
+capability declarations remain independent because the fixture advertises resources
+and the adapter must not.
+
+Validation: the locked isolated suite passes all 12 tests (3 adapter, 5 existing
+HTTP, 4 lifecycle); strict all-target spike Clippy, formatting and staged whitespace
+checks pass. The locked desktop dependency smoke passes with its 18 existing bin
+warnings. The ignored desktop lock first needed an offline metadata refresh for
+the new spike dependency; the final locked run succeeds. The desktop normal-edge
+reverse graph has no SDK dependents; the root workspace has no rmcp package at all.
+All preexisting spike packages retain their version/source/checksum, including
+rmcp 3.10.0; 30 packages are added by the core dependency. Full desktop/root CLI,
+minimum Rust, native OS and UI/E2E suites are not rerun for this isolated adapter.
+
+Ripwire impact/uses identify only the new adapter and its HTTP probe; external
+`ServerHandler` is not indexed, and affected selection has zero proven tests but
+lists adapter test construction as a candidate. Runtime integration evidence above
+covers that missing dispatch edge. New `call_tool` edit-check reports no incompatible
+callers. Final quality exits 2: one false unreachable finding on the unchanged,
+executed `Fixture::list_tools` after same-named trait implementations were added,
+and one 27-token similarity finding on the short capability constructors. Those
+constructors deliberately differ (fixture tools/resources versus adapter tools-only);
+sharing the fixture's capability value would advertise unsupported resources.
+Seven new non-gating reachability findings cover SDK-dispatched methods/test entry
+points. No suppressions/acknowledgments are added. The staged test gate exits 4:
+three executed test files have unknown runners and two documentation symbols are
+unmodeled; ten unlocated hunks fall back to seven file-granular seeds. These are
+static-analysis limits/reviewed short similarity, not a claim of a clean static gate.
+
+**Next focused increment:** qualify this adapter with the official SDK client in
+JSON and SSE configurations for both revisions, including legacy stateful explicit
+cancellation and modern stream-close cancellation after actual streamed progress
+where supported. Keep the fake host seam and production listener separate. Review
+an explicit malformed-input/redaction boundary before shipping, rather than assuming
+returned host error redaction covers SDK parsing. Desktop wiring/auth/token rotation,
+host-owned work tracking/drain, admission/concurrency/queue limits, compatibility
+routes, real runtime/keyring calls and third-party/native OS clients remain later.
+A host must define accepted-operation ownership and response-loss/duplicate-start
+semantics before adding operation starts; request cancellation alone is insufficient.

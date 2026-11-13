@@ -332,7 +332,12 @@ The desktop has a dev-only dependency probe; production still uses the routes ab
 Gated tests also distinguish modern stream-close cancellation from legacy explicit
 cancellation and verify an unrelated request survives. A cancelled request token
 or joined listener does not stop the fixture's non-cooperative handler; tests
-release and observe handler cleanup separately. Production host ownership/policy,
+release and observe handler cleanup separately. An isolated injected adapter now
+maps the one read-only `app_get_overview` operation using the shared policy,
+catalog and result DTO. Fake-host HTTP tests for both revisions cover denial
+before host entry, redacted host errors, and cooperative read cancellation while
+another request completes. This adds only a spike-to-core dependency; no desktop
+wiring or CLI MCP command is enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified
 before standard `/mcp` is available.
 

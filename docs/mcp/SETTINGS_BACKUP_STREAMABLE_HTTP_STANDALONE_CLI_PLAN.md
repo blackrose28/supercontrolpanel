@@ -1776,17 +1776,51 @@ eight files use file scope. Edit-check finds no incompatible callers; it reports
 Fixture unchanged but does not model the intentional visibility widening in this
 non-production test library. No full static-coverage claim.
 
-Next focused increment: an isolated injected host-handler adapter for the single
-read-only `app_get_overview` operation, using fake host work, the shared policy/
-catalog and public DTO mapping. Prove policy rejection precedes host entry,
-redacted errors, cooperative cancellation and unaffected concurrent requests.
-This is independent of operation-supervision gates; production desktop listener
-wiring remains later. Host-owned work tracking/drain, admission limits and explicit
-accepted-operation ownership must precede any claim of production shutdown safety.
-Real operation schemas, compatibility routes, backpressure/subscriptions, token
-rotation, third-party clients and Windows/macOS remain unqualified. Coordinated CLI
-import, other operation contracts, stdio MCP and packaging remain actionable. Do not
-repeat unchanged cgroup qualification.
+### Injected read-only SDK host adapter (2026-11-13)
+
+The isolated spike now implements one injected `OverviewAdapter<OverviewHost>` for
+`app_get_overview`. It reuses core's independent fail-closed policy, exact catalog
+metadata and public `McpAppOverviewResult`; only this permitted implemented tool is
+listed, with tools-only capabilities. Host-supplied policy is separate from request
+data. Policy, unknown/unimplemented names and invalid arguments fail before host
+entry. Dedicated empty-object input and three-field output schemas apply only to
+this standard adapter; the custom desktop argument handling/envelope are unchanged.
+Host failures become fixed `isError` text without raw errors or structured content.
+
+Three raw-HTTP fake-host tests run both exact revisions and prove DTO/text mapping,
+filtered discovery, policy-first rejection, redacted returned host errors, and token
+propagation into cooperative read work. Pre-first-response JSON/stateless disconnect
+cancels one read; that fake reports completion while the other remains uncancelled
+at the check and completes after release. This adds no stateful-SSE adapter proof,
+native work cleanup, hard bound or accepted-operation cancellation. Existing HTTP
+and lifecycle fixtures remain. See [contracts/evidence](PUBLISHED_RUST_SDK_SPIKE.md)
+for the explicit errors, schema limitations, test watchdogs and TDD mutations.
+
+The only new normal dependency edges are isolated spike → core (default features
+only) and `tokio-util` for the host's request token. Core/CLI gain no SDK dependency;
+production listener and desktop normal SDK graph remain unchanged. The isolated
+lock gains core's existing dependency graph; the ignored desktop lock is refreshed
+locally for changed spike metadata. No SDK version/capability upgrade is made.
+
+Validation: locked spike suite 12/12, strict spike all-target Clippy, formatting,
+whitespace and locked desktop dependency smoke pass; desktop normal graph and
+root workspace retain no normal SDK edge. Full desktop/root/native OS tests are
+not rerun. Deliberate authorization/redaction/token mutations fail their focused
+tests and are restored. Ripwire quality exits 2 with the unchanged exercised
+fixture's trait-dispatch reachability false positive and a reviewed 27-token
+capability-builder similarity; seven new reachability findings are non-gating,
+with no suppressions. Staged test gate exits 4 (three executed files of unknown
+runner, two documentation symbols, ten unlocated hunks/seven file-scope seeds).
+See the evidence document for the precise static limits; no clean-gate claim.
+
+Next focused increment: qualify the injected adapter with the official SDK client
+across JSON/SSE and both revisions, and explicitly test legacy stateful cancellation
+and modern stream-close cancellation with cooperative fake host work. Review the
+malformed-input/redaction boundary before shipping. Host-owned tracking/drain,
+admission limits, desktop auth/wiring, compatibility routes, operation ownership,
+real runtime/keyring, third-party/native OS clients remain unqualified. Coordinated
+CLI import, other operation contracts, stdio MCP and packaging remain actionable.
+Do not repeat unchanged cgroup qualification.
 
 ## Work 1: complete settings export/import
 
