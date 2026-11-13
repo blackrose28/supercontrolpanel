@@ -7,7 +7,7 @@ mod references;
 mod transaction;
 
 use crate::services::config_service::*;
-use scp_core::settings_backup::ExternalFile;
+use scp_core::settings_backup::{ExternalFile, FILES};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
@@ -15,7 +15,6 @@ use std::{
     path::Path,
 };
 
-const FILES: [&str; 3] = ["config.json", "servers.json", "sync-local.json"];
 const CONFIGURED: [&str; 5] = [
     KEYRING_OPENVPN_PASSWORD,
     KEYRING_OPENVPN_OTP_SECRET,
@@ -104,26 +103,7 @@ impl Archive {
             &self.platform,
             &self.external_files,
         )?;
-        if self.files.len() != FILES.len()
-            || FILES.iter().any(|name| !self.files.contains_key(*name))
-        {
-            return Err("Backup must declare all settings sections".into());
-        }
-        for name in FILES {
-            if let Some(value) = &self.files[name] {
-                if !value.is_object() {
-                    return Err("Invalid settings section".into());
-                }
-                if name == "config.json" {
-                    serde_json::from_value::<crate::models::AppConfig>(value.clone())
-                        .map_err(|_| "Invalid app settings")?;
-                }
-                if name == "sync-local.json" {
-                    serde_json::from_value::<SyncSettings>(value.clone())
-                        .map_err(|_| "Invalid local settings")?;
-                }
-            }
-        }
+        scp_core::settings_backup::validate_sections(&self.files)?;
         let expected: BTreeSet<_> = known_accounts(&self.server_ids()?).into_iter().collect();
         if self.credentials.keys().cloned().collect::<BTreeSet<_>>() != expected {
             return Err(

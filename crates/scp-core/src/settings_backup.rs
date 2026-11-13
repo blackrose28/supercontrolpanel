@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A reference only: never file contents, path normalization or an existence check.
 #[derive(Serialize, Deserialize)]
@@ -68,4 +68,34 @@ pub fn server_ids(value: Option<&serde_json::Value>) -> Result<Vec<String>, Stri
         }
     }
     Ok(ids.into_iter().collect())
+}
+
+/// Desktop v1 settings declarations and validation order.
+pub const FILES: [&str; 3] = ["config.json", "servers.json", "sync-local.json"];
+
+/// Validate exact declarations, present objects and typed app/local settings.
+/// `None` declares an absent file; `Some(Value::Null)` is an invalid present section.
+/// Typed parsing only checks clones: unknown fields and omitted defaults stay intact.
+/// Call after manifest validation and before server/credential validation. Success
+/// neither validates server records/credentials nor authorizes restore or activation.
+pub fn validate_sections(files: &BTreeMap<String, Option<Value>>) -> Result<(), String> {
+    if files.len() != FILES.len() || FILES.iter().any(|name| !files.contains_key(*name)) {
+        return Err("Backup must declare all settings sections".into());
+    }
+    for name in FILES {
+        if let Some(value) = &files[name] {
+            if !value.is_object() {
+                return Err("Invalid settings section".into());
+            }
+            if name == "config.json" {
+                serde_json::from_value::<crate::config::AppConfig>(value.clone())
+                    .map_err(|_| "Invalid app settings")?;
+            }
+            if name == "sync-local.json" {
+                serde_json::from_value::<crate::local_settings::SyncSettings>(value.clone())
+                    .map_err(|_| "Invalid local settings")?;
+            }
+        }
+    }
+    Ok(())
 }

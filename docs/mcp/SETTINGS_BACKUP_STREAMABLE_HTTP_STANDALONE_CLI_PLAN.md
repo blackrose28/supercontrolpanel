@@ -2047,6 +2047,70 @@ or keyring apply/recovery. If bounded extraction reveals a prerequisite, documen
 it. HTTP shipping policy, production stdio logging, other operation contracts and
 packaging remain independently actionable; unchanged cgroup gates need no reprobe.
 
+### Pure backup settings-section validation extraction (2026-11-13)
+
+`scp-core::settings_backup::validate_sections` now owns only exact declarations,
+present-object checks and full shared `AppConfig` / `SyncSettings` deserialization.
+Desktop `Archive::validate` delegates between manifest and server-ID checks. The
+unchanged three-name `FILES` constant is shared too, so desktop snapshot/restore
+loops retain the same order. No schema, dependency, lockfile, IPC/MCP DTO, runtime,
+credential mapping, filesystem/recovery or CLI command changes.
+
+Declarations must contain exactly `config.json`, `servers.json`, `sync-local.json`.
+Every file may be absent (`None`); a present non-object, including in-memory
+`Some(null)`, is invalid. Archive wire null decodes as `None`, preserving the
+existing absent-file declaration. Checks interleave object/type validation in that
+fixed order: bad config types beat a later non-object server section, which beats
+bad local types. Only object shape is checked for servers here; full records are
+validated afterward. Metadata limits precede schema, declarations, ordered section
+checks, server parsing, credential inventory, then credential byte bounds.
+
+Typed checks operate on clones and retain unknown stored fields, legacy secrets,
+foreign paths and omitted defaults. SyncSettings still evaluates/discards its
+existing defaults, including temporary random token generation for a missing token.
+This does not normalize paths, validate runtime MCP policy, activate services or
+authorize restore. Complete/portable restore, identity reset, absent versus
+unavailable credentials, journals, runtime gates and stale previews are unchanged.
+
+TDD: the new core test fails on the missing export
+(`/tmp/scp-sections-red.log`). Six shared contract cases plus outer validation
+precedence pass against the original desktop implementation
+(`/tmp/scp-sections-before.log`); a separate wire-null characterization also passes
+before extraction (`/tmp/scp-sections-null-before.log`). After extraction all seven
+core tests pass (`/tmp/scp-sections-green.log`), including the core-only assertion
+that section validation does not parse server records. The same six contract cases
+run through desktop Archive validation; no production test-only seam is added.
+
+Validation: locked Linux all-feature workspace tests **144 pass**, seven ignored
+subprocess fixtures exercised by parents. Explicit locked desktop suite:
+**179 unit tests + 1 SDK dependency coexistence test pass**. Strict workspace
+all-feature/all-target Clippy, locked CLI release build, root formatting, targeted
+desktop module formatting and whitespace checks pass. Existing desktop warnings
+and an unrelated unformatted test line are preserved. Root workspace excludes
+desktop and the isolated SDK spike. Native Windows/macOS, live OS keyring/ACL/UI,
+MSRV and isolated spike suites are not rerun; no native release qualification.
+
+Ripwire impact/uses identify snapshot, preview and restore compilation, feeding
+export/import/preview. Static affected selection has no runner for this seam;
+explicit suites above are the evidence. Archive validate edit-check reports an
+unchanged contract and zero incompatible calls. Quality delta exits 0 with no
+gating regressions, suppressions or baseline changes; new-symbol reachability
+findings include Cargo-executed tests and the shared validator, whose qualified
+call is confirmed in source and the passing desktop suite.
+The staged static test gate exits 4: the two new Cargo test files have unknown
+runners and export/describe/import/preview boundaries lack modelled reach. Both
+explicit suites pass; this does not claim new UI coverage.
+
+Next focused increment: inspect a bounded pure credential-map validation seam
+against explicitly supplied expected desktop accounts. Characterize exact account
+inventory, `None` versus present empty credentials, inclusive 65,536 UTF-8 bytes,
+and inventory-before-size errors before extraction. Keep known-account generation,
+CLI namespace/colon-ID differences and keyring ownership explicit; do not route
+through CLI CredentialAccount or move apply/recovery. Archive/Changes remain off
+IPC/MCP and no CLI import is enabled. HTTP shipping policy, production stdio
+logging, other operation contracts and packaging remain independently actionable;
+unchanged cgroup qualification must not be repeated.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

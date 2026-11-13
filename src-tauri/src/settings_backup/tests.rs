@@ -685,3 +685,82 @@ fn backup_server_id_errors_follow_sections_and_precede_credentials() {
         Err("Backup must declare all settings sections".into())
     );
 }
+
+mod backup_section_contracts {
+    fn validate_sections(files: &BTreeMap<String, Option<Value>>) -> Result<(), String> {
+        let mut archive = super::fixture();
+        archive.files = files.clone();
+        archive.validate()
+    }
+    use super::*;
+    mod contracts {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../crates/scp-core/tests/contracts/backup_sections.rs"
+        ));
+    }
+}
+
+#[test]
+fn backup_section_errors_preserve_outer_validation_precedence() {
+    let mut archive = fixture();
+    archive.schema = 2;
+    archive.platform = "x".repeat(65);
+    archive.files.remove("config.json");
+    archive
+        .files
+        .insert("servers.json".into(), Some(json!({"servers":[{}]})));
+    archive
+        .files
+        .insert("sync-local.json".into(), Some(json!({"mcpPort":null})));
+    archive.credentials.clear();
+    assert_eq!(
+        archive.validate(),
+        Err("Backup manifest metadata exceeds size limits".into())
+    );
+    archive.platform.clear();
+    assert_eq!(
+        archive.validate(),
+        Err("Unsupported settings schema; update the application".into())
+    );
+    archive.schema = 1;
+    assert_eq!(
+        archive.validate(),
+        Err("Backup must declare all settings sections".into())
+    );
+    archive.files.insert("config.json".into(), Some(json!({})));
+    assert_eq!(archive.validate(), Err("Invalid app settings".into()));
+    archive.files.insert("config.json".into(), None);
+    assert_eq!(archive.validate(), Err("Invalid local settings".into()));
+    archive.files.insert("sync-local.json".into(), None);
+    assert_eq!(
+        archive.validate(),
+        Err("Invalid backup server record".into())
+    );
+    archive.files.insert("servers.json".into(), None);
+    assert_eq!(
+        archive.validate(),
+        Err("Backup credential inventory does not match known app accounts and server IDs".into())
+    );
+    archive.credentials = known_accounts(&[]).into_iter().map(|a| (a, None)).collect();
+    archive
+        .credentials
+        .insert("openvpn_password".into(), Some("x".repeat(65537)));
+    assert_eq!(
+        archive.validate(),
+        Err("Backup credential is too large".into())
+    );
+}
+
+#[test]
+fn backup_wire_null_is_an_absent_file_not_a_present_null_value() {
+    let mut wire = serde_json::to_value(fixture()).unwrap();
+    wire["files"]["config.json"] = Value::Null;
+    let mut archive: Archive = serde_json::from_value(wire).unwrap();
+    assert_eq!(archive.files["config.json"], None);
+    assert_eq!(archive.validate(), Ok(()));
+    archive
+        .files
+        .insert("config.json".into(), Some(Value::Null));
+    assert_eq!(archive.validate(), Err("Invalid settings section".into()));
+}

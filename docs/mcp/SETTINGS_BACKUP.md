@@ -34,14 +34,29 @@ The exporter offers complete export only. It never silently substitutes cached/m
 
 `src-tauri/src/settings_backup/` owns the feature. `Archive` and `Changes` are backend-only and are not IPC DTOs. Only redacted summaries, paths and executable configuration reach the frontend. No backup tool/resource is registered in MCP or CC. Passphrases cross the narrow Tauri commands, are not logged, and are wrapped in zeroizing buffers; input fields clear after IPC submission. Plaintext serialized payloads, derived keys, decrypted archives, staged settings and journal buffers are cleared where practical. JavaScript/IPC copies and allocator/OS copies cannot be guaranteed erased.
 
-`scp-core::settings_backup` owns `ExternalFile`, `validate_manifest` and `server_ids`.
+`scp-core::settings_backup` owns `ExternalFile`, `FILES`, `validate_manifest`,
+`validate_sections` and `server_ids`.
 The reference retains required string `kind`/`path` fields and denies unknown
 fields; it performs no path normalization, file access or bundling. Validation
 keeps the desktop prefix order: metadata byte/count bounds, then supported schema,
-then the desktop's section validation, shared server-ID parser and desktop credential
-validation. This prefix
+then shared section validation and server-ID parsing, followed by desktop
+credential validation. Manifest/section validation
 alone does not establish archive validity or authorize restore. `Archive` and
 `Changes` remain desktop-only; no IPC/MCP registration or CLI import is added.
+
+Section validation requires exactly `config.json`, `servers.json` and
+`sync-local.json`, including declarations for absent files, then visits them in
+that fixed order. `None` means absent; an in-memory `Some(null)` is a present
+non-object and fails. On the archive wire, JSON null deserializes as `None`.
+Each present section must be an object; config and local settings then deserialize
+through the full shared `AppConfig` / `SyncSettings` schemas. Checks act on clones,
+so unknown stored fields, legacy credentials, paths and omitted defaults are not
+rewritten. Existing schema defaults (including a temporary random MCP token when
+omitted) are evaluated and discarded. This is schema checking only: it neither
+validates runtime MCP policy/paths nor activates services. Server record checks
+remain a later step, ahead of credential inventory and credential size checks.
+Fixed errors do not echo input values. Shared section cases also run through the
+desktop archive validator; outer precedence and wire-null behavior are pinned there.
 
 The server parser deserializes the full shared `Server` model, including required
 fields, defaults, enum/port types and tolerated unknown fields. An absent file
