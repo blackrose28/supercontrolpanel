@@ -638,3 +638,50 @@ fn backup_external_reference_serialization_remains_nested_and_strict() {
     wire["externalFiles"][0]["contents"] = json!("must-reject");
     assert!(serde_json::from_value::<Archive>(wire).is_err());
 }
+
+mod backup_server_id_contracts {
+    fn server_ids(value: Option<&serde_json::Value>) -> Result<Vec<String>, String> {
+        let mut archive = super::fixture();
+        archive.files.remove("servers.json");
+        if let Some(value) = value {
+            archive
+                .files
+                .insert("servers.json".into(), Some(value.clone()));
+        }
+        archive.server_ids()
+    }
+    mod contracts {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../crates/scp-core/tests/contracts/backup_server_ids.rs"
+        ));
+    }
+}
+
+#[test]
+fn backup_server_id_errors_follow_sections_and_precede_credentials() {
+    let mut archive = fixture();
+    archive.files.insert("servers.json".into(), None);
+    assert_eq!(archive.server_ids(), Ok(vec![]));
+    archive
+        .files
+        .insert("servers.json".into(), Some(json!({"servers":[{"id":""}]})));
+    archive.credentials.clear();
+    assert_eq!(
+        archive.validate(),
+        Err("Invalid backup server record".into())
+    );
+    archive
+        .files
+        .insert("sync-local.json".into(), Some(json!({"mcpPort":"invalid"})));
+    assert_eq!(archive.validate(), Err("Invalid local settings".into()));
+    archive
+        .files
+        .insert("servers.json".into(), Some(serde_json::Value::Null));
+    assert_eq!(archive.validate(), Err("Invalid settings section".into()));
+    archive.files.remove("config.json");
+    assert_eq!(
+        archive.validate(),
+        Err("Backup must declare all settings sections".into())
+    );
+}

@@ -92,32 +92,9 @@ fn known_accounts(ids: &[String]) -> Vec<String> {
 
 impl Archive {
     fn server_ids(&self) -> Result<Vec<String>, String> {
-        let Some(value) = self.files.get("servers.json").and_then(Option::as_ref) else {
-            return Ok(vec![]);
-        };
-        let servers = value
-            .get("servers")
-            .and_then(Value::as_array)
-            .ok_or("Invalid backup server list")?;
-        if servers.len() > 10000 {
-            return Err("Too many servers in backup".into());
-        }
-        let mut ids = BTreeSet::new();
-        for value in servers {
-            let server: crate::server_mgmt::Server = serde_json::from_value(value.clone())
-                .map_err(|_| "Invalid backup server record")?;
-            if server.id.is_empty()
-                || server.id.len() > 256
-                || !server
-                    .id
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.:".contains(&byte))
-                || !ids.insert(server.id)
-            {
-                return Err("Invalid or duplicate backup server ID".into());
-            }
-        }
-        Ok(ids.into_iter().collect())
+        scp_core::settings_backup::server_ids(
+            self.files.get("servers.json").and_then(Option::as_ref),
+        )
     }
 
     fn validate(&self) -> Result<(), String> {

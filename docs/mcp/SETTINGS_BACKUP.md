@@ -34,13 +34,25 @@ The exporter offers complete export only. It never silently substitutes cached/m
 
 `src-tauri/src/settings_backup/` owns the feature. `Archive` and `Changes` are backend-only and are not IPC DTOs. Only redacted summaries, paths and executable configuration reach the frontend. No backup tool/resource is registered in MCP or CC. Passphrases cross the narrow Tauri commands, are not logged, and are wrapped in zeroizing buffers; input fields clear after IPC submission. Plaintext serialized payloads, derived keys, decrypted archives, staged settings and journal buffers are cleared where practical. JavaScript/IPC copies and allocator/OS copies cannot be guaranteed erased.
 
-`scp-core::settings_backup` owns only `ExternalFile` and `validate_manifest`.
+`scp-core::settings_backup` owns `ExternalFile`, `validate_manifest` and `server_ids`.
 The reference retains required string `kind`/`path` fields and denies unknown
 fields; it performs no path normalization, file access or bundling. Validation
 keeps the desktop prefix order: metadata byte/count bounds, then supported schema,
-then the desktop's unchanged section/server/credential validation. This prefix
+then the desktop's section validation, shared server-ID parser and desktop credential
+validation. This prefix
 alone does not establish archive validity or authorize restore. `Archive` and
 `Changes` remain desktop-only; no IPC/MCP registration or CLI import is added.
+
+The server parser deserializes the full shared `Server` model, including required
+fields, defaults, enum/port types and tolerated unknown fields. An absent file
+(`None`) returns no IDs; a present null value, missing/null `servers` field or
+non-array list fails. Desktop maps its absent-file declaration to `None` and still
+rejects present non-object sections before calling the parser. The 10,000-record
+limit is inclusive and precedes record parsing. Records are checked in source
+order: deserialization precedes each ID check; IDs are nonempty, at most 256 bytes,
+ASCII letters/digits plus `-_.:`, unique and returned in sorted case-sensitive
+order. Errors retain fixed messages without echoing records or IDs. Shared tests
+run against both the original desktop adapter and the extracted core parser.
 
 A later credential extraction must reconcile the desktop archive's server-ID
 alphabet (which includes `:`) with CLI `CredentialAccount::ServerSshPassword`

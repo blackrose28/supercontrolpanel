@@ -1992,6 +1992,61 @@ desktop and leave credential mapping, filesystem/keyring apply/recovery and CLI
 command enablement for separately qualified increments. HTTP shipping policy,
 production stdio logging, other operation contracts and packaging remain actionable.
 
+### Pure backup server-ID parser extraction (2026-11-13)
+
+`scp-core::settings_backup::server_ids` now owns only parsing/validation of an
+optional desktop backup servers section. Desktop `Archive::server_ids` adapts its
+file map and delegates. The full `Server` schema was already shared/re-exported;
+no new schema, dependency or lockfile change is needed. No archive, restore,
+credential mapping, filesystem, runtime, IPC/MCP or CLI command moves.
+
+The parser preserves absent-file versus invalid present-list behavior, full Server
+deserialization (required fields/defaults/enums/ports/services/unknown fields),
+10,000 inclusive records, nonempty 256-byte ASCII IDs including `:`, sorted
+case-sensitive uniqueness and exact fixed errors. Count errors precede record
+parsing; each record deserializes before its ID check, in original array order.
+Desktop still validates metadata/schema and all sections before server IDs, then
+credential inventory and value bounds. A parser success never authorizes restore.
+CLI account validation still excludes colon and retains separate profile namespaces
+and no telemetry-key account. Ownership/account reconciliation remains separate.
+
+TDD: six shared contract tests first fail on the missing core export
+(`/tmp/scp-server-ids-red.log`). The identical six cases plus desktop section/error
+precedence characterization pass against the original desktop implementation
+(`/tmp/scp-server-ids-before.log`), then core passes after extraction
+(`/tmp/scp-server-ids-green.log`). Shared source is included by the desktop test
+adapter so both hosts execute the same cases. No production test seam is added.
+
+Validation: locked Linux root workspace all-feature tests **137 pass**, seven
+ignored subprocess fixtures exercised by parent tests. Explicit locked desktop
+suite: **171 unit tests + 1 SDK dependency coexistence test pass**. Strict workspace
+all-feature/all-target Clippy, locked standalone release build, root formatting,
+targeted desktop module formatting and whitespace checks pass. Existing desktop
+warnings/unrelated test formatting remain. Root workspace excludes desktop and the
+isolated SDK spike. Native Windows/macOS, real keyring/ACLs, UI, MSRV and isolated
+spike suites are not rerun for this pure extraction; no native release claim.
+
+Ripwire impact/uses show snapshot, validation, preview description and restore
+credential selection feeding export/import/preview. Affected selection does not
+model the Cargo tests; explicit suites above provide evidence. Desktop server_ids
+edit-check reports unchanged contract and no incompatible calls. Quality delta
+exits 0: ten nongating test/module dead-code rows and one minor self-churn row;
+no gating regressions, suppressions or baseline changes.
+The staged static test gate exits 4: two Cargo-executed test files have unknown
+runners and thirteen desktop/test paths lack modelled reach, including dispatch,
+restore and telemetry tests. The explicit desktop suite passes; this is not a
+claim of new UI/native coverage.
+
+Next focused increment: extract the pure settings-section validation seam from
+`Archive::validate` using the existing shared AppConfig/SyncSettings schemas.
+Characterize exact three-file declarations, absent/null distinctions, fixed file
+order, typed settings validation and metadata/section/server/credential error
+precedence before moving code. Keep archive and changes off IPC/MCP and preserve
+unknown stored fields; do not introduce CLI import, credential mapping, filesystem
+or keyring apply/recovery. If bounded extraction reveals a prerequisite, document
+it. HTTP shipping policy, production stdio logging, other operation contracts and
+packaging remain independently actionable; unchanged cgroup gates need no reprobe.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.
