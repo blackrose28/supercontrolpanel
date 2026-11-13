@@ -70,6 +70,7 @@ impl ProfileRuntime {
         rows: u16,
         command: CommandBuilder,
     ) -> Result<RuntimePty, String> {
+        self.owner.ensure_runtime_operations()?;
         let sequence = self.next_id;
         self.next_id = sequence
             .checked_add(1)
@@ -95,6 +96,7 @@ impl ProfileRuntime {
         command: CommandBuilder,
         output: &mut dyn Write,
     ) -> Result<PtyExitPayload, String> {
+        self.owner.ensure_runtime_operations()?;
         let mut launched = self.spawn(system, cols, rows, command)?;
         let cleanup = ForegroundCleanup {
             runtime: self,
@@ -120,6 +122,7 @@ impl ProfileRuntime {
         output: &mut (dyn Write + Send),
         cancelled: &AtomicBool,
     ) -> Result<ForegroundOutcome, String> {
+        self.owner.ensure_runtime_operations()?;
         if cancelled.load(Ordering::Acquire) {
             return Ok(ForegroundOutcome::Cancelled);
         }
@@ -128,6 +131,7 @@ impl ProfileRuntime {
     }
 
     pub fn write(&self, id: &str, data: &str) -> Result<(), String> {
+        self.owner.ensure_runtime_operations()?;
         self.sessions.write(id, data)
     }
 
@@ -273,4 +277,22 @@ fn join_foreground_output(
         return Err(primary);
     }
     closed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recovery_denial_precedes_id_exhaustion_without_reserving_an_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut runtime = ProfileRuntime::acquire(temp.path()).unwrap();
+        let system = portable_pty::native_pty_system();
+        for sequence in [1, u64::MAX] {
+            runtime.next_id = sequence;
+            std::fs::write(temp.path().join("scp-cli-restore-journal.enc"), b"evidence").unwrap();
+            assert_eq!(runtime.spawn(system.as_ref(), 80, 24, CommandBuilder::new("unused")).err().unwrap(), "CLI profile recovery evidence is present or cannot be inspected; ordinary runtime operations are unavailable");
+            assert_eq!(runtime.next_id, sequence);
+        }
+    }
 }

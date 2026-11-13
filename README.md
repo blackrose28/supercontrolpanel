@@ -187,10 +187,15 @@ absence; any object or other inspection error returns exit 1, no stdout, and
 defaults and settings parse/I/O errors. Clean missing directories remain absent,
 and clean reads still work while another ordinary CLI process owns the profile.
 The stat-only check is not a coordinated snapshot or protection against filesystem races.
-An already acquired runtime is not revoked when evidence appears later. The
-[maintenance lifetime audit](docs/mcp/CLI_MAINTENANCE_LIFETIMES.md) specifies the
-planned entry checks and cleanup exceptions; no maintenance or recovery authority
-is enabled.
+An acquired runtime rechecks these names before spawn, input and both foreground
+entries, including pre-cancelled calls. Observed evidence or inspection failure
+permanently denies ordinary operations for that owner, even after artifact removal:
+`CLI profile recovery evidence is present or cannot be inspected; ordinary runtime operations are unavailable`.
+Namespace/ID inspection and close/poll/drop/worker join remain available. This is
+entry observation only: no active monitoring, interruption of blocked native work,
+or revocation of issued readers or cloned secrets. Credential fencing and serialized
+maintenance remain pending; see the [lifetime audit](docs/mcp/CLI_MAINTENANCE_LIFETIMES.md).
+A late launch denial may leave Caddy's newly created empty output file.
 
 The core now provides a profile-bound credential store and a cache keyed by namespace
 and account. Its optional `os-keyring` feature uses the same persistent native stores as
@@ -619,7 +624,7 @@ planning, encryption, recovery and credential access remain desktop-owned. `scpc
 
 The [CLI import admission contract](docs/mcp/CLI_IMPORT_ADMISSION.md) defines the
 proposed target-namespace mapping and recovery gates. A denial-only acquisition
-fence and stat-only ordinary-read checks now block recovery artifacts;
+fence, runtime entry checks and stat-only ordinary-read checks now block recovery artifacts;
 desktop recovery journals cannot be used as
 CLI recovery files. This does not enable coordinated import or crash-safe operation recovery.
 

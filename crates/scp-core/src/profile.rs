@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
     io::Write,
-    path::Path,
+    path::{Path, PathBuf},
+    sync::atomic::{AtomicBool, Ordering},
 };
 use uuid::Uuid;
 
@@ -23,6 +24,8 @@ struct ProfileIdentity {
 pub struct ProfileOwner {
     _lock: OwnerLock,
     identity: ProfileIdentity,
+    config_dir: PathBuf,
+    runtime_revoked: AtomicBool,
 }
 
 // Explicit unlock prevents a descriptor inherited by concurrent fork/exec from
@@ -77,15 +80,39 @@ impl ProfileOwner {
             return Err("CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable".into());
         }
         let identity = load_or_create_identity(config_dir)?;
+        // Resolve relative selection only after existing acquisition errors have won.
+        // Do not canonicalize aliases or follow journal links.
+        let config_dir = std::path::absolute(config_dir)
+            .map_err(|e| format!("resolve CLI profile directory: {e}"))?;
         Ok(Self {
             _lock: lock,
             identity,
+            config_dir,
+            runtime_revoked: AtomicBool::new(false),
         })
     }
 
     /// Keyring service/cache namespace for this profile; never use desktop's fixed service.
     pub fn credential_namespace(&self) -> &str {
         &self.identity.credential_namespace
+    }
+
+    /// Entry observation only: already issued readers and native work are not revoked.
+    pub(crate) fn ensure_runtime_operations(&self) -> Result<(), String> {
+        self.ensure_runtime_with_inspector(|path| fs::symlink_metadata(path))
+    }
+
+    fn ensure_runtime_with_inspector(
+        &self,
+        inspect: impl Fn(&Path) -> std::io::Result<fs::Metadata>,
+    ) -> Result<(), String> {
+        if !self.runtime_revoked.load(Ordering::Acquire)
+            && recovery_evidence_absent(&self.config_dir, inspect)
+        {
+            return Ok(());
+        }
+        self.runtime_revoked.store(true, Ordering::Release);
+        Err("CLI profile recovery evidence is present or cannot be inspected; ordinary runtime operations are unavailable".into())
     }
 }
 
@@ -210,3 +237,6 @@ mod tests {
 
 #[cfg(test)]
 mod read_tests;
+
+#[cfg(test)]
+mod runtime_tests;

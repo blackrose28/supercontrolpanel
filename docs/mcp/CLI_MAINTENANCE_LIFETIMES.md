@@ -1,11 +1,13 @@
 # CLI maintenance and revocation lifetime audit
 
-Status: design only, 2026-11-13, source baseline `92a10b2`. No new authority,
-command, recovery format, keyring probe or bypass is implemented by this audit.
+Status: audit baseline `92a10b2`, updated 2026-11-13 with runtime entry denial
+implemented. No new public authority, command, recovery format, keyring probe or
+bypass is introduced.
 The [admission contract](CLI_IMPORT_ADMISSION.md) remains controlling for archive
 validation, target binding and account mapping. Acquisition and stat-only read
-fences are implemented; everything described here as required/proposed is future
-work. “Revocation” below means refusing subsequent ordinary operations after
+fences and the runtime entry slice below are implemented; credential admission,
+active supervision and publisher exclusion remain future work. “Revocation” below
+means refusing subsequent ordinary operations after
 observing recovery evidence, not erasing values already returned or interrupting
 native calls already in flight.
 
@@ -22,12 +24,12 @@ process-global/thread-local reentrancy mechanism would not coordinate CLI proces
 
 | Entry / owner | Actual lifetime and effects today | Requirement after evidence appears following acquisition |
 | --- | --- | --- |
-| [`ProfileOwner::acquire`](../../crates/scp-core/src/profile.rs), CLI [`initialize_profile`](../../crates/scp-cli/src/main.rs) | Private owner fields, no Clone/alternate constructor; directory → persistent lock file → nonblocking exclusive lock → two metadata checks → load/create identity. Init holds owner through stdout write. Owner stores identity and lock, **no directory or revocation state** | Preserve acquisition precedence. A future ordinary operation must recheck evidence through its retained owner, then latch denial; no replacement identity or unlock/reacquire workaround |
+| [`ProfileOwner::acquire`](../../crates/scp-core/src/profile.rs), CLI [`initialize_profile`](../../crates/scp-cli/src/main.rs) | Private owner fields, no Clone/alternate constructor; directory → persistent lock file → nonblocking exclusive lock → two metadata checks → load/create identity. Init holds owner through stdout write. Owner now stores identity, lock, acquisition-time absolute directory and a private atomic monotonic runtime latch | Preserve acquisition precedence. Runtime entries now recheck evidence through the retained owner and latch denial; future credential entries must also enforce denial; no replacement identity or unlock/reacquire workaround |
 | `ProfileOwner::credential_namespace`, [`ProfileRuntime::credential_namespace`](../../crates/scp-core/src/host.rs) | Return borrowed namespace from memory, infallibly, without I/O; callers can copy the string | Remain identity inspection, never a maintenance permit. Cannot retract a copied namespace; trusted hosts must not turn this string into a recovery bypass |
 | `ProfileRuntime::acquire` | Private `SessionStore`, nonce/counter, then owner in declaration/drop order. Production caller is Linux [`caddy_host::run`](../../crates/scp-cli/src/caddy_host.rs) | All sessions/workers must finish cleanup before owner release; no new runtime from revoked owner |
 | `ProfileRuntime::spawn` | Reserves fresh ID before native PTY setup; returns `RuntimePty` | Deny before ID reservation, PTY setup, reader/writer creation or child launch; evidence/inspection failure must beat launch errors |
-| `ProfileRuntime::write` | Registry lookup then writer write/flush; no current recovery check | Deny before lookup and any input, even for unknown ID or zero-length input; do not send a “cleanup command” through ordinary PTY input |
-| `run_foreground`, `run_foreground_cancellable` | Both launch via spawn; cancellable pre-check currently returns Cancelled before spawn. Scoped output worker joins before return. Internal exit loop calls `monitor.poll` directly | Recheck at entry, including pre-cancelled call; preserve the cleanup routes below. Entry fencing alone cannot detect evidence during blocked I/O; active observation/cancellation is separately gated |
+| `ProfileRuntime::write` | Owner entry check before registry lookup then writer write/flush | Deny before lookup and any input, even for unknown ID or zero-length input; do not send a “cleanup command” through ordinary PTY input |
+| `run_foreground`, `run_foreground_cancellable` | Both check owner at entry and launch via fenced spawn; cancellable checks before pre-cancel. Scoped output worker joins before return. Internal exit loop calls `monitor.poll` directly | Recheck at entry, including pre-cancelled call; preserve the cleanup routes below. Entry fencing alone cannot detect evidence during blocked I/O; active observation/cancellation is separately gated |
 | `ProfileRuntime::close`, `poll`, cleanup guard, runtime drop | Close removes session, kills/waits direct child; poll observes/retires original launch; drop releases sessions before owner | Remain permitted under denial. Do not require ordinary admission for kill/wait/poll/drop or worker join. Preserve payloads, idempotent close and launch-bound polling |
 | `RuntimePty { pub reader, private id/monitor }` | Reader can escape runtime lifetime; weak monitor cannot retain child. Host can read output without calling runtime. No strong session handle escapes `ProfileRuntime` | Already issued raw readers cannot be revoked by owner state. Allow teardown drainage/discard; no new reader capability. Active-output secrecy/stop guarantees require a separately designed host adapter |
 | [`ProfileSecrets::new`, `read`](../../crates/scp-core/src/credentials.rs) | Borrows owner plus mutable backend/cache. `key` uses namespace and typed account. Cache hit clones secret/absence before any backend call | Constructor alone cannot protect later calls. Future read must check owner before account validation/cache lookup/backend; cached Some/empty/None must all deny. Already returned/cloned `SecretValue` is outside revocation |
@@ -65,7 +67,7 @@ The ordinary core/CLI profile reads are exhausted by these paths:
   tests read fixture settings/output/PIDs. These are not hidden CLI profile loaders.
   Desktop file/secret loaders and SDK synthetic fixtures are separate authorities.
 
-Core owns profile evidence classification, any future per-owner latch and admission
+Core owns profile evidence classification, the per-owner runtime latch and admission
 at public core operations, cache semantics and private session cleanup. Host owns
 signal handling, raw output, active-loop observation/cancellation, native worker
 lifetime, user interaction, reporting and eventual profile release. Checking only
@@ -75,8 +77,8 @@ would change desktop behavior without establishing profile identity.
 
 ## Denial, inspection and cleanup precedence
 
-Required future ordinary state is monotonic for one acquired owner: usable →
-revoked. Inspect the exact desktop filename first, then reserved CLI filename;
+Implemented runtime state is monotonic for one acquired owner: usable →
+revoked; credentials do not yet consult it. Inspect the exact desktop filename first, then reserved CLI filename;
 only NotFound is absence. Any object or other error revokes. Once revoked, removing
 an artifact or making a later stat succeed must not resume that owner. No reset,
 public injected inspector, public boolean bypass or ordinary recovery constructor.
@@ -86,7 +88,7 @@ not durable crash retention and cannot prevent manual artifact deletion.
 
 Keep existing acquisition errors (directory/open/lock, competing owner, recovery,
 then identity) and read errors (recovery before settings absence/parse/I/O).
-For future runtime entry denial, use fixed text:
+Runtime entry denial uses fixed text:
 `CLI profile recovery evidence is present or cannot be inspected; ordinary runtime operations are unavailable`.
 It precedes session lookup, counter exhaustion, native setup and pre-cancellation.
 A clean pre-cancelled call still returns Cancelled without launch. Namespace/ID
@@ -161,10 +163,10 @@ lock filename/protocol or a reason to enable mutation now.
 
 ## Smallest enforceable follow-up and acceptance plan
 
-Next increment: **runtime entry denial after acquisition only**. Retain the selected
-profile directory and a private monotonic revocation latch with the owner; use a
-crate-private check for runtime spawn/write and both foreground entry points.
-Reuse the exact metadata predicate; production always uses symlink_metadata.
+Completed increment: **runtime entry denial after acquisition only**. The owner
+retains the selected profile directory and a private monotonic revocation latch;
+a crate-private check fences runtime spawn/write and both foreground entry points.
+It reuses the exact metadata predicate; production always uses symlink_metadata.
 Retained path selection must refer to the acquisition-time directory even if a
 caller later changes working directory; qualify relative paths without weakening
 existing acquisition error precedence. Symlink/alias hostility remains out of scope.
@@ -174,14 +176,14 @@ recovery authority, new lock protocol, credential error API or import command.
 It does not promise active-operation monitoring; credential/read serialization
 and authenticated recovery remain separate gates. No live keyring or cgroup probe.
 
-Tests must demonstrate behavioral RED before implementation:
+The runtime acceptance rows below now pass following behavioral RED; later rows remain gates:
 
 | Scope | Concrete acceptance cases / evidence |
 | --- | --- |
-| Next: late artifact | Acquire clean runtime, launch a fake existing session, publish each exact artifact, then call spawn/write and both foreground entries. Fixed denial; fake setup/input counters unchanged; settings/identity/artifacts byte-identical. Both true/false cancellation inputs deny; clean precancel remains Cancelled |
-| Next: metadata and latch | Bytes/empty/directory/DONE and Unix existing/dangling links; injected PermissionDenied/Other at each inspection position via private seam with exact order. After first denial remove evidence and prove same owner still denies; independent clean profile unaffected; no keyring access |
-| Next: cleanup | With late evidence and after latch, close still returns original payload/None, poll still Running/Exited/Detached as appropriate, drop kills/waits while lock retained. Known/unknown IDs do not bypass write denial. Reader/weak monitor cannot extend owner. Existing cleanup-error/panic and blocked-worker join tests remain green |
-| Next: precedence/preservation | Recovery beats invalid session/native setup and ID exhaustion using private unit access where necessary. Preserve ordinary acquisition conflict, missing-directory reads, owned-profile reads, namespace/ID inspection, relative profile selection across a later cwd change (isolated subprocess), and non-Linux host denial. Do not assert ID values as a new external format |
+| Implemented: late artifact | Acquire clean runtime, launch a fake existing session, publish each exact artifact, then call spawn/write and both foreground entries. Fixed denial; fake setup/input counters unchanged; settings/identity/artifacts byte-identical. Both true/false cancellation inputs deny; clean precancel remains Cancelled |
+| Implemented: metadata and latch | Bytes/empty/directory/DONE and Unix existing/dangling links; injected PermissionDenied/Other at each inspection position via private seam with exact order. After first denial remove evidence and prove same owner still denies; independent clean profile unaffected; no keyring access |
+| Implemented: cleanup | With late evidence and after latch, close still returns original payload/None, poll still Running/Exited/Detached as appropriate, drop kills/waits while lock retained. Known/unknown IDs do not bypass write denial. Reader/weak monitor cannot extend owner. Existing cleanup-error/panic and blocked-worker join tests remain green |
+| Implemented: precedence/preservation | Recovery beats invalid session/native setup and ID exhaustion using private unit access where necessary. Preserve ordinary acquisition conflict, missing-directory reads, owned-profile reads, namespace/ID inspection, relative profile selection across a later cwd change (isolated subprocess), and non-Linux host denial. Do not assert ID values as a new external format |
 | Later: credential gate | Existing adapter then late evidence: cached present/empty/absent reads, fresh read, set/delete and invalid account all deny before backend. Counts unchanged; cache evicted; clear/drop allowed; latch persists after evidence removal. Existing native failure classification, namespace isolation and compile-fail owner borrow remain green |
 | Later: exclusion | Channel/barrier-controlled in-process and subprocess readers pause inside actual file read while publisher attempts exclusive access; no publication until last reader settles. Reverse case denies promptly before file access. Test acquisition failure, first lock creation, missing profile, read-only directory, alias/links and process death; no sleeps as proof of ordering |
 | Later: active lifetime | Evidence during drain, poll loop, blocked sink and native credential worker: no detach/early unlock; close and join remain possible. Assert recovery vs I/O/cleanup/cancel precedence. Test reader escape honestly; do not claim asynchronous revocation from entry tests |
@@ -193,7 +195,52 @@ Use existing [session fake/call-order tests](../../crates/scp-core/tests/session
 [credential counted backend](../../crates/scp-core/tests/credentials.rs) and
 [read preservation tests](../../crates/scp-core/tests/read_recovery.rs).
 Run impacted tests first, then locked all-feature workspace, strict Clippy, fmt,
-diff and Ripwire edit/quality checks for that code slice. No new executable tests
-are needed for this docs-only audit. Native platform, release/MSRV, live-keyring
+diff and Ripwire edit/quality checks for that code slice. Runtime tests were added
+for this implementation; the original audit was docs-only. Native platform,
+release/MSRV, live-keyring
 and [operation crash-retention](LINUX_OPERATION_SUPERVISION.md) gates remain open;
 SDK/HTTP/logging and packaging can advance independently.
+
+## Runtime entry implementation evidence (2026-11-13)
+
+Behavioral RED showed late evidence allowing fake spawn/input and returning session
+lookup errors; the isolated cwd fixture also failed. Private seam RED showed
+inspection errors accepted and no ordered checks; the counter test reached native
+setup. GREEN reuses the exact two-name absence predicate and always supplies
+`fs::symlink_metadata` in production. Any object or non-NotFound error latches the
+owner's private atomic state; a latched owner skips later inspection. No reset,
+public seam, constructor, Clone or signature change exists.
+
+The retained directory uses `std::path::absolute` after directory/open/lock,
+recovery inspection and identity loading, preserving existing acquisition error
+precedence. It does not canonicalize or qualify hostile aliases/replacement.
+An isolated subprocess proves relative selection across a later cwd change.
+Both foreground entries check before dispatch (spawn also checks), with recovery
+before pre-cancel, ID reservation/exhaustion and native setup. Known/unknown IDs
+and empty input deny before lookup/write/flush. Inspection and entry acceptance
+are not serialized maintenance leases and cannot stop races with external writers.
+
+Tests cover both names, bytes/empty/directory/DONE and Unix links/dangling links,
+private PermissionDenied/Other at each position/order, removal with persistent
+denial, independent profile, byte preservation, no additional fake setup/input,
+namespace/ID inspection, allowed close/poll/drop and existing native error payloads.
+Existing cleanup failures, panics, cancellation and blocked scoped-worker joins
+remain required regression checks. An empty registry/Exited is still not native
+teardown confirmation. The owner remains held through existing cleanup/join paths.
+No active recovery observer or credential gate was added. Issued readers and secret
+clones cannot be retracted; blocked native calls cannot be interrupted. A Caddy
+entry denial after output creation may leave a new empty output file.
+
+Next focused slice: profile credential entry fencing, including a distinct fixed
+recovery error before account validation/cache/backend, namespace cache eviction
+on denial and retained borrowing. Use the Later: credential gate matrix above;
+keep raw shared desktop/keyring primitives unchanged. Read/publisher serialization,
+restricted authenticated recovery, archive mapping and active supervision remain
+gates before import or full in-process maintenance can ship.
+
+Validation: locked all-feature workspace 169 passed, eight ignored subprocess
+fixtures exercised by parents (including compile-fail ownership doc test); strict
+all-target/all-feature Clippy, fmt, diff and Markdown target/fragment checks pass.
+Ripwire unchanged-signature edit checks pass; quality delta has zero gating
+findings/suppressions. No desktop/UI/SDK/native Windows/macOS/live-keyring/MSRV/
+release rerun or cgroup probe is claimed.

@@ -9,6 +9,9 @@ use std::{
     sync::{Arc, Barrier, Mutex},
 };
 
+#[path = "sessions/recovery.rs"]
+mod recovery;
+
 #[derive(Default, Debug)]
 struct Trace {
     calls: Vec<&'static str>,

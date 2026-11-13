@@ -1,13 +1,13 @@
 # Coordinated CLI import: admission and ownership contract
 
-Status: admission design reviewed 2026-11-13; denial-only acquisition and ordinary-read fences implemented.
+Status: admission design reviewed 2026-11-13; denial-only acquisition, runtime entry and ordinary-read fences implemented.
 No CLI import, recovery implementation or secret-bearing model ships. Except for
-the acquisition and ordinary-read fences described below, the matrices specify required future behavior.
+the acquisition, runtime entry and ordinary-read fences described below, the matrices specify required future behavior.
 Passing the shared desktop archive validators does not admit CLI import.
 The [in-process lifetime audit](CLI_MAINTENANCE_LIFETIMES.md) traces existing
 capabilities, denial/cleanup precedence and future cross-process read exclusion;
-its selected next slice is runtime entry denial after acquisition, not maintenance
-or recovery authority.
+runtime entry denial after acquisition is now implemented, with credential fencing
+and maintenance/recovery authority still pending.
 
 ## Ownership acquisition audit
 
@@ -21,7 +21,7 @@ impact and affected results. There are two production callers of
 | `scpctl profile init` | `initialize_profile` → `ProfileOwner::acquire` | Denies recovery evidence before identity loading/creation |
 | Linux `scpctl caddy run` | host `run` → `ProfileRuntime::acquire` → `ProfileOwner::acquire` | Denies recovery evidence before output creation or launch |
 | Library runtime construction | Public `ProfileRuntime::acquire` delegates to the same owner constructor | Delegates to the fenced owner constructor |
-| Library credential adapter | `ProfileSecrets::new` borrows an owner; read/refresh/write use that namespace | Borrow enforces lock lifetime only; no pending-recovery state or maintenance exclusion |
+| Library credential adapter | `ProfileSecrets::new` borrows an owner; read/refresh/write use that namespace | Borrow enforces lock lifetime only; credential methods do not yet consult owner runtime denial or provide maintenance exclusion |
 | `server list`, `config show` | Direct core readers with metadata-only recovery check, no owner acquisition | Denies observed recovery evidence; no coordinated snapshot or maintenance lease |
 | Unit/integration fixtures | Core profile, credentials, sessions, foreground; CLI and Caddy lifecycle tests | Exercise direct/public constructors, conflicts and owner release; now include recovery-artifact admission tests |
 
@@ -258,7 +258,27 @@ command/event, SDK or native-supervision change. Native Windows/macOS, MSRV,
 desktop/UI, SDK spike, live keyring and release qualification were not rerun.
 
 This is an observation-time exclusion, not serialized maintenance: a journal may
-appear after the check, and no existing owner is revoked. Cooperating publishers,
+appear after the check; this read fence alone does not revoke an existing owner.
+Runtime entry observations now latch denial as described below. Cooperating publishers,
 in-process maintenance/revocation, restricted recovery authority, source account
 mapping and authenticated CLI journal design remain prerequisites for import.
 No recovery-status command, recovery/bypass/import or crash-retention authority ships.
+
+## Third prerequisite: runtime ordinary-entry denial (implemented)
+
+`ProfileOwner` retains the selected acquisition-time absolute directory and private
+monotonic runtime denial state. `ProfileRuntime::spawn`, `write`, `run_foreground`
+and `run_foreground_cancellable` check through that owner, using the same exact
+metadata predicate and production symlink_metadata. Desktop then reserved CLI
+name; only NotFound permits entry. Any object or other error permanently denies
+that owner, even if evidence disappears. Runtime denial uses the fixed error
+`CLI profile recovery evidence is present or cannot be inspected; ordinary runtime operations are unavailable`.
+It precedes ID reservation/exhaustion, native setup, session lookup and pre-cancel;
+clean pre-cancel still returns Cancelled. Namespace/ID inspection, close/poll/drop
+and scoped-worker joins remain allowed with existing payloads and error ordering.
+
+See the [implementation evidence and acceptance matrix](CLI_MAINTENANCE_LIFETIMES.md#runtime-entry-implementation-evidence-2026-11-13).
+This observes entry only; no active monitoring, escaped-reader/secret revocation,
+blocked native interruption, credential admission, publisher exclusion or recovery
+authority is added. Caddy can create an empty output file before a late denial.
+No shared desktop/CC/admin/MCP primitive or command/event contract changes.

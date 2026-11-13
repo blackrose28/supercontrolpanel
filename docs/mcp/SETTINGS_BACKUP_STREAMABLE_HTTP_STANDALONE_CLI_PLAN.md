@@ -2334,6 +2334,59 @@ checks, diff review and Ripwire quality delta; no Rust code/schema/dependency ch
 so no Rust/desktop/UI/SDK/native/keyring/MSRV/release reruns are claimed. No cgroup
 reprobe. Independent HTTP shipping/logging/operation/packaging work remains available.
 
+### CLI runtime ordinary-entry denial (2026-11-13)
+
+Completed the focused runtime slice from the [lifetime audit](CLI_MAINTENANCE_LIFETIMES.md#runtime-entry-implementation-evidence-2026-11-13).
+`ProfileOwner` now retains an acquisition-time absolute directory and private atomic
+monotonic runtime latch. A crate-private check reuses the exact desktop-then-CLI
+metadata predicate, with production always symlink_metadata and only NotFound
+permitting entry. Objects and all other errors latch fixed denial; removing
+artifacts never re-enables that owner. Absolute-path selection happens after
+existing acquisition checks/identity, preserving error precedence.
+
+`ProfileRuntime::spawn`, `write` and both foreground entries check before ID
+reservation, native setup, session lookup/input and pre-cancel. Fixed runtime error:
+`CLI profile recovery evidence is present or cannot be inspected; ordinary runtime operations are unavailable`.
+Clean pre-cancel remains Cancelled. Namespace/ID inspection and close/poll/drop/join
+stay available with original payloads and error ordering. No strong session handle,
+new public authority/constructor/bypass or desktop/CC/admin/MCP contract changes.
+
+Behavioral RED demonstrated fake launch/input permitted under late evidence,
+session errors winning, cwd selection failure and private inspector acceptance;
+the counter test reached native launch setup. GREEN covers both names, bytes,
+empty/directory/DONE, Unix links/dangling links, private PermissionDenied/Other at
+each ordered position, no extra setup/input, removal latch, independent clean
+profile, byte preservation, ID exhaustion and isolated relative-cwd selection.
+Cleanup tests preserve Running/Exited/Detached, close idempotence, native wait/poll
+errors and lock retention through drop. Existing panic/error/cancellation and
+blocked scoped-worker join tests remain green.
+
+Validation: locked all-feature core/CLI workspace **169 passed, eight ignored
+subprocess fixtures exercised by parents**, including compile-fail ownership doc
+test; strict all-target/all-feature Clippy, fmt, whitespace and local Markdown
+checks pass. Ripwire edit checks report unchanged signatures; final quality delta
+has zero gating findings and zero suppressions. Test refactoring removed initial
+duplication/complexity/verbosity findings. No desktop/UI/SDK/native Windows/macOS,
+live-keyring/MSRV/release reruns or cgroup reprobe claimed. No dependency/schema
+change.
+
+Scope remains entry observation only: no active recovery observer, interruption
+of blocked native work, revocation of issued readers/cloned secrets, credential
+gate, publisher lease or restricted recovery authority. Caddy may have already
+created an empty output file before late entry denial. No new crash-retention or
+confirmed-native-teardown guarantee is established.
+
+Next focused increment: credential adapter entry fencing under strict TDD. Add a
+distinct fixed recovery failure before account validation/cache/native access,
+evict namespace cache entries on denial, preserve owner borrowing and shared raw
+backend/desktop primitives. Exercise the audit's Later: credential gate matrix.
+Do not implement keyring recovery, import/mutation commands, journal format,
+maintenance locks or active monitoring in that slice. Reader/publisher exclusion,
+restricted authenticated target-bound recovery and archive/account mapping remain
+gates; independent HTTP shipping policy, production stdio logging, operation and
+packaging work remains actionable. Continue in a NEW same-devbox thread after
+that increment, with notifications enabled and no parent coordination/wait.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.
