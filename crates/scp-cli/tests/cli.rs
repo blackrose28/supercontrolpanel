@@ -615,3 +615,106 @@ fn profile_init_denies_recovery_evidence_without_stdout_or_identity_creation() {
         }
     }
 }
+
+#[test]
+fn read_commands_deny_recovery_objects_with_exit_one_and_no_stdout() {
+    for name in [
+        "settings-restore-journal.enc",
+        "scp-cli-restore-journal.enc",
+    ] {
+        for artifact in ["private bytes", "", "directory", "SCP-RESTORE-DONE-1"] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join(name);
+            if artifact == "directory" {
+                fs::create_dir(&path).unwrap();
+            } else {
+                fs::write(&path, artifact).unwrap();
+            }
+            assert_read_recovery_denial(temp.path());
+            assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+            if artifact != "directory" {
+                assert_eq!(fs::read(&path).unwrap(), artifact.as_bytes());
+            }
+        }
+        #[cfg(unix)]
+        {
+            assert_cli_link_denial(name, false);
+            assert_cli_link_denial(name, true);
+        }
+    }
+    #[cfg(unix)]
+    {
+        let temp = tempfile::tempdir().unwrap();
+        // ENOTDIR is reliable even as root: neither journal child can be inspected.
+        let profile = temp.path().join("profile-is-a-file");
+        fs::write(&profile, b"private profile bytes").unwrap();
+        assert_read_recovery_denial(&profile);
+        assert_eq!(fs::read(profile).unwrap(), b"private profile bytes");
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 1);
+    }
+}
+
+fn assert_read_recovery_denial(root: &std::path::Path) {
+    for command in [["config", "show"], ["server", "list"]] {
+        for json in [false, true] {
+            let mut args = vec![
+                "--config-dir",
+                root.to_str().unwrap(),
+                command[0],
+                command[1],
+            ];
+            if json {
+                args.push("--json");
+            }
+            let output = cli(&args);
+            assert_eq!(output.status.code(), Some(1), "{output:?}");
+            assert!(output.stdout.is_empty());
+            assert_eq!(String::from_utf8(output.stderr).unwrap(), "scpctl: CLI profile recovery evidence is present or cannot be inspected; ordinary reads are unavailable\n");
+        }
+    }
+    assert!(!root.join("profile.json").exists());
+    assert!(!root.join("runtime-owner.lock").exists());
+}
+
+#[cfg(unix)]
+fn assert_cli_link_denial(name: &str, exists: bool) {
+    let profile = tempfile::tempdir().unwrap();
+    let external = tempfile::tempdir().unwrap();
+    let source = external.path().join("retained-target");
+    fs::write(&source, b"private bytes").unwrap();
+    let journal_path = profile.path().join(name);
+    std::os::unix::fs::symlink(&source, &journal_path).unwrap();
+    if !exists {
+        fs::remove_file(&source).unwrap();
+    }
+    assert_read_recovery_denial(profile.path());
+    assert!(fs::symlink_metadata(&journal_path)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read_link(journal_path).unwrap(), source);
+    assert_eq!(fs::read_dir(profile.path()).unwrap().count(), 1);
+    assert_eq!(
+        fs::read(&source).ok(),
+        exists.then(|| b"private bytes".to_vec())
+    );
+}
+
+#[test]
+fn server_list_denies_recovery_before_missing_inventory_default() {
+    let temp = tempfile::tempdir().unwrap();
+    fs::write(
+        temp.path().join("scp-cli-restore-journal.enc"),
+        "private bytes",
+    )
+    .unwrap();
+    let output = cli(&[
+        "--config-dir",
+        temp.path().to_str().unwrap(),
+        "server",
+        "list",
+        "--json",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+}

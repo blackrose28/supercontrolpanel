@@ -73,16 +73,8 @@ impl ProfileOwner {
             Err(e) => return Err(format!("lock CLI profile: {e}")),
         }
         let lock = OwnerLock(lock);
-        // Foreign desktop evidence and the reserved CLI journal both block ordinary
-        // ownership. Never follow links, read contents, or interpret tombstones.
-        for name in [
-            "settings-restore-journal.enc",
-            "scp-cli-restore-journal.enc",
-        ] {
-            match inspect(&config_dir.join(name)) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {},
-                _ => return Err("CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable".into()),
-            }
+        if !recovery_evidence_absent(config_dir, inspect) {
+            return Err("CLI profile recovery evidence is present or cannot be inspected; ordinary ownership is unavailable".into());
         }
         let identity = load_or_create_identity(config_dir)?;
         Ok(Self {
@@ -138,6 +130,32 @@ fn load_or_create_identity(config_dir: &Path) -> Result<ProfileIdentity, String>
     }
 }
 
+/// Ordinary CLI file queries never acquire ownership or initialize a profile.
+pub(crate) fn ensure_readable(config_dir: &Path) -> Result<(), String> {
+    ensure_readable_with_inspector(config_dir, |path| fs::symlink_metadata(path))
+}
+
+fn ensure_readable_with_inspector(
+    config_dir: &Path,
+    inspect: impl Fn(&Path) -> std::io::Result<fs::Metadata>,
+) -> Result<(), String> {
+    if recovery_evidence_absent(config_dir, inspect) {
+        Ok(())
+    } else {
+        Err("CLI profile recovery evidence is present or cannot be inspected; ordinary reads are unavailable".into())
+    }
+}
+
+fn recovery_evidence_absent(
+    config_dir: &Path,
+    inspect: impl Fn(&Path) -> std::io::Result<fs::Metadata>,
+) -> bool {
+    // Never follow links, read contents, or interpret desktop tombstones.
+    ["settings-restore-journal.enc", "scp-cli-restore-journal.enc"]
+        .iter()
+        .all(|name| matches!(inspect(&config_dir.join(name)), Err(error) if error.kind() == std::io::ErrorKind::NotFound))
+}
+
 #[cfg(test)]
 mod tests {
     use super::ProfileOwner;
@@ -189,3 +207,6 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod read_tests;

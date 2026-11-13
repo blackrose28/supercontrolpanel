@@ -117,6 +117,11 @@ const JOURNALS: [&str; 2] = [
 ];
 
 fn assert_recovery_denied(root: &std::path::Path) {
+    // Exercise the ordinary core file boundaries before owner acquisition creates a lock.
+    let before_lock = fs::read(root.join("runtime-owner.lock")).ok();
+    assert_eq!(scp_core::config::read_shared_config(root).err().unwrap(), "CLI profile recovery evidence is present or cannot be inspected; ordinary reads are unavailable");
+    assert_eq!(scp_core::servers::read_servers(root).unwrap_err(), "CLI profile recovery evidence is present or cannot be inspected; ordinary reads are unavailable");
+    assert_eq!(fs::read(root.join("runtime-owner.lock")).ok(), before_lock);
     assert_eq!(
         scp_core::host::ProfileRuntime::acquire(root)
             .err()

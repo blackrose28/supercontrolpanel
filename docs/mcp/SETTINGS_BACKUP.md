@@ -90,8 +90,8 @@ contract. Archive/Changes, apply/recovery and all credential access stay desktop
 The [CLI import admission review](CLI_IMPORT_ADMISSION.md) specifies target namespace
 retention, account mapping/refusal rules and pending-recovery exclusion. Desktop
 undo journals and completion tombstones do not identify a CLI target and must not
-be replayed as CLI recovery. The first proposed prerequisite is a denial-only
-owner-acquisition fence; it is not implemented yet and does not enable import.
+be replayed as CLI recovery. Denial-only owner acquisition and stat-only ordinary
+CLI file-read fences are implemented; neither enables import or recovery.
 
 Version 1 consists of `SCPBAK01`, a little-endian 32-bit JSON-header length, the exact header bytes, and AES-256-GCM ciphertext/tag. The magic, length and header are associated data. The header declares format version, `argon2id-19`, `aes-256-gcm`, memory/iterations/parallelism, a fresh random 16-byte salt and 12-byte nonce. The encrypted payload has its own schema version, app version, platform, timestamp, file/credential inventory and external references. There is no compression or machine-bound decryption key.
 
@@ -133,4 +133,7 @@ The CLI's [acquisition fence](CLI_IMPORT_ADMISSION.md#first-prerequisite-acquisi
 refuses any desktop journal object, including a completion tombstone, without
 reading it or accessing the desktop recovery key. Desktop recovery behavior is
 unchanged. The reserved CLI journal filename defines no wire format; CLI import
-and recovery remain unavailable, and read-only CLI queries are a later gate.
+and recovery remain unavailable. Ordinary CLI config/inventory queries now deny
+observed recovery evidence before settings reads, without initialization, locking
+or keyring access; see the [read contract](CLI_IMPORT_ADMISSION.md#second-prerequisite-stat-only-ordinary-read-exclusion-implemented).
+This is not a coordinated snapshot or in-process maintenance/revocation gate.

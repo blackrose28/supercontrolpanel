@@ -178,9 +178,15 @@ Owner/runtime acquisition also checks `settings-restore-journal.enc` and the res
 Any object (including links, directories and desktop completion tombstones), or
 an inspection error, denies initialization/runtime with exit 1 and a fixed error.
 Contents are never read; identity, settings and artifacts remain unchanged. Keep
-recovery artifacts intact; CLI recovery and bypass are unavailable. Read-only
-`config show` and `server list` remain unchanged for this first acquisition fence;
-pending-recovery exclusion for those queries is a separate prerequisite.
+recovery artifacts intact; CLI recovery and bypass are unavailable.
+`config show` and `server list` inspect the same two exact names before reading
+settings, without initializing or locking the profile. Only `NotFound` means
+absence; any object or other inspection error returns exit 1, no stdout, and
+`CLI profile recovery evidence is present or cannot be inspected; ordinary reads are unavailable`
+(on stderr with the usual `scpctl: ` prefix). This check precedes missing-file
+defaults and settings parse/I/O errors. Clean missing directories remain absent,
+and clean reads still work while another ordinary CLI process owns the profile.
+The stat-only check is not a coordinated snapshot or protection against filesystem races.
 
 The core now provides a profile-bound credential store and a cache keyed by namespace
 and account. Its optional `os-keyring` feature uses the same persistent native stores as
@@ -287,7 +293,8 @@ projected object, or `null` when the file or directory is missing; human output
 is a labeled, pretty-printed projection or an explicit absence message. Missing
 files succeed without synthesizing defaults or creating directories. Defaults
 for omitted optional fields in an existing file follow the desktop schema.
-Malformed/schema-invalid or unreadable files return exit 1 with stderr diagnostics
+Recovery evidence or inspection failure is checked first as described above.
+Malformed/schema-invalid or unreadable files otherwise return exit 1 with stderr diagnostics
 and no stdout; invalid arguments return 2. Parse errors do not echo file values.
 
 This read does not initialize or lock a profile, read `sync-local.json` or the
@@ -608,7 +615,8 @@ planning, encryption, recovery and credential access remain desktop-owned. `scpc
 
 The [CLI import admission contract](docs/mcp/CLI_IMPORT_ADMISSION.md) defines the
 proposed target-namespace mapping and recovery gates. A denial-only acquisition
-fence now blocks recovery artifacts; desktop recovery journals cannot be used as
+fence and stat-only ordinary-read checks now block recovery artifacts;
+desktop recovery journals cannot be used as
 CLI recovery files. This does not enable coordinated import or crash-safe operation recovery.
 
 ### Servers page (SSH / Boundary / SCP)

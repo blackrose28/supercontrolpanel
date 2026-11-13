@@ -1,8 +1,8 @@
 # Coordinated CLI import: admission and ownership contract
 
-Status: admission design reviewed 2026-11-13; denial-only acquisition fence implemented.
+Status: admission design reviewed 2026-11-13; denial-only acquisition and ordinary-read fences implemented.
 No CLI import, recovery implementation or secret-bearing model ships. Except for
-the acquisition fence described below, the matrices specify required future behavior.
+the acquisition and ordinary-read fences described below, the matrices specify required future behavior.
 Passing the shared desktop archive validators does not admit CLI import.
 
 ## Ownership acquisition audit
@@ -18,7 +18,7 @@ impact and affected results. There are two production callers of
 | Linux `scpctl caddy run` | host `run` → `ProfileRuntime::acquire` → `ProfileOwner::acquire` | Denies recovery evidence before output creation or launch |
 | Library runtime construction | Public `ProfileRuntime::acquire` delegates to the same owner constructor | Delegates to the fenced owner constructor |
 | Library credential adapter | `ProfileSecrets::new` borrows an owner; read/refresh/write use that namespace | Borrow enforces lock lifetime only; no pending-recovery state or maintenance exclusion |
-| `server list`, `config show` | Direct file readers, no owner acquisition | Can observe files during future recovery; currently intentional read-only behavior |
+| `server list`, `config show` | Direct core readers with metadata-only recovery check, no owner acquisition | Denies observed recovery evidence; no coordinated snapshot or maintenance lease |
 | Unit/integration fixtures | Core profile, credentials, sessions, foreground; CLI and Caddy lifecycle tests | Exercise direct/public constructors, conflicts and owner release; now include recovery-artifact admission tests |
 
 `ProfileOwner` fields are private, with no alternate public constructor, Clone or
@@ -78,7 +78,7 @@ fixed classifications, never raw archive records, credentials or native errors.
 | No recovery evidence and valid identity | Eligible for the remaining validation/policy gates; absence alone does not authorize import |
 | Source archive missing/extra sections/accounts, bad metadata/server record, tampering, unsupported schema or excessive size | Reject using full desktop v1 archive contract in its existing order, before mapping |
 | Source identity/namespace, arbitrary service/account or extraction filename offered as mapping authority | Reject; only fixed section names and typed destination accounts may enter a plan |
-| Read-only inspection while known recovery is pending | Future coordinated import must reject ordinary settings/inventory reads too; a separate redacted recovery-status query may report only state/reason |
+| Read-only inspection while known recovery is pending | Ordinary settings/inventory reads now reject observed evidence; a separate redacted recovery-status query remains future work |
 | Ordinary runtime active or maintenance unavailable | Refuse import; do not silently stop it or wait while holding runtime mutexes |
 | Destination changes or owner/namespace differs since preview | Expire preview; require fresh destination reads and confirmation |
 
@@ -179,9 +179,9 @@ Strict RED/GREEN tests cover:
   inspection seam or a reliable native fixture; do not claim chmod denies root.
 
 This first fence intentionally does not enable import or recovery. A subsequent
-gate must cover stat-only denial for existing read-only file queries without
-initializing/locking profiles, in-process maintenance/revocation, and restricted
-recovery authority before mutation becomes eligible. Cooperating processes must
+gate must cover in-process maintenance/revocation and restricted recovery authority
+before mutation becomes eligible. Stat-only ordinary-read denial is implemented below.
+Cooperating processes must
 hold the same lock when publishing future journals; stat checks do not prevent a
 hostile external process racing filesystem changes. Filesystem alias/TOCTOU and
 native Windows/macOS behavior need explicit qualification, not a portable-safety
@@ -203,3 +203,58 @@ rows. Matrix refactoring removed the initial new-test complexity/nesting finding
 Native Windows/macOS, desktop, SDK spike, UI, live keyring, release and
 MSRV checks were not rerun for this acquisition-only change. No dependency, schema,
 command/event, recovery format or native supervision changes.
+
+## Second prerequisite: stat-only ordinary-read exclusion (implemented)
+
+Caller audit: `scp_core::config::read_shared_config` and
+`scp_core::servers::read_servers` are public core entry points used in production
+only by CLI `show_config` and the `server list` branch of `run`, respectively.
+Their crate-private `config_file::read_json` has exactly those two callers and no
+independent external entry point. Desktop uses its own loaders and recovery gate;
+it shares the model schemas, not these file readers. Therefore both public core
+readers enforce CLI recovery denial before invoking the unchanged JSON helper.
+No CLI-only preflight that direct library callers could bypass is used.
+
+A crate-private `profile::ensure_readable` delegates to a private inspection seam.
+The owner constructor reuses the same private absence predicate, retaining its
+lock-first ordering, error and RAII behavior. No public API, owner construction,
+keyring adapter or desktop loader changes. Production always inspects with
+`fs::symlink_metadata`; neither caller can inject a bypass. Inspect the exact
+`settings-restore-journal.enc`, then `scp-cli-restore-journal.enc`, stopping on
+first denial. `Err(NotFound)` alone permits the next inspection or file read.
+`Ok(any Metadata)` and every other error deny, regardless of contents or file type.
+There is no journal open/read/decrypt, target following, tombstone exception,
+identity inspection, profile creation, owner lock or credential access.
+
+The fixed core error is:
+`CLI profile recovery evidence is present or cannot be inspected; ordinary reads are unavailable`.
+Actual CLI commands retain the `scpctl: ` stderr prefix, exit 1 and emit no stdout
+in human and JSON modes. Recovery denial precedes settings absence, malformed
+content and settings I/O errors. Once both inspections return NotFound, existing
+single-file behavior remains: missing config → None/null, missing inventory → empty
+list, parse/I/O errors retain their current redacted diagnostics. Missing profile
+directories are not created. Clean reads may run while another ordinary CLI process
+owns the profile; persistent owner-lock and identity contents are not consulted.
+
+Strict RED tests showed both public core readers returning ordinary absence and
+both actual CLI commands exiting 0 despite evidence; injected PermissionDenied and
+Other errors initially succeeded. GREEN coverage reuses the existing owner/runtime
+artifact matrix for both readers: both filenames, bytes/empty/directory, desktop
+DONE bytes, Unix existing/dangling links, existing/missing identity and exact
+settings/artifact preservation. Additional tests cover missing/valid/malformed/
+directory settings precedence, near-match filenames, no lock/directory creation,
+injected errors at either inspection position, actual CLI human/JSON exit 1 with
+no stdout, external link target preservation, and a reliable Unix ENOTDIR fixture
+(no chmod/root assumption). Existing clean/owned-profile reads remain green.
+Locked all-feature workspace: **161 pass**, seven ignored subprocess fixture
+entries exercised by parents. Strict Clippy, formatting and diff checks pass.
+Ripwire quality delta exits 0 with no gating findings or suppressions; new Cargo
+test reachability rows and minor existing churn remain. No dependency/schema,
+command/event, SDK or native-supervision change. Native Windows/macOS, MSRV,
+desktop/UI, SDK spike, live keyring and release qualification were not rerun.
+
+This is an observation-time exclusion, not serialized maintenance: a journal may
+appear after the check, and no existing owner is revoked. Cooperating publishers,
+in-process maintenance/revocation, restricted recovery authority, source account
+mapping and authenticated CLI journal design remain prerequisites for import.
+No recovery-status command, recovery/bypass/import or crash-retention authority ships.

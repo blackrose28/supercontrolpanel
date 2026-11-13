@@ -2255,6 +2255,44 @@ guardian/tree crash retention or native supervision. HTTP shipping policy,
 production stdio logging, other operations and packaging remain independently
 actionable. Do not reprobe unchanged managed cgroup controls.
 
+### CLI stat-only recovery exclusion for file queries (2026-11-13)
+
+Implemented the [ordinary-read contract](CLI_IMPORT_ADMISSION.md#second-prerequisite-stat-only-ordinary-read-exclusion-implemented).
+The production caller audit found only CLI callers for public core
+`read_shared_config` and `read_servers`; desktop shares schemas but retains separate
+loaders/recovery. Both core readers now check recovery evidence before the private
+single-file JSON reader. A private absence predicate is shared with the existing
+owner fence; public API signatures, lock-first conflict precedence and owner release
+remain unchanged. Only `symlink_metadata` NotFound permits reading; all objects and
+other errors deny with the fixed ordinary-read error. Both exact names are covered;
+no content reads, initialization, locks, identity/keyring access or bypass.
+
+RED demonstrated ordinary absence/success at direct core and actual CLI boundaries,
+and injected inspection errors initially succeeding. GREEN covers both filenames,
+bytes/empty/directory/tombstone, Unix links/dangling, identity/settings/artifact
+preservation, settings absence/parse/I/O precedence, near-match filenames, reliable
+injected errors and actual Unix ENOTDIR, human/JSON exit 1/no stdout. Existing clean
+missing-directory and cross-process-owned-profile reads pass. Shared matrix setup
+avoids duplicating the existing owner/runtime artifact tests.
+All-feature locked workspace **161 pass**, seven ignored fixture entries exercised
+by parents; strict Clippy, fmt and diff checks pass. Ripwire quality delta exits 0,
+no gating findings or suppressions; Cargo-test reachability rows and minor existing
+churn remain. Desktop/UI, SDK, native Windows/macOS, MSRV, live keyring and release
+checks were not rerun. No dependency/schema/desktop/transport changes.
+
+Next focused increment: audit and specify in-process CLI maintenance/revocation
+before implementing any authority. Trace existing owners, runtime/session handles,
+credential adapters/caches and ordinary file reads; define which operations must
+fail when recovery appears after acquisition, which cleanup remains permitted,
+and how a future cooperating publisher excludes reads without creating deadlocks.
+Keep this as a focused reviewable contract/design slice with source-backed entry
+and lifetime matrices; do not add a recovery constructor, import/mutation command,
+journal wire format, keyring probe or generic bypass. Select the smallest enforceable
+follow-up from that audit. Source archive/account mapping and authenticated restricted
+recovery remain gated. HTTP shipping policy, production stdio logging, other
+operations and packaging remain independently actionable; do not start a blocked
+successor while independent work remains. Do not reprobe unchanged cgroup controls.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

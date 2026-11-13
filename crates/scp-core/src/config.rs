@@ -203,7 +203,8 @@ impl From<&AppConfig> for AppConfigForDisk {
 
 /// Read the selected directory's `config.json` into the desktop disk projection.
 ///
-/// Missing files return `None`. This never initializes a profile, takes an owner
+/// Recovery evidence or inspection failure denies before reading settings.
+/// Missing files otherwise return `None`. This never initializes a profile, takes an owner
 /// lock, reads local settings/keyring, migrates, or writes. Legacy credentials and
 /// device paths are discarded by the projection, not migrated. Free-text settings
 /// may still contain sensitive data. This is a single-file read, not a coordinated
@@ -211,6 +212,7 @@ impl From<&AppConfig> for AppConfigForDisk {
 pub fn read_shared_config(
     config_dir: &std::path::Path,
 ) -> Result<Option<AppConfigForDisk>, String> {
+    crate::profile::ensure_readable(config_dir)?;
     crate::config_file::read_json::<AppConfig>(
         &config_dir.join("config.json"),
         "config",

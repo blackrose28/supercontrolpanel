@@ -51,8 +51,10 @@ struct ServersFile {
     servers: Vec<Server>,
 }
 
-/// Read only the selected profile's inventory, without keyring or host initialization.
+/// Read only the selected CLI profile's inventory, without keyring or host initialization.
+/// Recovery evidence or inspection failure denies before reading settings.
 pub fn read_servers(config_dir: &Path) -> Result<Vec<Server>, String> {
+    crate::profile::ensure_readable(config_dir)?;
     let file: Option<ServersFile> =
         crate::config_file::read_json(&config_dir.join("servers.json"), "servers", "inventory")?;
     Ok(file.unwrap_or_default().servers)
