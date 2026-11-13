@@ -597,6 +597,10 @@ exact desktop backup server-ID parser and credential-map check are shared in
 CLI import; desktop supplies the expected credential accounts. Archive/restore
 planning, encryption, recovery and credential access remain desktop-owned. `scpctl` has no backup/import command yet.
 
+The [CLI import admission contract](docs/mcp/CLI_IMPORT_ADMISSION.md) defines the
+proposed target-namespace mapping and recovery gates. The ownership fence is still
+planned; desktop recovery journals cannot be used as CLI recovery files.
+
 ### Servers page (SSH / Boundary / SCP)
 
 - Each server record includes:

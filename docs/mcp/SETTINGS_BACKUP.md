@@ -87,6 +87,12 @@ qualify that mapping and recovery/ownership contract separately. Do not substitu
 CLI credential validation for archive validation or weaken either ownership
 contract. Archive/Changes, apply/recovery and all credential access stay desktop-owned.
 
+The [CLI import admission review](CLI_IMPORT_ADMISSION.md) specifies target namespace
+retention, account mapping/refusal rules and pending-recovery exclusion. Desktop
+undo journals and completion tombstones do not identify a CLI target and must not
+be replayed as CLI recovery. The first proposed prerequisite is a denial-only
+owner-acquisition fence; it is not implemented yet and does not enable import.
+
 Version 1 consists of `SCPBAK01`, a little-endian 32-bit JSON-header length, the exact header bytes, and AES-256-GCM ciphertext/tag. The magic, length and header are associated data. The header declares format version, `argon2id-19`, `aes-256-gcm`, memory/iterations/parallelism, a fresh random 16-byte salt and 12-byte nonce. The encrypted payload has its own schema version, app version, platform, timestamp, file/credential inventory and external references. There is no compression or machine-bound decryption key.
 
 Exports use Argon2id v19, 64 MiB, three iterations, one lane, deriving 32 bytes. Before running the KDF, imports enforce a 1 KiB header limit, a 32 MiB file limit, supported algorithms/version, fixed salt/nonce lengths, 8–64 MiB memory, 1–3 iterations and one lane. Decryption/authentication and schema, unique server-ID (ASCII letters/digits plus `-_.:`), account-map and size checks precede all mutations. Newer schema versions are rejected; v1 is the only currently supported schema. Future versions require explicit migrations.

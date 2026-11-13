@@ -2165,19 +2165,58 @@ test files have unknown runners and eight desktop paths (including archive serve
 parsing, snapshot, compile/credential planning and export/describe/import/preview)
 lack modelled reach. Explicit suites pass; this is no static coverage or UI claim.
 
-Next focused increment: qualify a bounded coordinated CLI import ownership/mapping
-contract before moving another secret-bearing model or enabling mutation. Inspect
-all ProfileOwner acquisition paths and desktop journal/recovery artifacts; specify
-how target identity/namespace are retained, desktop colon IDs and telemetry/token
-accounts are mapped or rejected, unavailable credentials fail closed, and pending
-recovery prevents ordinary ownership/configuration/credential operations. Record
-an explicit admission matrix and the first testable gate; implement only a small
-qualified prerequisite if appropriate. Keep desktop complete/portable restore and
-CLI profile isolation intact, Archive/Changes off IPC/MCP, and filesystem/keyring
-apply/recovery separate until qualified. HTTP shipping policy, production stdio
-logging, other operation contracts and packaging remain independently actionable.
-Do not repeat unchanged cgroup qualification or create a blocked successor while
-independent plan work remains.
+The following design increment qualifies that boundary before further extraction.
+
+### Coordinated CLI import admission review (2026-11-13)
+
+[CLI import admission and ownership](CLI_IMPORT_ADMISSION.md) records the source
+audit, explicit target/source and account/settings admission matrices, desktop
+artifact interpretation, remaining transaction/recovery gates and the first
+testable prerequisite. This is documentation only; no import, fence, recovery
+implementation or new secret-bearing model ships in this increment.
+
+All tracked Rust acquisition references were inspected. The two production owner
+callers are CLI profile initialization and core runtime acquisition; Linux Caddy
+uses that runtime. Other direct acquisitions are tests/fixtures. ProfileSecrets
+borrows an owner but has no recovery-state check, while read-only config/inventory
+queries intentionally bypass ownership. Ripwire impact reports 32 downstream
+symbols and six affected test files with unknown runners; textual audit supplements
+its partial nested-call resolution. No runtime symbol is edited here.
+
+Desktop journals have no CLI namespace binding and use a broader recovery account
+allowlist than the archive parser. Neither encrypted desktop journals nor their
+completion tombstones authorize CLI admission. The proposed mapping retains exact
+target profile identity, uses typed target-namespace accounts, rejects participating
+colon IDs, and never restores source Boundary app tokens or telemetry keys. Required
+fresh reads fail closed; absent and empty remain distinct. Portable local settings
+stay inactive; CLI same-device identity recovery is initially rejected, preserving
+desktop's existing option. Full source validation precedes any filtering/mapping.
+
+First prerequisite: deny ordinary owner acquisition if either the desktop journal
+path or reserved `scp-cli-restore-journal.enc` path exists as any object, or cannot
+be inspected. Check under the OS lock before identity initialization; do not read
+contents, parse tombstones, open the keyring, recover or offer an override. The
+reserved CLI filename establishes no journal format. Later gates must cover
+read-only queries, in-process maintenance/revocation and restricted recovery before
+mutation. Crash-safe process-tree ownership remains separately unqualified.
+
+Verification for this documentation-only increment: locked all-feature root
+workspace **149 pass**, seven ignored subprocess fixture entries exercised by
+their parents; this checks existing behavior, not the proposed admission rules.
+No RED/GREEN claim applies until implementation. Local Markdown link targets
+and diff whitespace pass. Ripwire quality delta exits 0 with zero regressions,
+gating findings or suppressions; no baseline edits. Desktop, isolated SDK spike,
+Clippy/release, UI/live keyring, MSRV and native Windows/macOS were not rerun for
+this no-code change. No dependencies, schemas or command/event contracts changed.
+
+Next focused increment: implement that acquisition fence with strict RED/GREEN
+tests at core owner/runtime and actual CLI init/Caddy boundaries. Preserve conflict
+precedence, stable metadata, lock release, private creation and no-artifact behavior;
+exercise file/directory/symlink/tombstone and inspection-error denial without reading
+artifact contents. Keep it denial-only. Do not enable import or move apply/recovery.
+HTTP shipping policy, production stdio logging, other operation contracts and
+packaging remain independently actionable. Do not repeat unchanged cgroup probes
+or create a blocked successor while independent work remains.
 
 ## Work 1: complete settings export/import
 
