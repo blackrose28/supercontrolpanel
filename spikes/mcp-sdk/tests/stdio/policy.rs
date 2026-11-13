@@ -64,12 +64,16 @@ async fn initialize(wire: &mut Wire) {
     assert_eq!(response["result"]["capabilities"], json!({"tools":{}}));
 }
 
+async fn startup_peer_error(mode: &str, logs: &str, expected: &str) {
+    let (mut wire, diagnostics) = connect(mode, logs);
+    wire.send(super::input_errors::peer_error()).await;
+    assert_eq!(complete(wire, diagnostics, false).await, expected);
+}
+
 #[tokio::test]
 async fn policy_startup_peer_error_has_only_fixed_line_and_failure() {
     for logs in LOGS {
-        let (mut wire, diagnostics) = connect("normal", logs);
-        wire.send(super::input_errors::peer_error()).await;
-        assert_eq!(complete(wire, diagnostics, false).await, STARTUP);
+        startup_peer_error("normal", logs, STARTUP).await;
     }
 }
 
@@ -159,4 +163,9 @@ async fn policy_subscriber_conflict_fails_before_reading_even_open_stdin() {
     assert_eq!(status.code(), Some(1));
     assert!(wire.line().await.is_none());
     assert_eq!(bounded(diagnostics).await.unwrap(), STARTUP);
+}
+
+#[tokio::test]
+async fn policy_failed_diagnostic_sink_has_no_stdout_fallback_and_exits_one() {
+    startup_peer_error("writer-failure", "trace", "").await;
 }

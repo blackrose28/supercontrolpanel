@@ -2524,6 +2524,52 @@ After every completed increment, STOP EDITING and start a NEW same-devbox
 continuation thread with notifications enabled and a self-contained handoff;
 no parent coordination/message/wait. Honor user stop/cancel/approval instructions.
 
+### Isolated active outcomes and writer faults (2026-11-13)
+
+Completed the remaining focused internal outcome/writer slice from `cfb7c33`;
+see the [controlling contract and limits](STDIO_DIAGNOSTIC_POLICY.md#internal-outcome-and-diagnostic-writer-qualification-2026-11-13)
+and [SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#isolated-active-outcomes-and-diagnostic-writer-faults-2026-11-13).
+Actual nonpanic task-abort JoinErrors are injected separately at outer and inner
+SDK result layers. Both fail after synthetic cleanup with exactly one service
+line, regardless of host-request flag. Real initialized SDK services independently
+exercise external and owner-token cancellation; only explicitly requested owner
+cancellation with settled successful cleanup succeeds. Channel-gated cleanup
+prevents early success; failed cleanup overrides Closed/requested cancellation.
+The ordinary fixture has no owned cancellation path. No new production authority.
+
+A private fallible Write seam selects literal setup/startup/service diagnostics.
+Immediate/partial errors and zero/partial-then-zero writes retain failure without
+recursive reporting, panic, flush or stdout fallback. A refusing-sink subprocess
+gets a real startup peer error and exits 1 with empty stdout/stderr. Partial delivery
+or blocking remains possible. All three pinned known quit variants are tested;
+future non-exhaustive variants are structurally default-denied, never fabricated
+or claimed as runtime coverage. Boundary-injected JoinErrors do not prove aborting
+the SDK's private task; synthetic cleanup does not prove native teardown. Panic
+hooks and non-tracing output remain outside suppression.
+
+Six unit behavioral RED failures and a separate subprocess writer RED precede
+GREEN/refactoring. Final locked spike **62 tests** (nine policy units, 25 stdio);
+strict all-target Clippy, fmt and whitespace pass. Ripwire edit checks: existing
+contracts retained, zero incompatible callers. Quality: zero gating/preexisting
+regressions, 22 non-gating new-symbol reachability/duplication/verbosity rows,
+no suppressions or public surface. A gating duplicate subprocess startup exchange
+was refactored into a shared helper. Existing raw sentinel/EOF diagnostics remain
+unchanged. No SDK/lock/schema/production/desktop/custom HTTP changes. Unchanged
+root/native/UI/MSRV/release checks not rerun; no managed cgroup reprobe.
+
+Next focused increment: independent HTTP standards-preserving shipping policy.
+Read pinned SDK producers and existing isolated http_errors/negotiation_errors
+sources/tests; concretely review a narrow response contract and implement the
+smallest behavioral RED/GREEN slice it supports. Preserve modern 404/legacy 200
+correlated JSON-RPC errors and selected bounded negotiation errors; blanket body
+erasure/composition remains non-shipping evidence. No broad parser/header/session
+sanitization claim, no custom six-route change, SDK upgrade or production activation.
+Other operation, import serialization/recovery and packaging work remains actionable.
+
+After every completed increment, STOP EDITING and start a NEW same-devbox
+continuation thread with notifications enabled and a self-contained handoff;
+no parent coordination/message/wait. Honor user stop/cancel/approval instructions.
+
 ## Work 1: complete settings export/import
 
 Implementation: see [desktop backup design, usage, recovery and validation](SETTINGS_BACKUP.md). The v1 importer deliberately blocks Boundary token and telemetry key replacement until the recovery constraints below can be verified. Windows/macOS native credential-store, filesystem behavior and cross-platform release KDF benchmarks remain release qualification work.

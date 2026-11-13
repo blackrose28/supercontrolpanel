@@ -437,8 +437,11 @@ startup/service failure lines, with typed errors kept internal. A separate isola
 policy executable now tests fixed startup failures, preselection EOF, both active
 wire lifecycles, all-level/span worker suppression and installation conflicts.
 The existing raw fixtures still deliberately expose synthetic inputs. Active
-failure classification and diagnostic sink faults remain unqualified; production
-stdio remains unavailable. HTTP response/error policy is a separate release gate.
+failure classification, explicit cancellation origin, synthetic cleanup ordering
+and diagnostic sink faults are now qualified within the isolated fixture; production
+stdio remains unavailable. Unknown future SDK variants are reviewed through a
+fail-closed match, not constructed in tests. HTTP response/error policy is a
+separate release gate.
 The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
 enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified

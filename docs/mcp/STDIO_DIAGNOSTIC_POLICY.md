@@ -1,7 +1,8 @@
 # Standalone stdio diagnostics: reviewed boundary
 
 Status: source-backed contract review, 2026-11-13, baseline `ef1e88b`;
-five-row isolated policy fixture implemented against review commit `3a7e702`.
+five-row isolated policy fixture implemented against review commit `3a7e702`;
+internal outcome/writer qualification extends baseline `cfb7c33`.
 **Not production-qualified.** Behavioral RED/GREEN evidence is recorded below.
 `scpctl` has no MCP command; desktop/custom HTTP hosting and the raw SDK fixtures
 remain unchanged.
@@ -102,8 +103,9 @@ exists; fixed handling of that JoinError cannot retract those bytes.
 
 ## Acceptance and next implementation slice
 
-The five isolated rows now pass in a separate policy executable; later rows remain
-requirements. Raw-debug/input-errors/startup-eof and the fixed EOF observer retain
+The five initial rows and the internal outcome/writer slice now pass in a separate
+policy executable within the limits below; production requirements remain.
+Raw-debug/input-errors/startup-eof and the fixed EOF observer retain
 their original semantics. Test sentinels are synthetic; no profiles, real
 credentials, native runtime operations or desktop state are loaded.
 
@@ -114,7 +116,7 @@ credentials, native runtime operations or desktop state are loaded.
 | Implemented isolated: tracing suppression | With `RUST_LOG=trace` and targeted rmcp directives, malformed numeric-method input containing a sentinel still gets the exact idless -32600/Invalid request/no data; active peer Error produces no reply; malformed string arguments get correlated -32601/MCP method not supported then catalog recovery. Exact stderr excludes SDK records at every stage; every stdout line checked through EOF |
 | Implemented isolated: level/span reach | Test-only emissions with synthetic fields at TRACE/DEBUG/INFO/WARN/ERROR and spans, on main and spawned worker tasks, yield no bytes under the installed policy. Real parser/request probes above establish SDK paths; absence of DEBUG alone is insufficient |
 | Implemented isolated: setup conflict | Separate process preinstalls a silent test subscriber; policy install fails before any SDK input/transport/service/host entry. Fixed startup line and failure; no unknown subscriber debug formatting |
-| Later before activation: internal outcome/error writer | Test outer waiting error, inner JoinError and non-exhaustive fallback, expected vs unexpected cancellation, fallible diagnostic sink failure, exact single-line precedence and cleanup ownership. Avoid panic payload assertions as proof of panic sanitization |
+| Implemented isolated: internal outcome/error writer | Real nonpanic task-abort JoinErrors injected separately into outer waiting Result and inner QuitReason::JoinError; actual SDK cancellation by external versus explicit owner token; settled synthetic cleanup gates success, cleanup failure wins; literal single-line reporter, immediate/partial/zero-write sink failures, and process no-stdout-fallback. Non-exhaustive fallback reviewed structurally, no future variant constructed. No native cleanup or panic sanitization claim |
 | Preservation | Existing raw-debug tests still require original sentinel values; original typed raw startup and EOF observer tests retain their exact diagnostics. Raw characterization is never rewritten into suppression evidence |
 
 The [policy binary](../../spikes/mcp-sdk/src/bin/stdio-policy-fixture.rs) uses a
@@ -124,7 +126,7 @@ never reads RUST_LOG or installs another dispatcher. Private failures distinguis
 setup, boxed original typed SDK startup error, and active failure. Boxing retains
 the actual enum without formatting it; the process drops it after classification.
 The fallible stderr write ignores its I/O error and retains failure status, with
-no recursive diagnostic or stdout fallback. Writer faults are not tested yet.
+no recursive diagnostic or stdout fallback. Writer faults are qualified below.
 
 The [typed unit test](../../spikes/mcp-sdk/src/bin/stdio_policy/runner.rs) directly
 matches ExpectedInitializeRequest(Some(Error(...))) and checks absent ID, code,
@@ -167,15 +169,64 @@ message/data, and raw startup/EOF observer tests retain exact diagnostics.
 No dependency, lockfile, schema, production core/CLI/desktop or HTTP changes.
 Unchanged root/native/UI/MSRV/release suites were not rerun; no cgroup reprobe.
 
-Next focused isolated increment: behavioral RED/GREEN qualification of active
-outcome classification and diagnostic-writer failures. Cover outer waiting error
-and inner JoinError independently, unexpected versus explicitly owned cancellation,
-fixed single-line precedence and fallible sinks. Review how to test the
-non-exhaustive fallback honestly without claiming construction of a future SDK
-variant. Any cleanup seam must remain synthetic and must not imply native teardown
-or panic sanitization. Current minimal active handling accepts only Closed and
-fails all other outcomes; those failure branches and writer faults remain separate
-gates. No production activation, new host authority or SDK upgrade.
+### Internal outcome and diagnostic writer qualification (2026-11-13)
+
+The private runner now awaits synthetic owned cleanup before returning any active
+outcome. Closed succeeds only with successful cleanup; Cancelled also requires an
+explicit owning-host request. Cleanup failure yields the fixed service failure,
+even for Closed or requested cancellation. The ordinary executable still passes
+false and owns no native work. No new cancellation command or host authority is
+exposed. A channel-gated cleanup test proves no completion before cleanup release;
+a failed cleanup overrides otherwise successful completion. This is not a native
+teardown, cancellation deadline or crash-retention guarantee.
+
+Separate tests create actual Tokio JoinErrors by aborting pending nonpanic tasks,
+check is_cancelled and !is_panic, then inject them at the exact two SDK result
+layers consumed by the runner: Err(JoinError) and Ok(QuitReason::JoinError).
+Both fail after owned cleanup, regardless of the owner-request flag, and report
+exactly one service line. These are boundary-injection tests, **not evidence that
+an actual RunningService's private task handle was aborted**. A real initialized
+SDK service is separately cancelled through its externally supplied token and
+through its owning service token. Both yield actual QuitReason::Cancelled; only
+the explicitly requested owner case succeeds after synthetic cleanup. Token state
+alone does not establish who requested shutdown. Panic hooks may emit before any
+JoinError exists; none of these tests qualifies panic sanitization.
+
+Pinned rmcp 3.10.0 exposes exactly Closed, Cancelled and JoinError in its
+non-exhaustive enum. All known variants are covered. The runner's only success
+arms name Closed and explicitly requested Cancelled with successful cleanup;
+the wildcard returns service failure for every other value. That fallback is
+source-reviewed and compiled downstream. An unknown future SDK variant cannot be
+constructed honestly with this pin, so no runtime coverage of such a variant is
+claimed. No unsafe construction, counterfeit SDK variant or dependency change.
+
+The literal reporter now takes a private Write sink; ordinary reporting still uses
+stderr.lock after runtime drop. Unit tests select setup/startup/service lines
+(including an original typed startup error with synthetic context), and require
+silence on success. Immediate I/O errors, partial writes followed by errors, zero
+writes and partial-then-zero writes retain ExitCode::FAILURE. Exact prefix and
+write-call counts exclude recursive reporting; the injected sink's error text is
+never formatted, and no flush/panic is triggered. A separate subprocess injects a
+refusing sink after the actual unsolicited startup peer error: actual child.wait
+is exit 1, stdout is empty through EOF and stderr is empty. Sink failure can lose
+the entire line or leave a partial prefix; this qualifies error handling, not
+successful delivery or a bound on blocking.
+
+Behavioral RED: six unit rows fail against the minimal outcome seam and success-only
+writer placeholder (/tmp/scp-outcomes-red.log), including skipped cleanup,
+incorrect cancellation and incorrect exit status. The process writer test separately
+fails because the original reporter still writes its startup line
+(/tmp/scp-writer-process-red.log). GREEN precedes refactoring the duplicate
+subprocess startup exchange into one helper and adding real SDK cancellation
+coverage. The original typed startup test remains unchanged. Final verification
+and static-analysis results are recorded in the
+[SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#isolated-active-outcomes-and-diagnostic-writer-faults-2026-11-13)
+and [plan increment](SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md#isolated-active-outcomes-and-writer-faults-2026-11-13).
+
+This completes the focused isolated acceptance slice, with the non-exhaustive
+runtime limit stated explicitly. Production activation still requires host authority,
+lifecycle/admission/cleanup and non-tracing output audits. Independent HTTP shipping
+policy, operations, serialized import/recovery and packaging remain actionable.
 
 ## Independent HTTP and release gates
 
@@ -190,8 +241,8 @@ session/body policy and does not authorize those wrappers for production. Preser
 all six custom localhost/bearer HTTP routes and require-ui-approval behavior.
 
 Production stdio remains gated on host authority, lifecycle/admission/cleanup,
-typed active outcomes, diagnostic sink and non-tracing output audit, native
-Windows/macOS qualification and other existing release checks. Settings import
+production integration of typed active outcomes and diagnostic sinks, non-tracing
+output audit, native Windows/macOS qualification and other existing release checks. Settings import
 still follows the controlling [admission contract](CLI_IMPORT_ADMISSION.md) and
 [maintenance lifetime audit](CLI_MAINTENANCE_LIFETIMES.md). No SDK upgrade,
 maintenance/recovery authority, command, schema or desktop/CC/admin contract changes

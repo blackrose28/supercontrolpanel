@@ -42,10 +42,18 @@ fn main() -> ExitCode {
     });
     // No detached logging worker/flush guard. Runtime settles before reporting.
     drop(runtime);
-    report(outcome)
+    if mode == "writer-failure" {
+        report_to(outcome, &mut RefusingDiagnostic)
+    } else {
+        report(outcome)
+    }
 }
 
 fn report(outcome: Result<(), Failure>) -> ExitCode {
+    report_to(outcome, &mut std::io::stderr().lock())
+}
+
+fn report_to(outcome: Result<(), Failure>, sink: &mut impl Write) -> ExitCode {
     let diagnostic: &[u8] = match outcome {
         Ok(()) => return ExitCode::SUCCESS,
         Err(Failure::Setup) => b"scpctl: MCP stdio startup failed\n",
@@ -57,6 +65,21 @@ fn report(outcome: Result<(), Failure>) -> ExitCode {
         Err(Failure::Service) => b"scpctl: MCP stdio service failed\n",
     };
     // A blocked sink may block. A failed sink never recurses, panics or uses stdout.
-    let _ = std::io::stderr().lock().write_all(diagnostic);
+    let _ = sink.write_all(diagnostic);
     ExitCode::FAILURE
 }
+
+// Fixture-only process injection; no new production sink selection or authority.
+struct RefusingDiagnostic;
+impl Write for RefusingDiagnostic {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::BrokenPipe.into())
+    }
+}
+
+#[cfg(test)]
+#[path = "stdio_policy/report_tests.rs"]
+mod report_tests;

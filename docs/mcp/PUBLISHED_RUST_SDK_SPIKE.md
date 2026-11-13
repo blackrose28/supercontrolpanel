@@ -1457,3 +1457,66 @@ faults and single-line precedence, preserving synthetic cleanup limits. Current
 minimal active handling accepts Closed only and emits a fixed service failure for
 other outcomes; those failures are not yet fault-injection qualified. Production
 stdio, independent HTTP shipping policy, native ownership and packaging stay gated.
+
+## Isolated active outcomes and diagnostic writer faults (2026-11-13)
+
+Extends `cfb7c33` under the controlling
+[stdio diagnostic contract](STDIO_DIAGNOSTIC_POLICY.md#internal-outcome-and-diagnostic-writer-qualification-2026-11-13).
+The private runner settles synthetic owned cleanup before classifying completion.
+Closed needs successful cleanup; Cancelled additionally needs an explicit host
+request. Failed cleanup overrides either success. The executable has no owned
+cancellation path and still supplies false; no new production authority or command.
+
+Separate tests abort actual pending nonpanic tasks and inject the resulting
+JoinErrors into the outer waiting Result and inner QuitReason::JoinError. They
+require cleanup before a single fixed service line, even with the host-request
+flag set. This qualifies the result boundary, not aborting the SDK's private
+service task. Another test initializes a real pinned SDK service and separately
+cancels its external token and owning-service token. Both return actual Cancelled;
+only the explicit owner action plus settled cleanup succeeds. A channel-gated
+cleanup future prevents premature success, and cleanup error yields service failure.
+No native teardown, panic-hook suppression or shutdown deadline is established.
+
+Source review of rmcp 3.10.0 confirms exactly three known non-exhaustive quit
+variants. All are covered, while only Closed and requested Cancelled with settled
+successful cleanup are success arms; the wildcard fails closed. There is no honest
+way to construct a future SDK variant with this pin. Its runtime execution is
+therefore not claimed, and no unsafe/fake enum or dependency upgrade is used.
+Pinned tracing 0.1.44 / tracing-core 0.1.36 policy remains unchanged.
+
+The reporter now delegates to a private Write seam. Setup/startup/service outcomes
+select only their fixed line; an original typed startup error containing synthetic
+context is never formatted. Success performs no write. Immediate/partial I/O errors
+and zero/partial-then-zero writes retain failure without panic, recursive reporting,
+flush or extra bytes. Exact prefix and write-call checks qualify that behavior,
+not delivery or bounded blocking. A separate process uses a refusing diagnostic
+sink after an actual startup peer error: stdout stays empty through EOF, stderr is
+empty and actual child.wait returns exit 1. Existing raw fixtures and observer
+source/tests remain unchanged with their original synthetic diagnostic contents.
+
+TDD: six unit tests first fail behaviorally for skipped cleanup, incorrect owned
+cancellation or successful failure status (/tmp/scp-outcomes-red.log); the process
+sink test separately fails because the original startup line is still written
+(/tmp/scp-writer-process-red.log). GREEN precedes shared subprocess startup-exchange
+refactoring and real SDK cancellation coverage. Locked full suite: **62 tests**,
+including nine policy units and 25 stdio integration tests. Strict all-target
+Clippy, fmt and whitespace checks pass. Ripwire edit checks retain existing
+contracts, incompatible callers zero. Quality has zero gating/preexisting findings
+and no suppressions/public surface; 22 non-gating new-symbol rows include Cargo/
+trait reachability, deliberate independent error-layer test duplication and test
+verbosity. The initial gating duplicate subprocess setup was refactored away.
+Cargo execution supplies evidence the static subprocess/trait model cannot prove.
+The explicit four-file test gate lists only the policy integration module with an
+unknown runner, missing Cargo unit/subprocess reach; the full suite executes them.
+Local Markdown targets and fragments pass across all four changed documents.
+No root/desktop/native/UI/MSRV/release tests rerun and no cgroup reprobe.
+
+Next focused increment: advance the independent HTTP shipping policy in the
+isolated spike. Read pinned SDK response/error/header/session producers and the
+existing http_errors / negotiation_errors sources and boundary tests. Review a
+narrow standards-preserving response policy before implementing its smallest
+behavioral RED/GREEN slice; retain correlated modern 404 versus legacy 200 JSON-RPC
+errors and bounded selected negotiation handling. Do not compose blanket body
+erasure into a standards-ready claim, select broad parser/header/session secrecy
+without evidence, change the six custom HTTP routes or activate production MCP.
+Operations, import serialization/recovery and packaging remain independent work.
