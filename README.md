@@ -378,6 +378,14 @@ error; legacy initialization already creates a running service before the
 `initialized` notification and closes successfully on EOF. Each probe checks
 strict protocol stdout and actual process exit. These raw synthetic error/exit
 observations do not select production EOF or diagnostic policy.
+A further raw-input probe distinguishes an unsolicited idless client error before
+lifecycle selection from the same envelope in an active service. Startup preserves
+the typed SDK error and reflects synthetic message/data in Rust's raw termination
+diagnostic; active services drop that peer error and return fixed `-32601` for a
+malformed `tools/call`, without invoking the overview host. Exact stdout/stderr and
+real process waits are checked. This characterizes the unsanitized startup path;
+it does not qualify SDK logs or choose production error policy. Syntax-invalid
+lines and structural parser errors remain separate probes.
 The SDK dependency remains isolated; no desktop wiring or CLI MCP command is
 enabled. Production host ownership/authentication,
 shutdown bounds, third-party clients and native OS builds remain to be qualified

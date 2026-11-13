@@ -1,11 +1,14 @@
 //! Synthetic subprocess only; never reads real configuration or credentials.
 //! Stdout belongs exclusively to the SDK. No production scpctl entry point.
+#[path = "stdio_fixture/active.rs"]
+mod active;
 #[path = "stdio_fixture/eof_observer.rs"]
 mod eof_observer;
+#[path = "stdio_fixture/input_errors.rs"]
+mod input_errors;
 #[path = "stdio_fixture/startup_eof.rs"]
 mod startup_eof;
 
-use rmcp::ServiceExt;
 use scp_core::mcp_dto::McpAppOverviewResult;
 use scp_mcp_sdk_spike::overview::{OverviewAdapter, OverviewHost, OverviewPolicy};
 use std::{net::SocketAddr, sync::Arc};
@@ -116,28 +119,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
     eprintln!("fixture started");
-    if mode == "startup-eof" {
-        return startup_eof::run(adapter).await;
+    match mode.as_str() {
+        "startup-eof" => startup_eof::run(adapter).await,
+        "input-errors" => input_errors::run(adapter).await,
+        _ => active::run(adapter, completion).await,
     }
-    let external = CancellationToken::new();
-    let service = adapter
-        .serve_with_ct(rmcp::transport::stdio_pipes(), external.clone())
-        .await?;
-    if let Some(completion) = completion {
-        // Retain RunningService: waiting() consumes it and drops its external-token guard.
-        // This test host waits for synthetic cooperation, not a native/handler join.
-        completion.notified().await;
-        assert!(!external.is_cancelled());
-        eprintln!("fixture host completion observed external active");
-        assert!(matches!(
-            service.waiting().await?,
-            rmcp::service::QuitReason::Closed
-        ));
-        assert!(external.is_cancelled());
-        eprintln!("fixture waiting closed external cancelled");
-    } else {
-        service.waiting().await?;
-    }
-    eprintln!("fixture stopped");
-    Ok(())
 }

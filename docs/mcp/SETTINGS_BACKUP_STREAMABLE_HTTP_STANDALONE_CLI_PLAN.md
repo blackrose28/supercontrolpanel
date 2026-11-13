@@ -2264,6 +2264,51 @@ signals, native Windows/macOS stdio and production ownership remain unqualified.
 HTTP shipping policy, coordinated CLI import, other operation contracts and
 packaging remain independently actionable. Do not repeat unchanged cgroup probes.
 
+### Unsolicited subprocess peer error and malformed dispatch qualification (2026-11-13)
+
+Three new raw subprocess probes in the isolated rmcp =3.10.0 spike distinguish
+one well-formed idless client error envelope before lifecycle selection from the
+same envelope in active legacy/modern services. The startup path preserves typed
+`ExpectedInitializeRequest(Some(Error(...)))`, including exact synthetic
+message/data and an active external token, then emits Rust's raw termination
+diagnostic containing those values and exits unsuccessfully without stdout.
+This is explicit unsanitized-path evidence, not shipping error policy.
+
+Active services drop that unsolicited peer error without replying. A malformed
+`tools/call` with string arguments reaches the SDK CustomRequest fallback and the
+existing adapter returns fixed `-32601` / `MCP method not supported`, no data or
+host read. A subsequent catalog request succeeds. Correlated tools/list establishes
+service startup (modern discovery and bootstrap ping alone do not); actual stdin
+EOF, strict newline/64 KiB stdout/EOF checks, exact stderr and real process waits
+establish completion. The fixture checks waiting returns Closed and the consumed
+wrapper cancels its external token. Native joining/cleanup is not implied.
+
+No subscriber is installed for these probes; SDK DEBUG/TRACE paths can still
+reflect peer errors/requests. Neither fixed protocol replies, the unchanged EOF
+observer nor HTTP experiments qualify stdio log redaction. No production host,
+sanitizer, tool, stdin interceptor, config/profile/keyring or CLI MCP wiring is
+added. Existing active/gated service handling moves unchanged into its own fixture
+module; main constructs and dispatches experiments. Dependencies/locks unchanged.
+
+TDD: corrected source-based tests fail all three probes without the new mode
+branch, then pass after restoration. Removing just the typed-startup observation
+fails only the startup probe; restored code passes all 12 stdio tests. Full locked
+spike suite: 40 pass; strict Clippy, formatting/whitespace and desktop dependency
+probe pass (18 existing warnings); normal SDK dependency graph empty. No root/core/
+full desktop/native/MSRV/UI/release reruns. Quality delta exits 2 solely for recent
+fixture-main churn after moving lifecycle handling, with five non-gating new-symbol
+dead-code rows; no suppressions/baseline edits. See
+[SDK evidence](PUBLISHED_RUST_SDK_SPIKE.md#unsolicited-stdio-peer-errors-and-malformed-dispatch-2026-11-13).
+
+Next focused increment: complete syntax-invalid lines versus structurally invalid
+valid JSON at startup/active service, with a bounded fixture set selected from
+pinned parser source. A deliberate no-ID invalid-request stdout probe requires a
+strict error-envelope checker retaining newline/64 KiB integrity, not merely
+valid JSON. Preserve raw diagnostics/typed errors before deciding shipping policy.
+Backpressure, signals, native Windows/macOS and production ownership remain open;
+HTTP shipping policy, coordinated CLI import, other operations and packaging are
+independently actionable. Do not repeat unchanged cgroup qualification.
+
 ### stdio MCP contract
 
 - Use the same SDK adapter, operation schemas, policy, and redaction as desktop MCP, hosted directly on the headless runtime.

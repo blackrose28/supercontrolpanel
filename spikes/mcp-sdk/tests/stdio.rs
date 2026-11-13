@@ -18,6 +18,8 @@ const LEGACY: &str = "2025-11-25";
 mod cancellation;
 #[path = "stdio/eof.rs"]
 mod eof;
+#[path = "stdio/input_errors.rs"]
+mod input_errors;
 #[path = "stdio/startup_eof.rs"]
 mod startup_eof;
 

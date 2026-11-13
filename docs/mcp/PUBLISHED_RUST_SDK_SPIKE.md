@@ -1103,3 +1103,104 @@ qualifies that boundary. Backpressure, signals, native Windows/macOS stdio,
 production ownership, HTTP shipping policy, coordinated CLI import, other
 operation contracts and packaging remain actionable; unchanged cgroup delegation
 is not reprobed.
+
+## Unsolicited stdio peer errors and malformed dispatch (2026-11-13)
+
+The isolated `input-errors` fixture mode preserves rmcp =3.10.0 and the same
+synthetic overview adapter. Three raw subprocess tests qualify one specific
+boundary: a well-formed JSON-RPC error envelope with no ID, supplied where the
+server has no pending outbound request. The error's message and password-shaped
+data carry only the synthetic `SYNTHETIC_STDIO_SECRET` sentinel. This is a
+protocol-stage/association probe, not syntax-invalid or structurally invalid JSON.
+
+Pinned published source was inspected before selecting fixtures:
+
+- `transport/async_rw.rs::receive` skips complete syntax-invalid lines. Valid JSON
+  that fails the typed message shape instead queues fixed `-32600` / `Invalid
+  request` with no ID. Compatibility parsing can log the supplied raw line at
+  DEBUG. Neither branch is exercised by this well-formed error-envelope probe.
+- `service/server.rs` handles bootstrap ping/discovery specially; complete modern
+  discovery alone does not select the service lifecycle. Non-request envelopes
+  reach `ExpectedInitializeRequest(Some(message))`. This typed variant retains
+  the supplied message; its Display and derived Debug include that message.
+  `error.rs` also formats ErrorData message/data, without a redaction guarantee.
+- `service.rs` drops idless peer errors in an active service after a DEBUG event
+  containing the error. It does not generate a protocol response for that event.
+  This differs from the transport-generated idless error response above.
+- The untagged `ClientRequest` union falls back to `CustomRequest` for the chosen
+  malformed `tools/call` (string `arguments` instead of an object). ServerHandler
+  dispatch reaches OverviewAdapter's existing fixed custom-request error. SDK
+  service DEBUG request and TRACE event logging may still contain supplied data.
+- `handler/server.rs` rejects modern service ping with method-not-found, while
+  bootstrap ping responds inline without selecting a lifecycle. Tests therefore
+  establish active dispatch using correlated `tools/list`, not ping or timing.
+
+| State and probe | Required evidence |
+| --- | --- |
+| No lifecycle selected; unsolicited idless peer error | Actual typed ExpectedInitializeRequest containing Error, absent ID, exact code/message/data; external service token still active; no stdout response; unsuccessful actual process wait |
+| Legacy initialize/initialized and correlated tools/list; same peer error then malformed tools/call | No peer-error reply; correlated fixed -32601 / MCP method not supported with no data; subsequent exact catalog result; successful EOF/process wait |
+| Modern discovery then correlated tools/list; same active probes | Same fixed error/recovery/exit evidence, with required modern request metadata |
+
+The fixture's `inspect_err` checks the actual SDK variant and retained payload,
+emits a fixed typed-observation marker, and forwards the original error unchanged
+through `?`. Rust's raw Result termination diagnostic starts with
+`Error: ExpectedInitializeRequest(Some(Error(JsonRpcError ...` and includes both
+sentinel values. The test pins the **entire** diagnostic, including code, absent
+ID, message and data. This is evidence that an unfiltered startup error can expose
+input, not a decision to ship that diagnostic. No RunningService exists on this
+path and the external token remains active. The active paths check `waiting()`
+returns Closed and wrapper consumption cancels the external token; this is not a
+claim that EOF itself cancels it or that native handlers are joined.
+
+`tests/stdio/input_errors.rs` uses only real subprocess pipes, actual stdin EOF,
+strict newline/64 KiB JSON-RPC stdout validation, final stdout EOF and bounded
+actual child waits. Every outgoing response in this slice has an ID and is
+correlated; the shared validator is unchanged. The harness deliberately sends an
+idless **incoming** error, never expects an idless stdout response. Exact stderr
+comparisons exclude host reads and additional diagnostics; active stderr contains
+only fixed lifecycle markers. No subscriber is installed in this mode: absence of
+sentinels there does **not** qualify raw SDK logs. The existing EOF observer is
+unchanged and is not used here. Five-second step watchdogs are test limits, not
+production deadlines. No production sanitizer, tool, stdin interceptor, real
+runtime/profile/config/keyring wiring or CLI MCP command is added.
+
+TDD: new tests run against the prior mode dispatcher fail at missing typed/stage
+observations. An initial ping-based oracle was corrected after inspecting its
+bootstrap/modern dispatch distinction; rerunning the corrected tests with the new
+mode branch removed produces three expected RED failures. Restoring the branch
+passes all three. Removing only the fixed typed-startup marker produces one RED
+startup test and two passing active tests; the original module is restored.
+Refactoring moves existing active/gated service lifecycle handling unchanged into
+`stdio_fixture/active.rs`, leaving fixture main responsible for construction and
+mode dispatch. All 12 stdio tests, including previous EOF/cancellation probes,
+pass after that move.
+
+Validation: locked full spike suite **40 pass** (11 adapter, 5 error boundary,
+5 HTTP, 4 lifecycle, 3 negotiation boundary, 12 stdio), strict all-target Clippy,
+formatting and whitespace checks pass. Locked desktop SDK dependency probe:
+1 pass with 18 existing warnings; normal-edge SDK reverse graph remains empty.
+No dependency/lock changes or root/core/full desktop/native Windows/macOS/MSRV/UI/
+release reruns for this synthetic-only scope.
+
+Ripwire main impact/uses report no direct callers; source/tests verify subprocess
+usage, so affected-test selection is supplemented with the full spike suite.
+Quality delta exits 2 only for major recent main churn after the lifecycle move;
+verbosity growth is removed. Five non-gating new-symbol dead-code rows are three
+Cargo tests and two module-dispatched run functions. No suppressions or baseline
+edits. This structural finding is retained explicitly, not called a clean gate.
+The staged test gate exits 4 for eleven unknown-runner test files/modules (all
+executed by Cargo), unchanged desktop `run_boundary_oidc_automation` and two
+unrelated documentation headings. Main edit-check reports unchanged signature,
+zero direct callers and no incompatible uses. No static/native coverage claim.
+
+Next focused increment: qualify complete syntax-invalid lines versus structurally
+invalid valid JSON at startup and active dispatch, selecting a bounded fixture
+set from the pinned parser source. Any expected no-ID invalid-request stdout
+response needs a strict error-envelope checker preserving newline/64 KiB limits;
+do not weaken stdout validation to merely valid JSON. Use correlated subsequent
+responses or fixed test-only stage evidence, actual stdin EOF and actual child
+waits. Keep raw diagnostic characterization distinct from a later shipping
+policy. Backpressure, signals, native Windows/macOS stdio and hard native cleanup
+remain unqualified. HTTP shipping policy, production ownership, coordinated CLI
+import, other operations and packaging remain independently actionable. Do not
+repeat unchanged cgroup qualification.
