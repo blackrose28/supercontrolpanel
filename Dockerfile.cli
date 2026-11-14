@@ -1,0 +1,31 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV CARGO_HOME=/usr/local/cargo
+ENV RUSTUP_HOME=/usr/local/rustup
+ENV PATH="${CARGO_HOME}/bin:${PATH}"
+
+# Minimal headless prerequisites for standalone scpctl (no GTK, WebKit, or D-Bus dev headers)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    ca-certificates \
+    curl \
+    openssh-client \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Rust stable toolchain
+RUN mkdir -p "${CARGO_HOME}" "${RUSTUP_HOME}" \
+    && chmod 0777 "${CARGO_HOME}" "${RUSTUP_HOME}" \
+    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    && chmod -R a+rwX "${CARGO_HOME}" "${RUSTUP_HOME}"
+
+WORKDIR /app
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+
+RUN cargo test --locked -p scp-core -p scp-mcp -p scp-cli \
+    && cargo build --locked --release -p scp-cli \
+    && cargo tree --locked -p scp-cli -e normal,build \
+    && ldd /app/target/release/scpctl

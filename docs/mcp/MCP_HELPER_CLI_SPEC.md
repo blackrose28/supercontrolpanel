@@ -1,5 +1,9 @@
 # SuperControlPanel Helper CLI Spec
 
+## Standalone CLI coexistence (Slice 5)
+
+`scpctl` runs independently when the desktop application is closed (`scp-core` + `scp-mcp` stdio host), whereas `supercontrolpanelhelper` targets an active desktop HTTP MCP listener (`/mcp` + compatibility routes) using localhost bearer auth. They use separate profile directories and are complementary: use `supercontrolpanelhelper` against live desktop-owned sessions/UI approvals and `scpctl` for headless automation or CI. See [Standalone CLI Agent Guide](STANDALONE_CLI_AGENT_GUIDE.md) and [Slice 5 report](STANDALONE_CLI_SLICE5.md).
+
 ## Slice 6 qualification
 
 Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.

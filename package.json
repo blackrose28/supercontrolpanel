@@ -15,7 +15,11 @@
     "tauri:build": "tauri build -- --bin super-control-panel",
     "helper:run": "cargo run --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper --",
     "helper:build": "cargo build --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper",
-    "helper:release": "cargo build --release --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper"
+    "helper:release": "cargo build --release --manifest-path src-tauri/Cargo.toml --bin supercontrolpanelhelper",
+    "cli:build": "cargo build --locked -p scp-cli",
+    "cli:release": "cargo build --locked --release -p scp-cli",
+    "cli:test": "cargo test --locked -p scp-core -p scp-mcp -p scp-cli",
+    "cli:package": "node scripts/package-scpctl.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

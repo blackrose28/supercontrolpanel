@@ -65,3 +65,4 @@ src-tauri/src/cc/telemetry_queue_disk_new/
 
 # Independent CLI workspace
 /target/
+/dist-cli/

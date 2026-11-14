@@ -15,11 +15,12 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { ResourceUpdatedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 
 const execFileAsync = promisify(execFile);
-const scpctlBin =
-  process.env.SCPCTL_BIN || new URL('../../../target/debug/scpctl', import.meta.url).pathname;
-const sshdFixtureBin =
-  process.env.SSHD_FIXTURE_BIN ||
-  new URL('../../../target/debug/examples/sshd_fixture_daemon', import.meta.url).pathname;
+const scpctlBin = process.env.SCPCTL_BIN
+  ? path.resolve(process.env.SCPCTL_BIN)
+  : new URL('../../../target/debug/scpctl', import.meta.url).pathname;
+const sshdFixtureBin = process.env.SSHD_FIXTURE_BIN
+  ? path.resolve(process.env.SSHD_FIXTURE_BIN)
+  : new URL('../../../target/debug/examples/sshd_fixture_daemon', import.meta.url).pathname;
 const inspectorLauncher = new URL(
   '../node_modules/@modelcontextprotocol/inspector/clients/launcher/build/index.js',
   import.meta.url,

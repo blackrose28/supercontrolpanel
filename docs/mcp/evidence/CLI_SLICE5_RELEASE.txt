@@ -1,0 +1,59 @@
+Slice 5 Standalone CLI (`scpctl`) Release Packaging & Verification Evidence
+=========================================================================
+
+Artifact: scpctl-v0.1.0-linux-x86_64.tar.gz (3.8M archive; 12M release binary)
+Host OS/Arch: Linux 5.4.0 x86_64 (Ubuntu 20.04.1 LTS)
+Toolchain: rustc 1.100.0 (0ef1bc386 2026-11-09) / cargo 1.100.0 (3acc79c0c 2026-11-05) / Node v26.13.0
+Baseline Commit: d52c431
+
+Checksums (SHA-256)
+-------------------
+Archive (scpctl-v0.1.0-linux-x86_64.tar.gz):
+  4a587ab25b3a047cf4466552ccce1b763cb148bcdc61745df9a585598dd8aacd
+Binary (bin/scpctl):
+  8096d2e4f01eca6ed0486f6ae67d5af1a9bc7f6dbd38d1daa640a42f6a58f310
+
+Archive Contents
+----------------
+- scpctl-v0.1.0-linux-x86_64/bin/scpctl
+- scpctl-v0.1.0-linux-x86_64/completions/scpctl.bash
+- scpctl-v0.1.0-linux-x86_64/completions/_scpctl
+- scpctl-v0.1.0-linux-x86_64/completions/scpctl.fish
+- scpctl-v0.1.0-linux-x86_64/completions/scpctl.ps1
+- scpctl-v0.1.0-linux-x86_64/README.txt
+
+Contract Surface (`scpctl schema --json`)
+-----------------------------------------
+- CLI commands: 31
+- MCP operations: 45 (41 callable on standalone stdio host + 4 excluded desktop/interactive operations)
+- MCP resources: 6 (`scp://*`)
+
+Dependency & Dynamic Linkage Isolation
+--------------------------------------
+`cargo tree --locked -p scp-cli -e normal,build` (467 lines):
+- dependencyIsolationPassed: true
+- Zero forbidden crates (`tauri`, `tauri-build`, `tauri-runtime`, `wry`, `tao`, `webkit2gtk`, `gtk`, `glib`, `libdbus-sys`, `axum`, `hyper`, `reqwest`)
+
+`ldd target/release/scpctl`:
+- dynamicLinkageIsolationPassed: true
+- Linked libraries:
+  - linux-vdso.so.1
+  - libc.so.6
+  - /lib64/ld-linux-x86-64.so.2
+  - libssl.so.1.1
+  - libcrypto.so.1.1
+  - libz.so.1
+  - libgcc_s.so.1
+  - libm.so.6
+  - libpthread.so.0
+  - libdl.so.2
+- Zero GTK, WebKit, X11, Wayland, or `libdbus-1` shared library dependencies.
+
+Installed-Prefix Qualification (`scripts/install-scpctl.sh`)
+------------------------------------------------------------
+Verified package checksums via `node scripts/package-scpctl.mjs --verify dist-cli` and installed into a clean isolated prefix (removed after verification).
+Executed against `<prefix>/bin/scpctl`:
+- `experiments/cli-stdio-slice0/tests/slice1_production_stdio.mjs`: 3 passed, 0 failed
+- `experiments/cli-stdio-slice0/tests/slice4_production_stdio.mjs`: 5 passed, 0 failed
+- `experiments/cli-stdio-slice0/tests/slice5_release_qualification.mjs`: 3 passed, 0 failed (includes tamper rejection, `dbus-run-session` GUI-free Secret-Service-absent smoke with Inspector CLI 2.14.0 modern/legacy + `@modelcontextprotocol/client@2.4.0`, and `examples/standalone-cli/{shell,stdio-mcp}-agent-workflow.mjs`)
+Total installed-prefix Node E2E suite: 11 passed, 0 failed (9105.6ms).

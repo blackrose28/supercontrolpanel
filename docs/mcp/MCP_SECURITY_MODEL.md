@@ -1,5 +1,9 @@
 # SuperControlPanel MCP Security Model
 
+## Standalone stdio security note (Slice 5)
+
+Standalone `scpctl mcp serve --stdio` authorizes tools and resources solely from profile-local `stdio-policy.json` (defaulting to `read-only`, live-reloaded, and fail-closed on parse error), independent of desktop `sync-local.json` bearer auth and UI-approval settings. Isolated CLI profiles prohibit pointing at desktop config dirs (`POLICY_DENIED`). See [Standalone CLI Agent Guide](STANDALONE_CLI_AGENT_GUIDE.md) and [Slice 5 report](STANDALONE_CLI_SLICE5.md).
+
 ## Slice 6 qualification
 
 Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.

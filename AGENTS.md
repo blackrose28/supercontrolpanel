@@ -15,6 +15,8 @@ Maintain the PTY-driven function runner: features launch/control PTYs and report
 - `src/styles.css`: layout and terminal styling.
 - `src-tauri/src/main.rs`: Tauri v2 commands, Rust/portable-pty lifecycle, function orchestration.
 - `src-tauri/src/mcp/`: localhost HTTP MCP transport, tools, resources; design docs in `docs/mcp/`.
+- `crates/{scp-core,scp-mcp,scp-cli}/`: independent Rust workspace for shared runtime/backup core, desktop+stdio MCP adapters, and standalone `scpctl` CLI; agent guide and release docs in `docs/mcp/`.
+- `scripts/{package-scpctl.mjs,install-scpctl.sh}`, `Dockerfile.cli`, `examples/standalone-cli/`: standalone CLI packaging, checksum-verified prefix installer, and headless workflow examples.
 - `src-tauri/tauri.conf.json`: desktop build and window configuration.
 
 Install: `npm install`. Develop: `npm run tauri dev`. Build: `npm run tauri build`.
@@ -34,6 +36,7 @@ Test commands (run in the applicable package):
 - Admin frontend: Vitest + React Testing Library, `npm test -- --run`; `*.test.ts` / `*.test.tsx`.
 - NestJS backend: Jest, `npm test` (filter with `-- --testPathPattern=<file>`); `*.spec.ts`.
 - Tauri backend: `cargo test` in `src-tauri`; `#[cfg(test)]` modules or `tests/`.
+- Standalone CLI workspace: `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`, `scp-mcp` default vs `--all-features`, and `node --test experiments/cli-stdio-slice0/tests/slice{1_production_stdio,4_production_stdio,5_release_qualification}.mjs`.
 
 Use Ripwire from the repository root before broad code searches/whole-file reads:
 
@@ -66,3 +69,4 @@ Static analysis is approximate; verify dynamic dispatch and command/event contra
 - First-run enrollment saves CC credentials locally, enables CC, and connects its WebSocket. Both enrollment and skip mark `firstRunCompleted`.
 - HTTP MCP binds localhost only and requires bearer auth on every route. Redact secrets/auth tokens. Under `require-ui-approval`, reject sensitive HTTP tools.
 - MCP routes: GET `/health`, `/mcp/status`, `/mcp/tools`, `/mcp/resources`; POST `/mcp/tools/call`, `/mcp/resources/read`. Consult source/design docs before changing transport behavior.
+- Standalone `scpctl` keeps an isolated profile directory (`SCPCTL_CONFIG_DIR`, separate from desktop profiles) with single-writer `owner.lock`, fail-closed live-reloaded `stdio-policy.json`, and `StrictHostKeyChecking=yes` SSH/SFTP/SCP checks.

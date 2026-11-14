@@ -10,7 +10,9 @@ import { StdioClientTransport as ModernStdioTransport } from '@modelcontextproto
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
-const scpctlBin = new URL('../../../target/debug/scpctl', import.meta.url).pathname;
+const scpctlBin = process.env.SCPCTL_BIN
+  ? path.resolve(process.env.SCPCTL_BIN)
+  : new URL('../../../target/debug/scpctl', import.meta.url).pathname;
 
 async function setupSeededEnv(t, stdioPolicy = null) {
   const base = await mkdtemp(path.join(tmpdir(), 'scpctl-slice1-e2e-'));

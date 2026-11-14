@@ -1,5 +1,9 @@
 # SuperControlPanel MCP Transport and Auth
 
+## Standalone stdio transport (Slice 5)
+
+When operating with the desktop app closed, `scpctl mcp serve --stdio` serves newline-delimited UTF-8 JSON-RPC over stdin/stdout (diagnostics on stderr only; no HTTP listener and no bearer token discovery). See [Standalone CLI Agent Guide](STANDALONE_CLI_AGENT_GUIDE.md) and [Slice 5 report](STANDALONE_CLI_SLICE5.md) for framing/concurrency bounds, single-writer `owner.lock`, and `stdio-policy.json` separation from desktop HTTP auth.
+
 ## Implemented Streamable HTTP transport
 
 One Axum listener serves the SDK at exact `/mcp` and all six REST compatibility routes without redirects. Pinned rmcp 3.9.0/Axum 0.8.8 and SDK-managed legacy sessions are unchanged. The adapter covers all existing registry tools/resources under shared policy, with official-client tests for 2025-11-25 and 2026-07-28. Standard JSON/SSE handling belongs to the SDK. See [Slice 3](DESKTOP_STREAMABLE_HTTP_SLICE3.md) for contracts, tests and qualification limits.

@@ -1,5 +1,9 @@
 # SuperControlPanel MCP Tool Catalog
 
+## Standalone stdio catalog (Slices 4–5)
+
+`scpctl mcp serve --stdio` reuses the same `45`-operation / `6`-resource (`scp://*`) catalog under `stdio-policy.json`: `41` `Capability::Runtime` operations are callable when all categories and `"allow-local-policy"` are configured (`11` under default `read-only`, `15` with `file-transfer`), while `4` operations (`server_rdp_start`, `config_sync_pull`, `config_git_pull`, `config_git_push`) remain excluded with `CAPABILITY_UNAVAILABLE`. See [Standalone CLI Agent Guide](STANDALONE_CLI_AGENT_GUIDE.md), [Slice 4 report](STANDALONE_CLI_SLICE4.md), and [Slice 5 report](STANDALONE_CLI_SLICE5.md).
+
 ## Slice 6 qualification
 
 Config now exposes the full `/mcp` URL, separate token copy, tested Inspector CLI 2.14.0 examples and runtime refresh/retry. [Slice 6](DESKTOP_STREAMABLE_HTTP_SLICE6.md) records exact client/platform evidence and remaining release gates. Standard/REST schemas, shared category/sensitivity policy, helper base-URL/token discovery and desktop command/event contracts are unchanged. Compatibility routes remain through at least one stable release containing `/mcp`, with removal requiring separately reviewed helper/consumer migration. Cross-platform and untested product-client support are not implied.

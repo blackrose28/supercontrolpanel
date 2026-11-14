@@ -119,7 +119,7 @@ npm run helper:run -- status
 npm run helper:run -- openvpn status
 ```
 
-## Standalone CLI and stdio MCP (Slices 1–3)
+## Standalone CLI and stdio MCP (Slices 1–5)
 
 The independent Rust workspace (`scp-core`, `scp-mcp`, `scp-cli`) builds `scpctl` without Tauri, GTK/WebKit, `libdbus-sys`, or HTTP dependencies and executes cleanly with the desktop app closed:
 
@@ -129,7 +129,7 @@ cargo run --locked -p scp-cli -- schema --json
 cargo run --locked -p scp-cli -- capabilities --no-profile --json
 ```
 
-Implemented Slice 1–3 commands on `target/release/scpctl` (`31` commands total):
+Implemented Slice 1–5 commands and workflows on `target/release/scpctl` (`31` commands total):
 
 - Profile-free discovery: `--help`, `--version`, `schema [--command <CMD>] --json`, `capabilities --no-profile [--json]`, `openvpn detect [--json]`, `completion <bash|zsh|fish|powershell>` (also `--shell`).
 - Profile-backed read-only inspection (acquires exclusive `owner.lock`, rejects desktop config paths, runs journal recovery before loading config):
@@ -163,9 +163,16 @@ Implemented Slice 1–3 commands on `target/release/scpctl` (`31` commands total
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings export --output <PATH> [--overwrite] (--passphrase-file <PATH> | --passphrase-stdin | --interactive) [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings import --input <PATH> --preview (--passphrase-file <PATH> | --passphrase-stdin | --interactive) [--no-shared] [--no-servers] [--no-local] [--no-secrets] [--use-source-paths] [--remap <KEY=PATH>] [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings import --input <PATH> --apply --interactive [--passphrase-file <PATH> | --passphrase-stdin] [--no-shared] [--no-servers] [--no-local] [--no-secrets] [--use-source-paths] [--remap <KEY=PATH>]`
-- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by profile-local `stdio-policy.json` (`sensitiveActionPolicy: "read-only"`, exposing 9 read-only tools by default or 11 read-only tools + all 6 `scp://*` resources when `"file-transfer"` is enabled). Stdio MCP remains read-only until Slice 4.
+- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by live-reloaded, fail-closed `stdio-policy.json`: `11` read-only tools + all `6` `scp://*` resources under default `read-only` policy (`15` tools when `"file-transfer"` is added), and `41` callable tools under `"allow-local-policy"` with all `4` categories (`4` desktop/interactive operations remain excluded with `CAPABILITY_UNAVAILABLE`).
 
-`src-tauri` re-exports shared models, encrypted `.scpbak` backup engine primitives/references, pure runtime/RDP/config helpers, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [Slice 2 report](docs/mcp/STANDALONE_CLI_SLICE2.md), [Slice 3 report](docs/mcp/STANDALONE_CLI_SLICE3.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli` and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
+Release packaging, installation, agent examples, and CI helpers (`package.json` scripts `cli:build`, `cli:release`, `cli:test`, `cli:package`):
+
+- Package & verify release artifact (`SHA256SUMS`, `cargo tree` crate isolation, Linux `ldd` linkage check): `node scripts/package-scpctl.mjs --out-dir dist-cli && node scripts/package-scpctl.mjs --verify dist-cli`
+- Install verified archive into a prefix: `bash scripts/install-scpctl.sh --archive dist-cli/scpctl-v<VER>-<OS>-<ARCH>.tar.gz --checksums dist-cli/SHA256SUMS --prefix ~/.local`
+- Minimal headless Docker build definition: [`Dockerfile.cli`](Dockerfile.cli); cross-platform matrix CI: [`.github/workflows/standalone-cli.yml`](.github/workflows/standalone-cli.yml)
+- Runnable headless agent workflows: [`examples/standalone-cli/shell-agent-workflow.mjs`](examples/standalone-cli/shell-agent-workflow.mjs) and [`examples/standalone-cli/stdio-mcp-agent-workflow.mjs`](examples/standalone-cli/stdio-mcp-agent-workflow.mjs)
+
+`src-tauri` re-exports shared models, encrypted `.scpbak` backup engine primitives/references, pure runtime/RDP/config helpers, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Agent guide](docs/mcp/STANDALONE_CLI_AGENT_GUIDE.md), [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [Slice 2 report](docs/mcp/STANDALONE_CLI_SLICE2.md), [Slice 3 report](docs/mcp/STANDALONE_CLI_SLICE3.md), [Slice 4 report](docs/mcp/STANDALONE_CLI_SLICE4.md), [Slice 5 report](docs/mcp/STANDALONE_CLI_SLICE5.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`, installed-prefix/stdio qualification with `node --test experiments/cli-stdio-slice0/tests/slice{1_production_stdio,4_production_stdio,5_release_qualification}.mjs`, and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
 
 ## MCP support
 
