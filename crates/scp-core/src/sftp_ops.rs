@@ -9,7 +9,7 @@ use crate::models::{
 use crate::runtime::ProfileRuntime;
 use crate::secrets::KeyringBackend;
 use crate::ssh_ops::{
-    acquire_endpoint_for_server, connect_tcp_timeout, home_dir_from_env, host_key_untrusted,
+    connect_tcp_timeout, home_dir_from_env, host_key_untrusted, require_running_endpoint,
     verify_session_host_key,
 };
 use crate::supervisor::CancelToken;
@@ -129,7 +129,7 @@ pub(crate) fn open_remote_browser_impl<B: KeyringBackend>(
     rt: &ProfileRuntime<B>,
     server_id: &str,
     root_path: Option<&str>,
-    cancel: &CancelToken,
+    _cancel: &CancelToken,
 ) -> Result<RemoteBrowseSession, CoreError> {
     let norm_root = normalize_remote_transfer_path(
         root_path.unwrap_or("/"),
@@ -139,8 +139,7 @@ pub(crate) fn open_remote_browser_impl<B: KeyringBackend>(
     )
     .map_err(|e| e.into_core_error())?;
     let server = rt.get_server(server_id)?;
-    let (endpoint, mut lease) =
-        acquire_endpoint_for_server(rt, &server, "open_remote_browser", cancel)?;
+    let endpoint = require_running_endpoint(rt, &server, "open_remote_browser")?;
     let (kh_path, id_path) = rt.resolved_ssh_paths();
     let password = rt.read_optional_secret(&keyring_server_ssh_password_account(&server.id));
     let (ssh, sftp) = connect_and_open_sftp(
@@ -157,10 +156,9 @@ pub(crate) fn open_remote_browser_impl<B: KeyringBackend>(
     }
 
     let browser_id = format!("sftp-{}", NEXT_BROWSER_SEQ.fetch_add(1, Ordering::Relaxed));
-    let is_temp = lease.is_temporary();
     let entry = BrowserSession {
         server_id: server.id.clone(),
-        temp_tunnel: is_temp,
+        temp_tunnel: false,
         _ssh: ssh,
         sftp,
     };
@@ -168,10 +166,13 @@ pub(crate) fn open_remote_browser_impl<B: KeyringBackend>(
         .remote_browsers()
         .insert_session(&server.id, &browser_id, entry);
     let session = RemoteBrowseSession {
-        browser_id,
+        browser_id: browser_id.clone(),
         root_path: norm_root,
     };
-    lease.disarm();
+    rt.event_sink().emit(DomainEvent::RemoteBrowserOpened {
+        session_id: browser_id,
+        server_id: server.id,
+    });
     if let Some((old_id, old_temp, old_srv)) = replaced {
         emit_closed_and_cleanup(rt, &old_id, &old_srv, old_temp, "replaced");
     }

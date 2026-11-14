@@ -2,6 +2,7 @@
 use crate::models::{FunctionStatus, ScpTransferEntry};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 /// Event emitted by the core runtime without coupling to Tauri or MCP transports.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,12 +24,19 @@ pub enum DomainEvent {
     TransferUpdated {
         entry: ScpTransferEntry,
     },
+    RemoteBrowserOpened {
+        session_id: String,
+        server_id: String,
+    },
     RemoteBrowserClosed {
         session_id: String,
         server_id: String,
         reason: String,
     },
 }
+
+/// Thread-safe callback invoked whenever the runtime emits a `DomainEvent`.
+pub type EventObserver = Arc<dyn Fn(&DomainEvent) + Send + Sync>;
 
 /// Sink notified whenever runtime functions, processes, transfers, or browsers change.
 pub trait EventSink: Send + Sync {
@@ -41,6 +49,34 @@ pub struct NoopEventSink;
 
 impl EventSink for NoopEventSink {
     fn emit(&self, _event: DomainEvent) {}
+}
+
+pub(crate) struct FanoutEventSink {
+    primary: Arc<dyn EventSink>,
+    observers: Mutex<Vec<EventObserver>>,
+}
+
+impl FanoutEventSink {
+    pub(crate) fn wrap(primary: Arc<dyn EventSink>) -> Arc<Self> {
+        Arc::new(Self {
+            primary,
+            observers: Mutex::new(Vec::new()),
+        })
+    }
+
+    pub(crate) fn add_observer(&self, observer: EventObserver) {
+        self.observers.lock().push(observer);
+    }
+}
+
+impl EventSink for FanoutEventSink {
+    fn emit(&self, event: DomainEvent) {
+        self.primary.emit(event.clone());
+        let snapshot: Vec<EventObserver> = self.observers.lock().clone();
+        for observer in snapshot {
+            observer(&event);
+        }
+    }
 }
 
 /// Thread-safe event buffer used in tests and short-lived CLI commands.

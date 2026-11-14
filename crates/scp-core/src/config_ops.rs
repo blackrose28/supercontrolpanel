@@ -303,7 +303,28 @@ fn parse_and_validate_server(value: &Value) -> Result<Server, CoreError> {
     Ok(server)
 }
 
+#[derive(Default)]
+struct ExtractedConfigSecrets {
+    openvpn_password: Option<Zeroizing<String>>,
+    openvpn_otp_secret: Option<Zeroizing<String>>,
+    boundary_password: Option<Zeroizing<String>>,
+    boundary_oidc_password: Option<Zeroizing<String>>,
+    boundary_oidc_otp_secret: Option<Zeroizing<String>>,
+}
+
 fn validate_config_object(value: &mut Value) -> Result<(), CoreError> {
+    let _ = validate_config_object_impl(value, false)?;
+    Ok(())
+}
+
+fn validate_mcp_config_object(value: &mut Value) -> Result<ExtractedConfigSecrets, CoreError> {
+    validate_config_object_impl(value, true)
+}
+
+fn validate_config_object_impl(
+    value: &mut Value,
+    allow_secrets: bool,
+) -> Result<ExtractedConfigSecrets, CoreError> {
     check_string_bounds(value, "config")?;
     let obj = value.as_object_mut().ok_or_else(|| {
         CoreError::invalid_arguments("invalid_config", "Config payload must be a JSON object")
@@ -313,21 +334,92 @@ fn validate_config_object(value: &mut Value) -> Result<(), CoreError> {
         let app_obj = as_object(app, "config.app")?;
         reject_unknown_keys(app_obj, CONFIG_APP_KEYS, "config.app")?;
     }
+    let mut secrets = ExtractedConfigSecrets::default();
     if let Some(vpn) = obj.get_mut("openvpn") {
         let vpn_obj = vpn.as_object_mut().ok_or_else(|| {
             CoreError::invalid_arguments("invalid_config", "config.openvpn must be an object")
         })?;
         reject_unknown_keys(vpn_obj, CONFIG_OPENVPN_KEYS, "config.openvpn")?;
-        reject_inline_secret_fields(vpn_obj, &["password", "otpSecret"])?;
+        if allow_secrets {
+            secrets.openvpn_password = extract_optional_secret_field(vpn_obj, "password")?;
+            secrets.openvpn_otp_secret = extract_optional_secret_field(vpn_obj, "otpSecret")?;
+        } else {
+            reject_inline_secret_fields(vpn_obj, &["password", "otpSecret"])?;
+        }
     }
     if let Some(boundary) = obj.get_mut("boundary") {
         let b_obj = boundary.as_object_mut().ok_or_else(|| {
             CoreError::invalid_arguments("invalid_config", "config.boundary must be an object")
         })?;
         reject_unknown_keys(b_obj, CONFIG_BOUNDARY_KEYS, "config.boundary")?;
-        reject_inline_secret_fields(b_obj, &["password", "oidcPassword", "oidcOtpSecret"])?;
+        if allow_secrets {
+            secrets.boundary_password = extract_optional_secret_field(b_obj, "password")?;
+            secrets.boundary_oidc_password = extract_optional_secret_field(b_obj, "oidcPassword")?;
+            secrets.boundary_oidc_otp_secret =
+                extract_optional_secret_field(b_obj, "oidcOtpSecret")?;
+        } else {
+            reject_inline_secret_fields(b_obj, &["password", "oidcPassword", "oidcOtpSecret"])?;
+        }
     }
-    Ok(())
+    Ok(secrets)
+}
+
+fn extract_optional_secret_field(
+    obj: &mut Map<String, Value>,
+    key: &str,
+) -> Result<Option<Zeroizing<String>>, CoreError> {
+    let Some(val) = obj.remove(key) else {
+        return Ok(None);
+    };
+    let s = val.as_str().ok_or_else(|| {
+        CoreError::invalid_arguments(
+            "invalid_config",
+            format!("Config secret field '{key}' must be a string"),
+        )
+    })?;
+    if s.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(Zeroizing::new(s.to_string())))
+    }
+}
+
+fn apply_optional_local_path_updates(
+    sanitized: &Value,
+    current_sync: &SyncSettings,
+    next_sync: &mut SyncSettings,
+    next: &mut AppConfig,
+) {
+    let vpn_obj = sanitized.get("openvpn").and_then(Value::as_object);
+    let boundary_obj = sanitized.get("boundary").and_then(Value::as_object);
+    let updates: [(bool, &str, &mut String, &mut String); 3] = [
+        (
+            vpn_obj.is_some_and(|m| m.contains_key("executablePath")),
+            current_sync.openvpn_executable_path.as_str(),
+            &mut next_sync.openvpn_executable_path,
+            &mut next.openvpn.executable_path,
+        ),
+        (
+            vpn_obj.is_some_and(|m| m.contains_key("ovpnPath")),
+            current_sync.openvpn_ovpn_path.as_str(),
+            &mut next_sync.openvpn_ovpn_path,
+            &mut next.openvpn.ovpn_path,
+        ),
+        (
+            boundary_obj.is_some_and(|m| m.contains_key("cliPath")),
+            current_sync.boundary_cli_path.as_str(),
+            &mut next_sync.boundary_cli_path,
+            &mut next.boundary.cli_path,
+        ),
+    ];
+    for (provided, current_val, sync_slot, cfg_slot) in updates {
+        if provided {
+            *sync_slot = cfg_slot.trim().to_string();
+        } else {
+            *sync_slot = current_val.to_string();
+            *cfg_slot = current_val.to_string();
+        }
+    }
 }
 
 fn reject_inline_secret_fields(
@@ -966,14 +1058,7 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
             }));
         }
 
-        if next_sync.openvpn_executable_path != current_sync.openvpn_executable_path
-            || next_sync.openvpn_ovpn_path != current_sync.openvpn_ovpn_path
-            || next_sync.boundary_cli_path != current_sync.boundary_cli_path
-        {
-            write_sync_settings_atomic(&self.profile_paths().sync_local_path, &next_sync)?;
-        }
-        write_app_config_atomic(&self.profile_paths().config_path, &next)?;
-        self.replace_app_config_and_sync(next, next_sync);
+        self.persist_config_and_sync_delta(&current_sync, next_sync, next.clone())?;
         Ok(json!({
             "preview": false,
             "action": "patch",
@@ -982,6 +1067,137 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
             "appConfig": after_view,
             "changed": current_rev != next_rev,
         }))
+    }
+
+    /// Saves a full MCP config payload, routing non-empty secrets to the keyring while
+    /// preserving omitted keyring secrets and omitted local executable/profile paths.
+    pub fn save_app_config_mcp(&self, raw: &Value) -> Result<AppConfig, CoreError> {
+        let mut sanitized = raw.clone();
+        let secrets = validate_mcp_config_object(&mut sanitized)?;
+        if !sanitized.get("app").is_some_and(Value::is_object) {
+            return Err(CoreError::invalid_arguments(
+                "invalid_config",
+                "Full config save requires 'app' object with defaultTerminalCols and defaultTerminalRows",
+            ));
+        }
+        let mut next: AppConfig = serde_json::from_value(sanitized.clone()).map_err(|e| {
+            CoreError::invalid_arguments("invalid_config", format!("Invalid config JSON: {e}"))
+        })?;
+        validate_app_config_values(&next)?;
+
+        let _guard = self.gate().enter()?;
+        let current = self.get_app_config()?;
+        let current_sync = self.get_sync_settings()?;
+        let mut next_sync = current_sync.clone();
+        apply_optional_local_path_updates(&sanitized, &current_sync, &mut next_sync, &mut next);
+        self.apply_extracted_config_secrets(&current, &secrets, &mut next)?;
+        self.persist_config_and_sync_delta(&current_sync, next_sync, next.clone())?;
+        Ok(next)
+    }
+
+    /// Patches the active configuration from an MCP JSON payload, routing non-empty secrets
+    /// to the keyring while preserving existing keyring secrets when omitted or empty.
+    pub fn patch_app_config_mcp(&self, patch: &Value) -> Result<AppConfig, CoreError> {
+        let mut sanitized = patch.clone();
+        let secrets = validate_mcp_config_object(&mut sanitized)?;
+
+        let _guard = self.gate().enter()?;
+        let current = self.get_app_config()?;
+        let current_sync = self.get_sync_settings()?;
+        let mut merged = serde_json::to_value(AppConfigForDisk::from(&current)).map_err(|e| {
+            CoreError::operation_failed(
+                "config_encode_failed",
+                e.to_string(),
+                false,
+                "fix_configuration",
+            )
+        })?;
+        merged["openvpn"]["executablePath"] = json!(current_sync.openvpn_executable_path);
+        merged["openvpn"]["ovpnPath"] = json!(current_sync.openvpn_ovpn_path);
+        merged["boundary"]["cliPath"] = json!(current_sync.boundary_cli_path);
+        merge_json_object(&mut merged, &sanitized);
+
+        let mut next: AppConfig = serde_json::from_value(merged).map_err(|e| {
+            CoreError::invalid_arguments(
+                "invalid_config",
+                format!("Invalid config patch result: {e}"),
+            )
+        })?;
+        validate_app_config_values(&next)?;
+
+        let mut next_sync = current_sync.clone();
+        apply_optional_local_path_updates(&sanitized, &current_sync, &mut next_sync, &mut next);
+        self.apply_extracted_config_secrets(&current, &secrets, &mut next)?;
+        self.persist_config_and_sync_delta(&current_sync, next_sync, next.clone())?;
+        Ok(next)
+    }
+
+    fn apply_extracted_config_secrets(
+        &self,
+        current: &AppConfig,
+        secrets: &ExtractedConfigSecrets,
+        next: &mut AppConfig,
+    ) -> Result<(), CoreError> {
+        let mut store = self.secrets_arc().lock();
+        let slots: [(&str, Option<&Zeroizing<String>>, &str, &mut String); 5] = [
+            (
+                KEYRING_OPENVPN_PASSWORD,
+                secrets.openvpn_password.as_ref(),
+                current.openvpn.password.as_str(),
+                &mut next.openvpn.password,
+            ),
+            (
+                KEYRING_OPENVPN_OTP_SECRET,
+                secrets.openvpn_otp_secret.as_ref(),
+                current.openvpn.otp_secret.as_str(),
+                &mut next.openvpn.otp_secret,
+            ),
+            (
+                KEYRING_BOUNDARY_PASSWORD,
+                secrets.boundary_password.as_ref(),
+                current.boundary.password.as_str(),
+                &mut next.boundary.password,
+            ),
+            (
+                KEYRING_BOUNDARY_OIDC_PASSWORD,
+                secrets.boundary_oidc_password.as_ref(),
+                current.boundary.oidc_password.as_str(),
+                &mut next.boundary.oidc_password,
+            ),
+            (
+                KEYRING_BOUNDARY_OIDC_OTP_SECRET,
+                secrets.boundary_oidc_otp_secret.as_ref(),
+                current.boundary.oidc_otp_secret.as_str(),
+                &mut next.boundary.oidc_otp_secret,
+            ),
+        ];
+        for (account, incoming, current_val, target_slot) in slots {
+            *target_slot = match incoming {
+                Some(v) => {
+                    store.set(account, v)?;
+                    v.to_string()
+                }
+                None => current_val.to_string(),
+            };
+        }
+        Ok(())
+    }
+
+    fn persist_config_and_sync_delta(
+        &self,
+        current_sync: &SyncSettings,
+        next_sync: SyncSettings,
+        next: AppConfig,
+    ) -> Result<(), CoreError> {
+        if next_sync.openvpn_executable_path != current_sync.openvpn_executable_path
+            || next_sync.openvpn_ovpn_path != current_sync.openvpn_ovpn_path
+            || next_sync.boundary_cli_path != current_sync.boundary_cli_path
+        {
+            write_sync_settings_atomic(&self.profile_paths().sync_local_path, &next_sync)?;
+        }
+        write_app_config_atomic(&self.profile_paths().config_path, &next)?;
+        self.replace_app_config_and_sync(next, next_sync);
+        Ok(())
     }
 
     pub fn patch_sync_settings(

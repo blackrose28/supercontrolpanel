@@ -14,17 +14,6 @@ use scp_core::runtime::ProfileRuntime;
 use scp_core::secrets::MemoryKeyringBackend;
 use scp_core::supervisor::CancelToken;
 
-fn seed_profile(cfg_dir: &Path, servers: serde_json::Value, boundary_cli_path: &Path) {
-    let profile_dir = cfg_dir.join("profiles").join("default");
-    fs::create_dir_all(&profile_dir).unwrap();
-    fs::write(profile_dir.join("servers.json"), servers.to_string()).unwrap();
-    fs::write(
-        profile_dir.join("sync-local.json"),
-        json!({ "boundaryCliPath": boundary_cli_path.to_string_lossy() }).to_string(),
-    )
-    .unwrap();
-}
-
 fn open_test_runtime(
     cfg: &Path,
     desktop: &Path,
@@ -80,7 +69,7 @@ fn scp_ownership_registration_cancel_race() {
 }
 
 fn seed_two_servers(cfg: &Path, fx: &SshdFixture, b_port: u16) {
-    seed_profile(
+    ssh_fixture::seed_default_boundary_profile(
         cfg,
         json!({
             "servers": [

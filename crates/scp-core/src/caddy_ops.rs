@@ -1,19 +1,29 @@
 //! Headless Caddy static/reverse-proxy supervision and readiness checks.
 use crate::error::CoreError;
 use crate::models::{StartFunctionResult, CADDY_FUNCTION_ID};
-use crate::runtime::{ProfileRuntime, SuperviseHooks};
+use crate::runtime::{ProfileRuntime, SuperviseHooks, SupervisedReadyWait};
 use crate::secrets::KeyringBackend;
 use crate::supervisor::{CancelToken, ChildLaunch, OutputCallback, SpawnMode};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const CADDY_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) fn start_caddy_impl<B: KeyringBackend>(
     rt: &ProfileRuntime<B>,
     folder_override: Option<&str>,
+    cancel: &CancelToken,
+) -> Result<StartFunctionResult, CoreError> {
+    start_caddy_with_size_impl(rt, folder_override, None, None, cancel)
+}
+
+pub(crate) fn start_caddy_with_size_impl<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
+    folder_override: Option<&str>,
+    cols: Option<u16>,
+    rows: Option<u16>,
     cancel: &CancelToken,
 ) -> Result<StartFunctionResult, CoreError> {
     let folder = resolve_caddy_folder(rt, folder_override)?;
@@ -31,8 +41,8 @@ pub(crate) fn start_caddy_impl<B: KeyringBackend>(
         env: Vec::new(),
         env_remove: Vec::new(),
         mode: SpawnMode::Pty {
-            cols: cfg.app.default_terminal_cols.max(80),
-            rows: cfg.app.default_terminal_rows.max(24),
+            cols: cols.unwrap_or(cfg.app.default_terminal_cols).max(80),
+            rows: rows.unwrap_or(cfg.app.default_terminal_rows).max(24),
         },
         kill_tree: true,
         kind: "caddy",
@@ -153,35 +163,23 @@ fn wait_for_caddy_ready<B: KeyringBackend>(
     ready: &AtomicBool,
     cancel: &CancelToken,
 ) -> Result<(), CoreError> {
-    let deadline = Instant::now() + CADDY_READY_TIMEOUT;
-    loop {
-        if cancel.is_cancelled() {
-            let _ = rt.stop_supervised_function(CADDY_FUNCTION_ID, Duration::from_secs(2));
-            return Err(CoreError::interrupted("Caddy start cancelled"));
-        }
-        if ready.load(Ordering::SeqCst) {
-            return Ok(());
-        }
-        if rt
-            .supervisor()
-            .active_session_for_function(CADDY_FUNCTION_ID)
-            .as_deref()
-            != Some(session_id)
-        {
-            return Err(CoreError::operation_failed(
+    rt.wait_for_supervised_ready(
+        SupervisedReadyWait {
+            function_id: CADDY_FUNCTION_ID,
+            session_id,
+            timeout: CADDY_READY_TIMEOUT,
+            cancel_msg: "Caddy start cancelled",
+            early_exit: (
                 "caddy_exited_early",
                 "Caddy exited before serving configuration",
-                false,
                 "inspect_caddyfile",
-            ));
-        }
-        if Instant::now() >= deadline {
-            let _ = rt.stop_supervised_function(CADDY_FUNCTION_ID, Duration::from_secs(2));
-            return Err(CoreError::timeout(
+            ),
+            timeout_err: (
                 "caddy_ready_timeout",
-                "Timed out waiting for Caddy readiness",
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+                "Timed out waiting for Caddy readiness".to_string(),
+            ),
+        },
+        cancel,
+        || Ok(ready.load(Ordering::SeqCst)),
+    )
 }

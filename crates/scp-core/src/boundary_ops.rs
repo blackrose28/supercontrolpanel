@@ -195,11 +195,28 @@ pub(crate) fn start_boundary_auth_impl<B: KeyringBackend + 'static>(
     rt: &ProfileRuntime<B>,
     cancel: &CancelToken,
 ) -> Result<StartFunctionResult, CoreError> {
+    start_boundary_auth_with_size_impl(rt, None, None, cancel)
+}
+
+pub(crate) fn start_boundary_auth_with_size_impl<B: KeyringBackend + 'static>(
+    rt: &ProfileRuntime<B>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    cancel: &CancelToken,
+) -> Result<StartFunctionResult, CoreError> {
     let cfg = rt.get_app_config()?;
     let password = validate_boundary_auth_mode(rt, &cfg)?;
     let sync = rt.get_sync_settings()?;
     let exe = resolve_checked_boundary(&sync.boundary_cli_path)?;
-    let launch = build_boundary_auth_launch(rt, &cfg, exe, &password);
+    let mut launch = build_boundary_auth_launch(rt, &cfg, exe, &password);
+    if let SpawnMode::Pty { cols: c, rows: r } = &mut launch.mode {
+        if let Some(cols) = cols {
+            *c = cols.max(80);
+        }
+        if let Some(rows) = rows {
+            *r = rows.max(24);
+        }
+    }
     let out_buf = Arc::new(Mutex::new(String::new()));
     let hooks = build_boundary_auth_hooks(rt, password, Arc::clone(&out_buf));
     let session_id =

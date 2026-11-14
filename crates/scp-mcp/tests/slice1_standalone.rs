@@ -1,8 +1,11 @@
+#[path = "support/mod.rs"]
+mod support;
+
 use serde_json::json;
 use std::fs;
 use tempfile::TempDir;
 
-use scp_core::models::{ConnectionMethod, Server, ServerOs, StdioPolicy};
+use scp_core::models::StdioPolicy;
 use scp_core::profile::{resolve_profile_paths, ProfileLocationInput};
 use scp_core::runtime::ProfileRuntime;
 use scp_core::secrets::{KeyringHealth, MemoryKeyringBackend};
@@ -17,48 +20,14 @@ use scp_mcp::standalone::{
 use scp_mcp::validation::{conforms, output_schema};
 
 fn setup_runtime(health: KeyringHealth) -> (TempDir, ProfileRuntime<MemoryKeyringBackend>) {
-    let tmp = TempDir::new().unwrap();
-    let cli_root = tmp.path().join("cli_root");
-    let desktop = tmp.path().join("desktop");
-    let input = ProfileLocationInput {
-        config_dir: Some(&cli_root),
-        desktop_config_dir: Some(&desktop),
-        profile: Some("agent"),
-        ..Default::default()
-    };
-    let paths = resolve_profile_paths(&input).unwrap();
-    let server = Server {
-        id: "srv-1".into(),
-        name: "app-box".into(),
-        host: "10.1.2.3".into(),
-        os: ServerOs::Linux,
-        connection_method: ConnectionMethod::Ssh,
-        ssh_port: 22,
-        ssh_user: "deploy".into(),
-        boundary_target_id: String::new(),
-        boundary_listen_port: 0,
-        services: vec![],
-    };
-    fs::write(
-        &paths.servers_path,
-        serde_json::to_string_pretty(&json!({"servers": [server]})).unwrap(),
-    )
-    .unwrap();
-    // Permissive sync-local settings must never grant stdio permission.
-    fs::write(
-        &paths.sync_local_path,
-        serde_json::to_string_pretty(&json!({
-            "mcpSensitiveActionPolicy": "allow-with-token",
-            "mcpAllowedToolCategories": ["read-only", "runtime-control", "config-mutation", "file-transfer"],
-            "mcpAuthToken": "super-secret-mcp-token",
-            "ccAgentToken": "super-secret-cc-token"
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
-    let rt = ProfileRuntime::open_with_backend(&input, "stdio", MemoryKeyringBackend::new(health))
-        .unwrap();
+    let sync_local = json!({
+        "mcpSensitiveActionPolicy": "allow-with-token",
+        "mcpAllowedToolCategories": ["read-only", "runtime-control", "config-mutation", "file-transfer"],
+        "mcpAuthToken": "super-secret-mcp-token",
+        "ccAgentToken": "super-secret-cc-token"
+    });
+    let (tmp, rt, _) =
+        support::open_seeded_stdio_runtime("10.1.2.3", health, Some(sync_local), None);
     (tmp, rt)
 }
 
@@ -102,6 +71,8 @@ fn generalized_capability_and_lifetime_preserve_desktop_contract() {
 fn standalone_authorization_defaults_to_read_only_and_fails_closed() {
     let default_policy = StdioPolicy::default();
     let default_permitted = [
+        "boundary_search_targets",
+        "detect_openvpn_executable",
         "app_get_overview",
         "function_status_list",
         "function_status_get",
@@ -123,7 +94,12 @@ fn standalone_authorization_defaults_to_read_only_and_fails_closed() {
         default_permitted.len()
     );
     // Transfer read queries carry category "file-transfer" and require that category enabled.
-    for transfer_read in ["scp_transfer_list", "scp_transfer_get"] {
+    for transfer_read in [
+        "scp_transfer_list",
+        "scp_transfer_get",
+        "remote_browser_list_children",
+        "remote_browser_stat_path",
+    ] {
         assert_eq!(
             authorize_standalone(transfer_read, &default_policy)
                 .unwrap_err()
@@ -139,10 +115,14 @@ fn standalone_authorization_defaults_to_read_only_and_fails_closed() {
     };
     assert_eq!(
         permitted_standalone_operations(&read_and_transfer_policy).len(),
-        11
+        15
     );
     assert!(authorize_standalone("scp_transfer_list", &read_and_transfer_policy).is_ok());
     assert!(authorize_standalone("scp_transfer_get", &read_and_transfer_policy).is_ok());
+    assert!(
+        authorize_standalone("remote_browser_list_children", &read_and_transfer_policy).is_ok()
+    );
+    assert!(authorize_standalone("remote_browser_stat_path", &read_and_transfer_policy).is_ok());
     assert_eq!(
         authorize_standalone("scp_upload", &read_and_transfer_policy)
             .unwrap_err()
@@ -150,19 +130,28 @@ fn standalone_authorization_defaults_to_read_only_and_fails_closed() {
         ErrorCode::PolicyDenied
     );
 
-    // Unextracted read-only operations fail with CapabilityUnavailable.
-    for unextracted in [
-        "boundary_search_targets",
-        "detect_openvpn_executable",
-        "remote_browser_list_children",
-        "remote_browser_stat_path",
+    // Interactive/protected/reviewed-git operations remain unavailable even under permissive policy.
+    let all_cats_permissive = StdioPolicy {
+        sensitive_action_policy: "allow-local-policy".into(),
+        allowed_tool_categories: vec![
+            "read-only".into(),
+            "runtime-control".into(),
+            "config-mutation".into(),
+            "file-transfer".into(),
+        ],
+    };
+    for excluded in [
+        "server_rdp_start",
+        "config_sync_pull",
+        "config_git_pull",
+        "config_git_push",
     ] {
         assert_eq!(
-            authorize_standalone(unextracted, &read_and_transfer_policy)
+            authorize_standalone(excluded, &all_cats_permissive)
                 .unwrap_err()
                 .code,
             ErrorCode::CapabilityUnavailable,
-            "{unextracted}"
+            "{excluded}"
         );
     }
 
@@ -395,7 +384,7 @@ fn stdio_transport_serves_jsonrpc_discovery_calls_and_clean_eof() {
             .unwrap();
         let tools_resp: serde_json::Value =
             serde_json::from_str(&reader.next_line().await.unwrap().unwrap()).unwrap();
-        assert_eq!(tools_resp["result"]["tools"].as_array().unwrap().len(), 9);
+        assert_eq!(tools_resp["result"]["tools"].as_array().unwrap().len(), 11);
 
         writer
             .write_all(
@@ -456,8 +445,8 @@ fn slice3_cli_schemas_and_capabilities_are_complete() {
 
     let ops = full["mcpOperations"].as_array().unwrap();
     assert_eq!(ops.len(), 45);
-    assert_eq!(ops.iter().filter(|o| o["available"] == true).count(), 11);
-    assert_eq!(ops.iter().filter(|o| o["available"] == false).count(), 34);
+    assert_eq!(ops.iter().filter(|o| o["available"] == true).count(), 41);
+    assert_eq!(ops.iter().filter(|o| o["available"] == false).count(), 4);
 
     let resources = full["mcpResources"].as_array().unwrap();
     assert_eq!(
@@ -506,8 +495,6 @@ fn slice3_cli_schemas_and_capabilities_are_complete() {
     assert_eq!(caps["runtimeFamilies"]["config"], "cli_local");
     assert_eq!(caps["runtimeFamilies"]["backup"], "cli_local");
     assert_eq!(caps["runtimeFamilies"]["rdp"], "cli_interactive_gui");
-    assert_eq!(
-        caps["unavailableFamilies"],
-        json!({"sftp": "slice4_planned"})
-    );
+    assert_eq!(caps["runtimeFamilies"]["sftp"], "stdio_persistent_browser");
+    assert_eq!(caps["unavailableFamilies"], json!({}));
 }

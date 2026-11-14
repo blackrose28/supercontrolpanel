@@ -51,11 +51,7 @@ impl TestEnv {
     }
 
     fn seed_profile(&self, profile: &str, cfg: Value, sync: Value, servers: Value) {
-        let pdir = self.root.join("profiles").join(profile);
-        fs::create_dir_all(&pdir).unwrap();
-        fs::write(pdir.join("config.json"), cfg.to_string()).unwrap();
-        fs::write(pdir.join("sync-local.json"), sync.to_string()).unwrap();
-        fs::write(pdir.join("servers.json"), servers.to_string()).unwrap();
+        ssh_fixture::seed_named_profile(&self.root, profile, Some(cfg), sync, servers);
     }
 
     fn run(&self, profile: Option<&str>, args: &[&str], extra: &[(&str, &str)]) -> Output {
@@ -368,7 +364,12 @@ fn cli_one_shot_scp_upload_and_download_with_temporary_boundary_tunnel() {
         ],
         &ssh_env,
     );
-    assert!(dl.status.success());
+    assert!(
+        dl.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&dl.stdout),
+        String::from_utf8_lossy(&dl.stderr)
+    );
     assert_eq!(fs::read(&dl_dest).unwrap(), b"cli-slice2-boundary-scp-999");
     wait_port_freed(b_port, Duration::from_secs(2));
 
@@ -805,8 +806,8 @@ fn cli_schema_and_capabilities_slice2_surface() {
     }
     let ops = sbody["data"]["mcpOperations"].as_array().unwrap();
     assert_eq!(ops.len(), 45);
-    assert_eq!(ops.iter().filter(|o| o["available"] == true).count(), 11);
-    assert_eq!(ops.iter().filter(|o| o["available"] == false).count(), 34);
+    assert_eq!(ops.iter().filter(|o| o["available"] == true).count(), 41);
+    assert_eq!(ops.iter().filter(|o| o["available"] == false).count(), 4);
     assert_eq!(sbody["data"]["mcpResources"].as_array().unwrap().len(), 6);
 
     let caps = env.run(None, &["capabilities", "--no-profile", "--json"], &[]);
@@ -817,12 +818,13 @@ fn cli_schema_and_capabilities_slice2_surface() {
             .as_array()
             .unwrap()
             .len(),
-        9
+        11
     );
     assert!(cbody["data"]["runtimeFamilies"].is_object());
     assert_eq!(cbody["data"]["runtimeFamilies"]["backup"], "cli_local");
     assert_eq!(
-        cbody["data"]["unavailableFamilies"],
-        json!({"sftp": "slice4_planned"})
+        cbody["data"]["runtimeFamilies"]["sftp"],
+        "stdio_persistent_browser"
     );
+    assert_eq!(cbody["data"]["unavailableFamilies"], json!({}));
 }

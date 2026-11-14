@@ -11,7 +11,7 @@ use crate::models::{
 };
 use crate::runtime::ProfileRuntime;
 use crate::secrets::KeyringBackend;
-use crate::supervisor::{AcceptOutcome, CancelToken, ChildLaunch, ProcessSupervisor, SpawnMode};
+use crate::supervisor::{AcceptOutcome, CancelToken, ChildLaunch, OutputCallback, SpawnMode};
 use crate::transfer_store::{
     attach_scp_transfer_session, complete_scp_transfer_session, create_scp_transfer_entry,
     get_scp_transfer_entry, handle_scp_transfer_output, update_scp_transfer_entry,
@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 const DEFAULT_BOUNDARY_LISTEN_PORT: u16 = 6222;
 const DEFAULT_TUNNEL_READY_TIMEOUT: Duration = Duration::from_secs(12);
-const DEFAULT_SSH_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+pub(crate) const DEFAULT_SSH_CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// Function ID used for a server's Boundary tunnel.
 pub fn server_tunnel_function_id(server_id: &str) -> String {
@@ -431,10 +431,72 @@ pub(crate) fn acquire_endpoint_for_server<'a, B: KeyringBackend>(
 }
 
 pub(crate) struct ScpJobSpec {
+    server_id: String,
     title: String,
     src: String,
     dst: String,
     args: Vec<String>,
+}
+
+fn resolve_canonical_with_missing_tail(path: &Path) -> Result<PathBuf, CoreError> {
+    if path.exists() || path.symlink_metadata().is_ok() {
+        return path.canonicalize().map_err(|e| {
+            CoreError::invalid_arguments(
+                "invalid_local_path",
+                format!("Invalid local path {}: {e}", path.display()),
+            )
+        });
+    }
+    let mut missing = Vec::new();
+    let mut cur = path;
+    loop {
+        if cur.exists() || cur.symlink_metadata().is_ok() {
+            let mut base = cur.canonicalize().map_err(|e| {
+                CoreError::invalid_arguments(
+                    "invalid_local_path",
+                    format!("Invalid local path {}: {e}", path.display()),
+                )
+            })?;
+            for part in missing.iter().rev() {
+                base.push(part);
+            }
+            return Ok(base);
+        }
+        let Some(name) = cur.file_name() else {
+            return Err(CoreError::invalid_arguments(
+                "invalid_local_path",
+                format!("Local path has no existing ancestor: {}", path.display()),
+            ));
+        };
+        missing.push(name.to_os_string());
+        cur = match cur.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent,
+            _ => Path::new("."),
+        };
+    }
+}
+
+fn reject_profile_dir_transfer_path<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
+    local_path: &str,
+) -> Result<(), CoreError> {
+    let profile_dir = rt.profile_paths().profile_dir.canonicalize().map_err(|e| {
+        CoreError::operation_failed(
+            "profile_dir_failed",
+            e.to_string(),
+            false,
+            "fix_configuration",
+        )
+    })?;
+    let resolved = resolve_canonical_with_missing_tail(Path::new(local_path))?;
+    if resolved == profile_dir || resolved.starts_with(&profile_dir) {
+        return Err(CoreError::policy_denied(
+            "protected_profile_path",
+            "SCP transfers cannot read or overwrite files inside the profile directory",
+            "select_external_path",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_upload_inputs(
@@ -461,18 +523,10 @@ fn validate_download_inputs(req: &ScpDownloadRequest<'_>) -> Result<(String, Str
             .map_err(|e| e.into_core_error())?;
     let local =
         validate_local_download_target(req.local_target).map_err(|e| e.into_core_error())?;
-    if Path::new(&local).exists() && !req.overwrite {
-        return Err(CoreError::conflict(
-            "destination_exists",
-            format!("Local destination already exists: {local}"),
-            false,
-            "pass_overwrite_flag",
-        ));
-    }
     Ok((remote, local))
 }
 
-fn require_running_endpoint<B: KeyringBackend>(
+pub(crate) fn require_running_endpoint<B: KeyringBackend>(
     rt: &ProfileRuntime<B>,
     server: &Server,
     op: &str,
@@ -484,7 +538,7 @@ fn require_running_endpoint<B: KeyringBackend>(
         if rt.supervisor().active_session_for_function(&fid).is_none() {
             return Err(CoreError::conflict(
                 "tunnel_not_running",
-                "Boundary tunnel must be running before starting an async SCP transfer",
+                format!("Boundary tunnel must be running before {op}"),
                 false,
                 "start_server_tunnel",
             ));
@@ -565,7 +619,12 @@ fn prepare_upload_spec<'a, B: KeyringBackend>(
     async_mode: bool,
     cancel: &CancelToken,
 ) -> Result<(ScpJobSpec, Option<TunnelLease<'a, B>>), CoreError> {
+    let trimmed_local = paths.0.trim();
+    if !trimmed_local.is_empty() {
+        reject_profile_dir_transfer_path(rt, trimmed_local)?;
+    }
     let (local, remote, rec) = validate_upload_inputs(paths.0, paths.1, paths.2)?;
+    reject_profile_dir_transfer_path(rt, &local)?;
     let server = rt.get_server(server_id)?;
     let op = if async_mode {
         "scp_start_upload"
@@ -575,6 +634,7 @@ fn prepare_upload_spec<'a, B: KeyringBackend>(
     let (endpoint, lease) = prepare_scp_endpoint(rt, &server, op, async_mode, cancel)?;
     let args = build_verified_scp_args(rt, &endpoint, &local, &remote, rec, false)?;
     let spec = ScpJobSpec {
+        server_id: server.id.clone(),
         title: format!("Upload to {}", server.name),
         src: local,
         dst: remote,
@@ -589,7 +649,20 @@ pub(crate) fn prepare_download_spec<'a, B: KeyringBackend>(
     async_mode: bool,
     cancel: &CancelToken,
 ) -> Result<(ScpJobSpec, Option<TunnelLease<'a, B>>), CoreError> {
+    let trimmed_local = req.local_target.trim();
+    if !trimmed_local.is_empty() {
+        reject_profile_dir_transfer_path(rt, trimmed_local)?;
+    }
     let (remote, local) = validate_download_inputs(req)?;
+    reject_profile_dir_transfer_path(rt, &local)?;
+    if Path::new(&local).exists() && !req.overwrite {
+        return Err(CoreError::conflict(
+            "destination_exists",
+            format!("Local destination already exists: {local}"),
+            false,
+            "pass_overwrite_flag",
+        ));
+    }
     let server = rt.get_server(req.server_id)?;
     let op = if async_mode {
         "scp_start_download"
@@ -599,6 +672,7 @@ pub(crate) fn prepare_download_spec<'a, B: KeyringBackend>(
     let (endpoint, lease) = prepare_scp_endpoint(rt, &server, op, async_mode, cancel)?;
     let args = build_verified_scp_args(rt, &endpoint, &local, &remote, req.recursive, true)?;
     let spec = ScpJobSpec {
+        server_id: server.id.clone(),
         title: format!("Download from {}", server.name),
         src: remote,
         dst: local,
@@ -652,7 +726,6 @@ pub(crate) fn start_scp_async<B: KeyringBackend>(
         return Err(CoreError::interrupted("SCP transfer cancelled"));
     }
     let store = Arc::clone(rt.transfer_store());
-    let sink = Arc::clone(rt.event_sink());
     let transfer_id = create_scp_transfer_entry(
         &store,
         now_ms,
@@ -662,14 +735,7 @@ pub(crate) fn start_scp_async<B: KeyringBackend>(
         Some(spec.dst),
     )
     .map_err(|e| CoreError::operation_failed("transfer_store_error", e, false, "retry_later"))?;
-    match spawn_scp_session(
-        rt.supervisor(),
-        &store,
-        &sink,
-        &transfer_id,
-        spec.args,
-        cancel,
-    ) {
+    match spawn_scp_session(rt, &transfer_id, spec.server_id, spec.args, cancel) {
         Ok(session_id) => Ok(ScpAsyncStartResult {
             transfer_id,
             session_id,
@@ -688,11 +754,27 @@ pub(crate) fn start_scp_async<B: KeyringBackend>(
     }
 }
 
-fn spawn_scp_session(
-    supervisor: &ProcessSupervisor,
-    store: &Arc<ScpTransferStore>,
-    sink: &Arc<dyn EventSink>,
+fn emit_transfer_update(store: &Arc<ScpTransferStore>, sink: &Arc<dyn EventSink>, tid: &str) {
+    if let Ok(Some(entry)) = get_scp_transfer_entry(store, tid) {
+        sink.emit(DomainEvent::TransferUpdated { entry });
+    }
+}
+
+fn scp_output_callback(
+    store: Arc<ScpTransferStore>,
+    sink: Arc<dyn EventSink>,
+    tid: String,
+) -> OutputCallback {
+    Arc::new(move |sid, data, _is_pty| {
+        let _ = handle_scp_transfer_output(&store, sid, data, now_ms);
+        emit_transfer_update(&store, &sink, &tid);
+    })
+}
+
+fn spawn_scp_session<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
     transfer_id: &str,
+    server_id: String,
     args: Vec<String>,
     cancel: &CancelToken,
 ) -> Result<String, CoreError> {
@@ -707,35 +789,38 @@ fn spawn_scp_session(
         kill_tree: true,
         kind: "transfer",
     };
-    let store_exit = Arc::clone(store);
-    let sink_exit = Arc::clone(sink);
-    let tid_exit = transfer_id.to_string();
-    let store_out = Arc::clone(store);
-    let sink_out = Arc::clone(sink);
-    let tid_out = transfer_id.to_string();
-
-    let res = supervisor.spawn_with_gate(
+    let state = Arc::clone(rt.runtime_state_arc());
+    let store = Arc::clone(rt.transfer_store());
+    let sink = Arc::clone(rt.event_sink());
+    let (state_exit, store_exit, sink_exit, tid_exit) = (
+        Arc::clone(&state),
+        Arc::clone(&store),
+        Arc::clone(&sink),
+        transfer_id.to_string(),
+    );
+    let output_cb = scp_output_callback(
+        Arc::clone(&store),
+        Arc::clone(&sink),
+        transfer_id.to_string(),
+    );
+    let res = rt.supervisor().spawn_with_gate(
         launch,
         cancel,
         |sid| {
-            let _ = attach_scp_transfer_session(store, transfer_id, sid);
-            if let Ok(Some(entry)) = get_scp_transfer_entry(store, transfer_id) {
-                sink.emit(DomainEvent::TransferUpdated { entry });
-            }
+            state
+                .lock()
+                .active_transfers
+                .insert(sid.to_string(), server_id.clone());
+            let _ = attach_scp_transfer_session(&store, transfer_id, sid);
+            emit_transfer_update(&store, &sink, transfer_id);
             AcceptOutcome::Accepted(())
         },
         move |sid, code, reason| {
+            state_exit.lock().active_transfers.remove(sid);
             let _ = complete_scp_transfer_session(&store_exit, sid, code, reason, now_ms);
-            if let Ok(Some(entry)) = get_scp_transfer_entry(&store_exit, &tid_exit) {
-                sink_exit.emit(DomainEvent::TransferUpdated { entry });
-            }
+            emit_transfer_update(&store_exit, &sink_exit, &tid_exit);
         },
-        Some(Arc::new(move |sid, data, _is_pty| {
-            let _ = handle_scp_transfer_output(&store_out, sid, data, now_ms);
-            if let Ok(Some(entry)) = get_scp_transfer_entry(&store_out, &tid_out) {
-                sink_out.emit(DomainEvent::TransferUpdated { entry });
-            }
-        })),
+        Some(output_cb),
     )?;
     match res {
         AcceptOutcome::Accepted(s) => Ok(s),
@@ -751,9 +836,30 @@ pub(crate) fn run_scp_sync<B: KeyringBackend>(
     cancel: &CancelToken,
 ) -> Result<ScpTransferEntry, CoreError> {
     let started = start_scp_async(rt, spec, cancel)?;
-    let _ = rt
-        .supervisor()
-        .wait_for_session_exit(&started.session_id, Duration::from_secs(300));
+    let deadline = Instant::now() + Duration::from_secs(300);
+    loop {
+        if cancel.is_cancelled() {
+            let _ = rt
+                .supervisor()
+                .stop_session(&started.session_id, Duration::from_secs(2));
+            return Err(CoreError::interrupted("SCP transfer cancelled"));
+        }
+        if rt
+            .supervisor()
+            .wait_for_session_exit(&started.session_id, Duration::from_millis(50))
+        {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = rt
+                .supervisor()
+                .stop_session(&started.session_id, Duration::from_secs(2));
+            return Err(CoreError::timeout(
+                "scp_transfer_timeout",
+                "SCP transfer timed out after 300s",
+            ));
+        }
+    }
     let entry = get_scp_transfer_entry(rt.transfer_store(), &started.transfer_id)
         .map_err(|e| CoreError::operation_failed("transfer_store_error", e, false, "retry_later"))?
         .ok_or_else(|| {
@@ -782,6 +888,16 @@ pub(crate) fn prepare_ssh_launch<B: KeyringBackend>(
     server: &Server,
     endpoint: &SshEndpoint,
 ) -> Result<(String, Vec<String>), CoreError> {
+    prepare_ssh_launch_with_mode(rt, server, endpoint, false)
+}
+
+/// Builds the OpenSSH `ssh` command & argument list, optionally forcing non-interactive BatchMode.
+pub(crate) fn prepare_ssh_launch_with_mode<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
+    server: &Server,
+    endpoint: &SshEndpoint,
+    batch_mode: bool,
+) -> Result<(String, Vec<String>), CoreError> {
     let (kh_path, id_path) = rt.resolved_ssh_paths();
     let kh = kh_path
         .as_deref()
@@ -800,6 +916,12 @@ pub(crate) fn prepare_ssh_launch<B: KeyringBackend>(
         args.push(id.to_string_lossy().into_owned());
         args.push("-o".to_string());
         args.push("IdentitiesOnly=yes".to_string());
+    }
+    if batch_mode {
+        args.push("-o".to_string());
+        args.push("BatchMode=yes".to_string());
+        args.push("-o".to_string());
+        args.push("LogLevel=VERBOSE".to_string());
     }
     args.push(ssh_target(endpoint));
     if server.connection_method == ConnectionMethod::Boundary {

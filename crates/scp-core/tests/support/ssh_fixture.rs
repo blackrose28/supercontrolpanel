@@ -18,8 +18,36 @@ use tokio::net::TcpListener;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex;
 
+fn claimed_ports() -> &'static std::sync::Mutex<std::collections::HashSet<u16>> {
+    static CLAIMED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<u16>>> =
+        std::sync::OnceLock::new();
+    CLAIMED.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+fn next_odd_port_offset() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let base = (std::process::id() as usize).wrapping_mul(131) % 15_000;
+    base.wrapping_add(NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+}
+
+fn bind_unique_odd_listener() -> StdTcpListener {
+    for _ in 0..20_000 {
+        let candidate = 15_001u16 + ((next_odd_port_offset() % 20_000) * 2) as u16;
+        if claimed_ports().lock().unwrap().contains(&candidate) {
+            continue;
+        }
+        if let Ok(listener) = StdTcpListener::bind(("127.0.0.1", candidate)) {
+            if claimed_ports().lock().unwrap().insert(candidate) {
+                return listener;
+            }
+        }
+    }
+    panic!("unable to allocate unique odd loopback port");
+}
+
+#[allow(dead_code)]
 pub fn free_port() -> u16 {
-    let listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = bind_unique_odd_listener();
     listener.local_addr().unwrap().port()
 }
 
@@ -31,6 +59,7 @@ pub struct SshdFixture {
     pub user: String,
     pub host_pub_algo_and_key: String,
     pub user_key: PathBuf,
+    #[allow(dead_code)]
     pub known_hosts: PathBuf,
     pub boundary_script: PathBuf,
     pub remote_sandbox: PathBuf,
@@ -51,7 +80,7 @@ impl SshdFixture {
         let remote_sandbox = root.join("remote_sandbox");
         fs::create_dir_all(&remote_sandbox).unwrap();
 
-        let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
+        let std_listener = bind_unique_odd_listener();
         std_listener.set_nonblocking(true).unwrap();
         let port = std_listener.local_addr().unwrap().port();
         let user = current_username();
@@ -62,7 +91,9 @@ impl SshdFixture {
         let (shutdown, server_thread) =
             spawn_ssh_server_thread(std_listener, host_key, user.clone(), allowed_pubkey);
         let boundary_script = root.join("fake-boundary");
-        write_fake_boundary_script(&boundary_script, port);
+        let script = FAKE_BOUNDARY_TEMPLATE.replace("__SSHD_PORT__", &port.to_string());
+        fs::write(&boundary_script, script).unwrap();
+        fs::set_permissions(&boundary_script, fs::Permissions::from_mode(0o755)).unwrap();
 
         Self {
             _dir: dir,
@@ -400,10 +431,40 @@ async fn pump_pipe_to_channel<R: AsyncRead + Unpin>(
     }
 }
 
-fn write_fake_boundary_script(path: &Path, sshd_port: u16) {
-    let script = format!(
-        r#"#!/usr/bin/env python3
-import signal, socket, sys, threading, time
+#[allow(dead_code)]
+pub fn seed_named_profile(
+    root: &Path,
+    profile: &str,
+    cfg: Option<serde_json::Value>,
+    sync: serde_json::Value,
+    servers: serde_json::Value,
+) {
+    let pdir = root.join("profiles").join(profile);
+    fs::create_dir_all(&pdir).unwrap();
+    if let Some(c) = cfg {
+        fs::write(pdir.join("config.json"), c.to_string()).unwrap();
+    }
+    fs::write(pdir.join("sync-local.json"), sync.to_string()).unwrap();
+    fs::write(pdir.join("servers.json"), servers.to_string()).unwrap();
+}
+
+#[allow(dead_code)]
+pub fn seed_default_boundary_profile(
+    cfg_dir: &Path,
+    servers: serde_json::Value,
+    boundary_cli_path: &Path,
+) {
+    seed_named_profile(
+        cfg_dir,
+        "default",
+        None,
+        serde_json::json!({ "boundaryCliPath": boundary_cli_path.to_string_lossy() }),
+        servers,
+    );
+}
+
+const FAKE_BOUNDARY_TEMPLATE: &str = r#"#!/usr/bin/env python3
+import os, signal, socket, sys, threading, time
 
 args = sys.argv[1:]
 if not args or args[0] != "connect":
@@ -427,7 +488,7 @@ if target_id == "early-exit":
     sys.exit(1)
 
 if target_id == "hang-no-listen":
-    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
     while True:
         time.sleep(0.2)
 
@@ -446,19 +507,33 @@ def pipe(src, dst):
         except OSError:
             pass
 
+def handle_conn(client):
+    upstream = None
+    try:
+        upstream = socket.create_connection(("127.0.0.1", __SSHD_PORT__))
+        t1 = threading.Thread(target=pipe, args=(client, upstream), daemon=True)
+        t2 = threading.Thread(target=pipe, args=(upstream, client), daemon=True)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+    except OSError:
+        pass
+    finally:
+        for sock in (client, upstream):
+            if sock is not None:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+
 srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 srv.bind(("127.0.0.1", listen_port))
 srv.listen(32)
-signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
 
 while True:
     client, _ = srv.accept()
-    upstream = socket.create_connection(("127.0.0.1", {sshd_port}))
-    threading.Thread(target=pipe, args=(client, upstream), daemon=True).start()
-    threading.Thread(target=pipe, args=(upstream, client), daemon=True).start()
-"#
-    );
-    fs::write(path, script).unwrap();
-    fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
-}
+    threading.Thread(target=handle_conn, args=(client,), daemon=True).start()
+"#;

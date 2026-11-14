@@ -195,7 +195,7 @@ fn capabilities_without_and_with_profile() {
             .as_array()
             .unwrap()
             .len(),
-        9
+        11
     );
 
     let with_prof = run_with_env(

@@ -189,6 +189,7 @@ where
         50,
     ) as u64;
 
+    let shutdown_rt = Arc::clone(&runtime);
     let host = SdkHost::standalone(runtime, version);
     let stop = host.control.stop.clone();
     let writer_abort = CancellationToken::new();
@@ -208,20 +209,24 @@ where
     let transport =
         AsyncRwTransport::new_server(reader, timed_writer).with_max_line_length(max_line);
 
-    let running = match host.serve(transport).await {
-        Ok(running) => running,
+    let exit_code = match host.serve(transport).await {
+        Ok(running) => drive_stdio_session(running, stop, writer_abort, eof_hit, eof_notify).await,
         Err(ServerInitializeError::ConnectionClosed(_)) => {
             stop.cancel();
-            return if writer_abort.is_cancelled() { 1 } else { 0 };
+            if writer_abort.is_cancelled() {
+                1
+            } else {
+                0
+            }
         }
         Err(err) => {
             stop.cancel();
             eprintln!("stdio serve initialization failed: {err}");
-            return 1;
+            1
         }
     };
-
-    drive_stdio_session(running, stop, writer_abort, eof_hit, eof_notify).await
+    let _ = tokio::task::spawn_blocking(move || shutdown_rt.shutdown(Duration::from_secs(2))).await;
+    exit_code
 }
 
 async fn drive_stdio_session(

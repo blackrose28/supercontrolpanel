@@ -3,7 +3,6 @@ mod ssh_fixture;
 
 use ssh_fixture::{free_port, SshdFixture};
 use std::fs;
-use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,20 +17,6 @@ use scp_core::secrets::MemoryKeyringBackend;
 use scp_core::ssh_ops::server_tunnel_function_id;
 use scp_core::supervisor::CancelToken;
 
-fn seed_profile(cfg_dir: &Path, servers: serde_json::Value, boundary_cli_path: &Path) {
-    let profile_dir = cfg_dir.join("profiles").join("default");
-    fs::create_dir_all(&profile_dir).unwrap();
-    fs::write(profile_dir.join("servers.json"), servers.to_string()).unwrap();
-    fs::write(
-        profile_dir.join("sync-local.json"),
-        json!({
-            "boundaryCliPath": boundary_cli_path.to_string_lossy(),
-        })
-        .to_string(),
-    )
-    .unwrap();
-}
-
 #[test]
 fn untrusted_and_mismatched_host_keys_rejected_strictly_in_scp_and_sftp() {
     let fx = SshdFixture::start();
@@ -39,7 +24,7 @@ fn untrusted_and_mismatched_host_keys_rejected_strictly_in_scp_and_sftp() {
     let cfg = tmp.path().join("cfg");
     let desktop = tmp.path().join("desktop");
 
-    seed_profile(
+    ssh_fixture::seed_default_boundary_profile(
         &cfg,
         json!({
             "servers": [{
@@ -125,7 +110,7 @@ fn direct_ssh_scp_upload_download_recursive_and_overwrite_policy() {
     let cfg = tmp.path().join("cfg");
     let desktop = tmp.path().join("desktop");
 
-    seed_profile(
+    ssh_fixture::seed_default_boundary_profile(
         &cfg,
         json!({
             "servers": [{
@@ -245,7 +230,7 @@ fn persistent_sftp_browser_crud_weird_names_and_tunnel_stop_shutdown_cleanup() {
     let kh = tmp.path().join("known_hosts");
     fx.write_known_hosts(&kh, &[fx.port, b_port]);
 
-    seed_profile(
+    ssh_fixture::seed_default_boundary_profile(
         &cfg,
         json!({
             "servers": [{
@@ -361,7 +346,7 @@ fn boundary_tunnel_failures_one_shot_cleanup_and_caller_owned_reuse() {
     let kh = tmp.path().join("known_hosts");
     fx.write_known_hosts(&kh, &[fx.port, p_good]);
 
-    seed_profile(
+    ssh_fixture::seed_default_boundary_profile(
         &cfg,
         json!({
             "servers": [

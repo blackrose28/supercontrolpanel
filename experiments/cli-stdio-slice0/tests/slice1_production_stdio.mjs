@@ -90,10 +90,14 @@ for (const [era, ClientClass, TransportClass, options, expectedProtocol] of [
       [
         'app_get_overview',
         'boundary_get_status',
+        'boundary_search_targets',
         'config_get_paths',
+        'detect_openvpn_executable',
         'function_status_get',
         'function_status_list',
         'openvpn_get_status',
+        'remote_browser_list_children',
+        'remote_browser_stat_path',
         'scp_transfer_get',
         'scp_transfer_list',
         'server_get',
@@ -174,7 +178,7 @@ for (const [era, ClientClass, TransportClass, options, expectedProtocol] of [
   });
 }
 
-test('production scpctl stdio: default policy exposes 9 tools, keeps stdout pure NDJSON, exits 0 on EOF, blocks second owner', { timeout: 15000 }, async t => {
+test('production scpctl stdio: default policy exposes 11 tools, keeps stdout pure NDJSON, exits 0 on EOF, blocks second owner', { timeout: 15000 }, async t => {
   const { cliRoot, desktopDir } = await setupSeededEnv(t);
   const child = spawn(
     scpctlBin,
@@ -233,7 +237,7 @@ test('production scpctl stdio: default policy exposes 9 tools, keeps stdout pure
   child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
 
   const tools = await sendAndWait(2, 'tools/list');
-  assert.equal(tools.result.tools.length, 9);
+  assert.equal(tools.result.tools.length, 11);
 
   const conflictChild = spawn(
     scpctlBin,

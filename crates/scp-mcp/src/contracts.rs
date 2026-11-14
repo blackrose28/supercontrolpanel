@@ -23,7 +23,7 @@ pub struct OperationError {
     pub retryable: bool,
 }
 impl OperationError {
-    fn for_host(code: ErrorCode, standalone: bool) -> Self {
+    pub fn for_host(code: ErrorCode, standalone: bool) -> Self {
         let message = match (code, standalone) {
             (ErrorCode::PolicyDenied, false) => "MCP policy denied this operation. Use local desktop settings or controls.",
             (ErrorCode::PolicyDenied, true) => "MCP policy denied this operation. Configure local stdio policy to allow permitted operations.",
@@ -609,21 +609,19 @@ pub fn is_valid_category(category: &str) -> bool {
     )
 }
 
-pub fn is_slice1_standalone_extracted(handler: Handler) -> bool {
-    matches!(
-        handler,
-        Handler::AppGetOverview
-            | Handler::FunctionStatusList
-            | Handler::FunctionStatusGet
-            | Handler::OpenvpnGetStatus
-            | Handler::BoundaryGetStatus
-            | Handler::ServersList
-            | Handler::ServerGet
-            | Handler::ConfigGetPaths
-            | Handler::SyncSettingsGet
-            | Handler::ScpTransferList
-            | Handler::ScpTransferGet
-    )
+/// Returns whether `op` is available on the standalone CLI stdio MCP host.
+pub fn is_standalone_stdio_available(op: &Operation) -> bool {
+    matches!(op.capability, Capability::Runtime)
+}
+
+/// Returns the machine-readable unavailability reason on the standalone host, if any.
+pub fn standalone_unavailable_reason(op: &Operation) -> Option<&'static str> {
+    match op.capability {
+        Capability::Runtime => None,
+        Capability::InteractiveHost => Some("interactive_host_required"),
+        Capability::ProtectedImport => Some("protected_import"),
+        Capability::ReviewedGit => Some("reviewed_git"),
+    }
 }
 
 pub fn map_core_error(err: &scp_core::error::CoreError) -> OperationError {
@@ -657,7 +655,6 @@ fn authorize_checked(
         return Err(mk_err(ErrorCode::PolicyDenied));
     }
     let available = match op.capability {
-        Capability::Runtime if standalone => is_slice1_standalone_extracted(op.handler),
         Capability::Runtime => true,
         Capability::InteractiveHost if !standalone => cfg!(any(
             target_os = "windows",

@@ -2,8 +2,8 @@
 use crate::contracts::{
     operation, resource_operation, ErrorCode, Lifetime, Operation, OperationError, OPERATIONS,
 };
-use crate::lifecycle::{CancellationToken, TransportControl};
-use crate::standalone::{execute_standalone, permitted_standalone_operations};
+use crate::lifecycle::{current_cancel_token, CancellationToken, TransportControl};
+use crate::standalone::{execute_standalone_cancellable, permitted_standalone_operations};
 use crate::validation;
 use rmcp::{
     model::*,
@@ -43,22 +43,46 @@ impl SdkHost {
         runtime: Arc<ProfileRuntime<B>>,
         version: &'static str,
     ) -> Self {
+        let control = TransportControl::standalone_from_env();
+        let event_control = control.clone();
+        runtime.add_event_observer(Arc::new(move |event| match event {
+            scp_core::events::DomainEvent::FunctionStatusChanged { .. }
+            | scp_core::events::DomainEvent::ProcessExited { .. }
+            | scp_core::events::DomainEvent::TransferUpdated { .. }
+            | scp_core::events::DomainEvent::RemoteBrowserOpened { .. }
+            | scp_core::events::DomainEvent::RemoteBrowserClosed { .. } => {
+                event_control.invalidate();
+            }
+            scp_core::events::DomainEvent::ProcessOutput { .. } => {}
+        }));
         let discovery_rt = Arc::clone(&runtime);
         let exec_rt = Arc::clone(&runtime);
+        let exec_control = control.clone();
         Self {
             kind: HostKind::StandaloneStdio { version },
-            control: TransportControl::default(),
+            control,
             subscriptions: Default::default(),
-            permitted: Arc::new(move || {
-                let policy = discovery_rt
-                    .get_stdio_policy()
-                    .map_err(|e| crate::contracts::map_core_error(&e))?;
-                Ok(permitted_standalone_operations(policy)
+            permitted: Arc::new(move || match discovery_rt.reload_stdio_policy() {
+                Ok(policy) => Ok(permitted_standalone_operations(&policy)
                     .into_iter()
                     .map(|op| op.name.to_string())
-                    .collect())
+                    .collect()),
+                Err(err) if err.code == "POLICY_DENIED" => Ok(Vec::new()),
+                Err(err) => Err(crate::contracts::map_core_error(&err)),
             }),
-            execute: Arc::new(move |name, args| execute_standalone(&exec_rt, version, name, &args)),
+            execute: Arc::new(move |name, args| {
+                let result = execute_standalone_cancellable(
+                    &exec_rt,
+                    version,
+                    name,
+                    &args,
+                    &current_cancel_token(),
+                )?;
+                if operation(name).is_some_and(|op| !op.read_only) {
+                    exec_control.invalidate();
+                }
+                Ok(result)
+            }),
         }
     }
 
@@ -68,6 +92,7 @@ impl SdkHost {
         args: Value,
         cancel: CancellationToken,
     ) -> Result<Value, OperationError> {
+        let standalone = matches!(self.kind, HostKind::StandaloneStdio { .. });
         let execute = self.execute.clone();
         let deadline = operation_deadline(Some(op));
         let data = tokio::time::timeout(
@@ -75,9 +100,13 @@ impl SdkHost {
             self.control.run(cancel, move || execute(op.name, args)),
         )
         .await
-        .map_err(|_| OperationError::new(ErrorCode::Timeout))??;
+        .map_err(|_| OperationError::for_host(ErrorCode::Timeout, standalone))?
+        .map_err(|err| OperationError::for_host(err.code, standalone))?;
         if !validation::conforms(&validation::output_schema(op), &data) {
-            return Err(OperationError::new(ErrorCode::OperationFailed));
+            return Err(OperationError::for_host(
+                ErrorCode::OperationFailed,
+                standalone,
+            ));
         }
         Ok(standard_data(op, data))
     }

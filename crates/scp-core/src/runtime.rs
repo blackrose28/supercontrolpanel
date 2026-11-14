@@ -2,13 +2,14 @@
 use crate::backup::{io, transaction};
 use crate::boundary_ops::{
     refresh_boundary_status_impl, search_boundary_targets_impl, start_boundary_auth_impl,
+    start_boundary_auth_with_size_impl,
 };
-use crate::caddy_ops::{start_caddy_impl, stop_caddy_impl};
+use crate::caddy_ops::{start_caddy_impl, start_caddy_with_size_impl, stop_caddy_impl};
 use crate::config_repo::{
     load_app_config_and_migrate, load_servers, load_stdio_policy, load_sync_settings,
 };
 use crate::error::CoreError;
-use crate::events::{DomainEvent, EventSink, NoopEventSink};
+use crate::events::{DomainEvent, EventObserver, EventSink, FanoutEventSink, NoopEventSink};
 use crate::gate::MaintenanceGate;
 use crate::models::{
     default_function_statuses, now_ms, AppConfig, BoundaryTargetSummary, ConfigPaths,
@@ -18,7 +19,8 @@ use crate::models::{
     OPENVPN_FUNCTION_ID,
 };
 use crate::openvpn_ops::{
-    detect_openvpn_impl, start_openvpn_impl, stop_openvpn_impl, OpenVpnRuntimeOverrides,
+    detect_openvpn_impl, start_openvpn_impl, start_openvpn_with_overrides_impl, stop_openvpn_impl,
+    OpenVpnRuntimeOverrides,
 };
 use crate::profile::{
     acquire_owner_lease, ensure_or_load_metadata, resolve_profile_paths, OwnerLease,
@@ -32,9 +34,9 @@ use crate::sftp_ops::{
 };
 use crate::ssh_ops::{
     acquire_endpoint_for_server, default_identity_path, default_known_hosts_path,
-    prepare_download_spec, prepare_ssh_launch, run_scp_sync, scp_upload_impl,
-    server_ssh_function_id, server_tunnel_function_id, start_scp_async, start_scp_upload_impl,
-    start_server_tunnel_impl,
+    prepare_download_spec, prepare_ssh_launch, prepare_ssh_launch_with_mode, run_scp_sync,
+    scp_upload_impl, server_ssh_function_id, server_tunnel_function_id, start_scp_async,
+    start_scp_upload_impl, start_server_tunnel_impl, DEFAULT_SSH_CONNECT_TIMEOUT,
 };
 use crate::supervisor::{
     AcceptOutcome, CancelToken, ChildLaunch, ExitCallback, OutputCallback, ProcessSupervisor,
@@ -47,7 +49,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use uuid::Uuid;
 
 pub const DEFAULT_SERVER_LIST_LIMIT: usize = 100;
@@ -75,6 +77,7 @@ pub(crate) struct RuntimeState {
     pub(crate) reserved_functions: HashSet<String>,
     pub(crate) reserved_ports: HashMap<u16, String>,
     pub(crate) explicit_stops: HashSet<String>,
+    pub(crate) active_transfers: HashMap<String, String>,
     pub(crate) shutting_down: bool,
 }
 
@@ -85,6 +88,7 @@ impl RuntimeState {
             reserved_functions: HashSet::new(),
             reserved_ports: HashMap::new(),
             explicit_stops: HashSet::new(),
+            active_transfers: HashMap::new(),
             shutting_down: false,
         }
     }
@@ -105,6 +109,7 @@ pub struct ProfileRuntime<B: KeyringBackend = OsKeyringBackend> {
     transfers: Arc<ScpTransferStore>,
     remote_browsers: Arc<RemoteBrowserStore>,
     supervisor: Arc<ProcessSupervisor>,
+    fanout_sink: Arc<FanoutEventSink>,
     event_sink: Arc<dyn EventSink>,
     ssh_known_hosts_override: Mutex<Option<PathBuf>>,
     ssh_identity_override: Mutex<Option<PathBuf>>,
@@ -162,6 +167,8 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
             CADDY_FUNCTION_ID,
             BOUNDARY_AUTH_FUNCTION_ID,
         );
+        let fanout_sink = FanoutEventSink::wrap(event_sink);
+        let event_sink: Arc<dyn EventSink> = Arc::clone(&fanout_sink) as Arc<dyn EventSink>;
         Ok(Self {
             runtime_id,
             profile_paths,
@@ -177,6 +184,7 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
             transfers: Arc::new(ScpTransferStore::default()),
             remote_browsers: Arc::new(RemoteBrowserStore::new()),
             supervisor: Arc::new(ProcessSupervisor::new()),
+            fanout_sink,
             event_sink,
             ssh_known_hosts_override: Mutex::new(None),
             ssh_identity_override: Mutex::new(None),
@@ -214,6 +222,10 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
 
     pub fn event_sink(&self) -> &Arc<dyn EventSink> {
         &self.event_sink
+    }
+
+    pub fn add_event_observer(&self, observer: EventObserver) {
+        self.fanout_sink.add_observer(observer);
     }
 
     pub fn transfer_store(&self) -> &Arc<ScpTransferStore> {
@@ -480,6 +492,10 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         Ok(&self.stdio_policy)
     }
 
+    pub fn reload_stdio_policy(&self) -> Result<StdioPolicy, CoreError> {
+        load_stdio_policy(&self.profile_paths, &self.gate)
+    }
+
     pub fn get_config_paths(&self) -> Result<ConfigPaths, CoreError> {
         let _guard = self.gate.enter()?;
         let app_config_path = self
@@ -628,17 +644,35 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         start_server_tunnel_impl(self, server_id, cancel)
     }
 
-    /// Closes open remote browsers for `server_id` and stops its Boundary tunnel idempotently.
+    /// Closes open remote browsers, active SCP transfers, and SSH sessions for `server_id`,
+    /// then stops its Boundary tunnel idempotently.
     pub fn stop_server_tunnel(
         &self,
         server_id: &str,
         timeout: Duration,
     ) -> Result<bool, CoreError> {
         close_browsers_for_server_impl(self, server_id, "tunnel_stopped");
+        let transfer_sids: Vec<String> = {
+            let mut st = self.runtime_state.lock();
+            let sids: Vec<String> = st
+                .active_transfers
+                .iter()
+                .filter(|(_, srv)| srv.as_str() == server_id)
+                .map(|(sid, _)| sid.clone())
+                .collect();
+            for sid in &sids {
+                st.explicit_stops.insert(sid.clone());
+            }
+            sids
+        };
+        for sid in transfer_sids {
+            let _ = self.supervisor.stop_session(&sid, timeout);
+        }
+        let _ = self.stop_supervised_function(&server_ssh_function_id(server_id), timeout);
         self.stop_supervised_function(&server_tunnel_function_id(server_id), timeout)
     }
 
-    /// Starts an interactive PTY-backed SSH session for `server_id`.
+    /// Starts an interactive PTY-backed SSH session for `server_id` and waits for readiness.
     pub fn start_server_ssh(
         &self,
         server_id: &str,
@@ -649,8 +683,9 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         let server = self.get_server(server_id)?;
         let (endpoint, mut lease) =
             acquire_endpoint_for_server(self, &server, "start_server_ssh", cancel)?;
-        let (program, args) = prepare_ssh_launch(self, &server, &endpoint)?;
+        let (program, args) = prepare_ssh_launch_with_mode(self, &server, &endpoint, true)?;
         let function_id = server_ssh_function_id(&server.id);
+        let (ready, hooks) = build_ssh_auth_ready_hooks();
         let launch = ChildLaunch {
             function_id: function_id.clone(),
             program,
@@ -662,17 +697,76 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
             kill_tree: true,
             kind: "ssh",
         };
-        let session_id = self.start_supervised_function(
+        let session_id = self.start_supervised_with_hooks(
             launch,
             cancel,
             None,
             &format!("Connected SSH to {}", server.name),
+            hooks,
+        )?;
+        self.wait_for_supervised_ready(
+            SupervisedReadyWait {
+                function_id: &function_id,
+                session_id: &session_id,
+                timeout: DEFAULT_SSH_CONNECT_TIMEOUT,
+                cancel_msg: "SSH start cancelled",
+                early_exit: (
+                    "ssh_exited_early",
+                    "SSH session exited before authentication completed",
+                    "check_ssh_credentials",
+                ),
+                timeout_err: (
+                    "ssh_connect_timeout",
+                    "Timed out waiting for SSH authentication".to_string(),
+                ),
+            },
+            cancel,
+            || Ok(ready.load(Ordering::Acquire)),
         )?;
         lease.disarm();
         Ok(StartFunctionResult {
             function_id,
             session_id,
         })
+    }
+
+    pub(crate) fn wait_for_supervised_ready<F>(
+        &self,
+        spec: SupervisedReadyWait<'_>,
+        cancel: &CancelToken,
+        mut check_ready: F,
+    ) -> Result<(), CoreError>
+    where
+        F: FnMut() -> Result<bool, CoreError>,
+    {
+        let deadline = Instant::now() + spec.timeout;
+        loop {
+            if cancel.is_cancelled() {
+                let _ = self.stop_supervised_function(spec.function_id, Duration::from_secs(2));
+                return Err(CoreError::interrupted(spec.cancel_msg));
+            }
+            match check_ready() {
+                Ok(true) => return Ok(()),
+                Ok(false) => {}
+                Err(err) => {
+                    let _ = self.stop_supervised_function(spec.function_id, Duration::from_secs(2));
+                    return Err(err);
+                }
+            }
+            let active = self
+                .supervisor
+                .active_session_for_function(spec.function_id);
+            if active.as_deref() != Some(spec.session_id) {
+                let (code, msg, next) = spec.early_exit;
+                return Err(CoreError::operation_failed(code, msg, false, next));
+            }
+            if Instant::now() >= deadline {
+                let _ = self.stop_supervised_function(spec.function_id, Duration::from_secs(2));
+                let (code, msg) = spec.timeout_err;
+                return Err(CoreError::timeout(code, msg));
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// Prepares command args (and optional temporary Boundary tunnel) for direct foreground TTY SSH.
@@ -753,6 +847,19 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         start_boundary_auth_impl(self, cancel)
     }
 
+    /// Starts supervised Boundary authentication with optional PTY dimensions.
+    pub fn start_boundary_auth_with_size(
+        &self,
+        cols: Option<u16>,
+        rows: Option<u16>,
+        cancel: &CancelToken,
+    ) -> Result<StartFunctionResult, CoreError>
+    where
+        B: 'static,
+    {
+        start_boundary_auth_with_size_impl(self, cols, rows, cancel)
+    }
+
     /// Stops this runtime's active Boundary authentication process idempotently.
     pub fn stop_boundary_auth(&self, timeout: Duration) -> Result<bool, CoreError> {
         self.stop_supervised_function(BOUNDARY_AUTH_FUNCTION_ID, timeout)
@@ -771,6 +878,19 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         start_openvpn_impl(self, cancel)
     }
 
+    /// Starts OpenVPN with optional in-memory credential overrides without writing them to disk or keyring.
+    pub fn start_openvpn_with_overrides(
+        &self,
+        username: Option<&str>,
+        password: Option<&str>,
+        cancel: &CancelToken,
+    ) -> Result<StartFunctionResult, CoreError>
+    where
+        B: 'static,
+    {
+        start_openvpn_with_overrides_impl(self, username, password, cancel)
+    }
+
     /// Stops an owned OpenVPN session idempotently and releases its `vpn.lock`.
     pub fn stop_openvpn(&self, timeout: Duration) -> Result<bool, CoreError> {
         stop_openvpn_impl(self, timeout)
@@ -783,6 +903,17 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         cancel: &CancelToken,
     ) -> Result<StartFunctionResult, CoreError> {
         start_caddy_impl(self, folder_override, cancel)
+    }
+
+    /// Starts Caddy with optional folder override and PTY dimensions.
+    pub fn start_caddy_with_size(
+        &self,
+        folder_override: Option<&str>,
+        cols: Option<u16>,
+        rows: Option<u16>,
+        cancel: &CancelToken,
+    ) -> Result<StartFunctionResult, CoreError> {
+        start_caddy_with_size_impl(self, folder_override, cols, rows, cancel)
     }
 
     /// Stops an owned Caddy session idempotently.
@@ -888,6 +1019,7 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         st.reserved_functions.clear();
         st.reserved_ports.clear();
         st.explicit_stops.clear();
+        st.active_transfers.clear();
     }
 }
 
@@ -976,6 +1108,34 @@ fn release_launch_slots(state: &Arc<Mutex<RuntimeState>>, function_id: &str, por
     if let Some(p) = port {
         st.reserved_ports.remove(&p);
     }
+}
+
+fn build_ssh_auth_ready_hooks() -> (Arc<AtomicBool>, SuperviseHooks) {
+    let ready = Arc::new(AtomicBool::new(false));
+    let ready_cb = Arc::clone(&ready);
+    let tail = Arc::new(Mutex::new(String::new()));
+    let hooks = SuperviseHooks {
+        on_output: Some(Arc::new(move |_sid, chunk, _is_pty| {
+            if ready_cb.load(Ordering::Acquire) {
+                return;
+            }
+            let text = chunk.to_lowercase();
+            let mut buf = tail.lock();
+            buf.push_str(&text);
+            while buf.len() > 512 {
+                let mut cut = buf.len() - 512;
+                while !buf.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                buf.drain(..cut);
+            }
+            if buf.contains("authenticated to ") {
+                ready_cb.store(true, Ordering::Release);
+            }
+        })),
+        on_exit: None,
+    };
+    (ready, hooks)
 }
 
 fn try_accept_launch(
@@ -1180,6 +1340,15 @@ pub(crate) fn update_active_session_status(
         entry
     };
     sink.emit(DomainEvent::FunctionStatusChanged { status });
+}
+
+pub(crate) struct SupervisedReadyWait<'a> {
+    pub(crate) function_id: &'a str,
+    pub(crate) session_id: &'a str,
+    pub(crate) timeout: Duration,
+    pub(crate) cancel_msg: &'a str,
+    pub(crate) early_exit: (&'static str, &'static str, &'static str),
+    pub(crate) timeout_err: (&'static str, String),
 }
 
 pub(crate) struct SuperviseHooks {

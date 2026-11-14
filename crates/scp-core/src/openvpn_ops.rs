@@ -5,7 +5,7 @@ use crate::models::{
     OPENVPN_FUNCTION_ID,
 };
 use crate::profile::{acquire_exclusive_lock_file, OwnerLease};
-use crate::runtime::{ProfileRuntime, StatusUpdate, SuperviseHooks};
+use crate::runtime::{ProfileRuntime, StatusUpdate, SuperviseHooks, SupervisedReadyWait};
 use crate::secrets::KeyringBackend;
 use crate::supervisor::{CancelToken, ChildLaunch, OutputCallback, ProcessSupervisor, SpawnMode};
 use parking_lot::Mutex;
@@ -14,7 +14,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use totp_rs::{Algorithm, Secret, TOTP};
 use uuid::Uuid;
 
@@ -267,7 +267,17 @@ pub(crate) fn stop_openvpn_impl<B: KeyringBackend>(
 
 #[cfg(target_os = "windows")]
 pub(crate) fn start_openvpn_impl<B: KeyringBackend + 'static>(
+    rt: &ProfileRuntime<B>,
+    cancel: &CancelToken,
+) -> Result<StartFunctionResult, CoreError> {
+    start_openvpn_with_overrides_impl(rt, None, None, cancel)
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn start_openvpn_with_overrides_impl<B: KeyringBackend + 'static>(
     _rt: &ProfileRuntime<B>,
+    _username: Option<&str>,
+    _password: Option<&str>,
     _cancel: &CancelToken,
 ) -> Result<StartFunctionResult, CoreError> {
     Err(CoreError::capability_unavailable(
@@ -322,7 +332,17 @@ pub(crate) fn start_openvpn_impl<B: KeyringBackend + 'static>(
     rt: &ProfileRuntime<B>,
     cancel: &CancelToken,
 ) -> Result<StartFunctionResult, CoreError> {
-    let inputs = validate_vpn_inputs(rt)?;
+    start_openvpn_with_overrides_impl(rt, None, None, cancel)
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn start_openvpn_with_overrides_impl<B: KeyringBackend + 'static>(
+    rt: &ProfileRuntime<B>,
+    username_override: Option<&str>,
+    password_override: Option<&str>,
+    cancel: &CancelToken,
+) -> Result<StartFunctionResult, CoreError> {
+    let inputs = validate_vpn_inputs(rt, username_override, password_override)?;
     if rt.is_shutting_down() {
         return Err(CoreError::conflict(
             "shutting_down",
@@ -361,11 +381,49 @@ pub(crate) fn start_openvpn_impl<B: KeyringBackend + 'static>(
 }
 
 #[cfg(not(target_os = "windows"))]
+fn resolve_vpn_secrets<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
+    cfg: &OpenVpnConfig,
+    password_override: Option<&str>,
+) -> Result<(String, String), CoreError> {
+    let password = password_override
+        .map(ToOwned::to_owned)
+        .filter(|s| !s.is_empty())
+        .or_else(|| {
+            rt.read_optional_secret(KEYRING_OPENVPN_PASSWORD)
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| (!cfg.password.is_empty()).then(|| cfg.password.clone()))
+        .ok_or_else(|| {
+            CoreError::capability_unavailable(
+                "credentials_missing",
+                "OpenVPN password is not configured in profile keyring",
+                "configure_credentials",
+            )
+        })?;
+    let otp_secret = rt
+        .read_optional_secret(KEYRING_OPENVPN_OTP_SECRET)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| cfg.otp_secret.trim().to_string());
+    if !otp_secret.is_empty() {
+        generate_totp_code_with_offset(&otp_secret, 0).map_err(|e| {
+            CoreError::invalid_arguments("invalid_otp_secret", format!("Invalid OTP secret: {e}"))
+        })?;
+    }
+    Ok((password, otp_secret))
+}
+
+#[cfg(not(target_os = "windows"))]
 fn validate_vpn_inputs<B: KeyringBackend>(
     rt: &ProfileRuntime<B>,
+    username_override: Option<&str>,
+    password_override: Option<&str>,
 ) -> Result<ValidatedVpnInputs, CoreError> {
     let app = rt.get_app_config()?;
-    let cfg = normalized_openvpn_config(&app.openvpn);
+    let mut cfg = normalized_openvpn_config(&app.openvpn);
+    if let Some(user) = username_override.map(str::trim).filter(|s| !s.is_empty()) {
+        cfg.username = user.to_string();
+    }
     if cfg.terminate_open_vpn_when_helper_exits {
         return Err(CoreError::capability_unavailable(
             "incompatible_vpn_ownership",
@@ -391,26 +449,7 @@ fn validate_vpn_inputs<B: KeyringBackend>(
             "OpenVPN username is required",
         ));
     }
-    let password = rt
-        .read_optional_secret(KEYRING_OPENVPN_PASSWORD)
-        .filter(|s| !s.is_empty())
-        .or_else(|| (!cfg.password.is_empty()).then(|| cfg.password.clone()))
-        .ok_or_else(|| {
-            CoreError::capability_unavailable(
-                "credentials_missing",
-                "OpenVPN password is not configured in profile keyring",
-                "configure_credentials",
-            )
-        })?;
-    let otp_secret = rt
-        .read_optional_secret(KEYRING_OPENVPN_OTP_SECRET)
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| cfg.otp_secret.trim().to_string());
-    if !otp_secret.is_empty() {
-        generate_totp_code_with_offset(&otp_secret, 0).map_err(|e| {
-            CoreError::invalid_arguments("invalid_otp_secret", format!("Invalid OTP secret: {e}"))
-        })?;
-    }
+    let (password, otp_secret) = resolve_vpn_secrets(rt, &cfg, password_override)?;
     Ok(ValidatedVpnInputs {
         cfg,
         password,
@@ -677,43 +716,26 @@ fn wait_for_openvpn_ready<B: KeyringBackend>(
     cancel: &CancelToken,
 ) -> Result<(), CoreError> {
     let timeout = ov.ready_timeout.unwrap_or(DEFAULT_OPENVPN_READY_TIMEOUT);
-    let deadline = Instant::now() + timeout;
-    loop {
-        if cancel.is_cancelled() {
-            let _ = rt.stop_supervised_function(OPENVPN_FUNCTION_ID, Duration::from_secs(2));
-            return Err(CoreError::interrupted("OpenVPN start cancelled"));
-        }
-        match check_scan_outcome(scan) {
-            Ok(true) => return Ok(()),
-            Ok(false) => {}
-            Err(err) => {
-                let _ = rt.stop_supervised_function(OPENVPN_FUNCTION_ID, Duration::from_secs(2));
-                return Err(err);
-            }
-        }
-        if rt
-            .supervisor()
-            .active_session_for_function(OPENVPN_FUNCTION_ID)
-            .as_deref()
-            != Some(session_id)
-        {
-            return Err(CoreError::operation_failed(
+    rt.wait_for_supervised_ready(
+        SupervisedReadyWait {
+            function_id: OPENVPN_FUNCTION_ID,
+            session_id,
+            timeout,
+            cancel_msg: "OpenVPN start cancelled",
+            early_exit: (
                 "openvpn_exited_early",
                 "OpenVPN exited before completing initialization",
-                false,
                 "inspect_openvpn_config",
-            ));
-        }
-        if Instant::now() >= deadline {
-            let _ = rt.stop_supervised_function(OPENVPN_FUNCTION_ID, Duration::from_secs(2));
-            return Err(CoreError::timeout(
+            ),
+            timeout_err: (
                 "openvpn_ready_timeout",
                 format!(
                     "Timed out after {}s waiting for OpenVPN tunnel readiness",
                     timeout.as_secs()
                 ),
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+            ),
+        },
+        cancel,
+        || check_scan_outcome(scan),
+    )
 }
