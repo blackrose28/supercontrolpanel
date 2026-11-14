@@ -77,69 +77,7 @@ fn parse_boundary_targets(
     output: &[u8],
     filter: Option<String>,
 ) -> Result<Vec<BoundaryTargetSummary>, String> {
-    let v: serde_json::Value =
-        serde_json::from_slice(output).map_err(|e| format!("invalid JSON: {e}"))?;
-    let items = v
-        .get("items")
-        .and_then(|a| a.as_array())
-        .ok_or_else(|| "expected items array in boundary output".to_string())?;
-    let filter_lower = filter
-        .as_deref()
-        .map(|s| s.trim().to_lowercase())
-        .filter(|s| !s.is_empty());
-    let mut results: Vec<BoundaryTargetSummary> = Vec::new();
-    for item in items {
-        let obj = match item.as_object() {
-            Some(o) => o,
-            None => continue,
-        };
-        let id = obj
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if id.is_empty() {
-            continue;
-        }
-        let name = obj
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let target_type = obj
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let description = obj
-            .get("description")
-            .or_else(|| obj.get("attributes").and_then(|a| a.get("description")))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        let address = obj
-            .get("address")
-            .or_else(|| obj.get("attributes").and_then(|a| a.get("address")))
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if let Some(ref f) = filter_lower {
-            if !name.to_lowercase().contains(f)
-                && !id.to_lowercase().contains(f)
-                && !description.to_lowercase().contains(f)
-            {
-                continue;
-            }
-        }
-        results.push(BoundaryTargetSummary {
-            id,
-            name,
-            target_type,
-            description,
-            address,
-        });
-    }
-    Ok(results)
+    scp_core::boundary_ops::parse_boundary_targets(output, filter.as_deref())
 }
 
 #[cfg(test)]

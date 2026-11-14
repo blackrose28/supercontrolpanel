@@ -1,12 +1,22 @@
 //! Headless Super Control Panel core runtime, profile locking, secrets, and backup engine.
 pub mod backup;
+pub mod boundary_ops;
+pub mod caddy_ops;
 pub mod config_repo;
 pub mod error;
+pub mod events;
+pub mod file_paths;
 pub mod gate;
 pub mod models;
+pub mod openvpn_ops;
 pub mod profile;
 pub mod runtime;
 pub mod secrets;
+pub mod sftp_ops;
+pub mod ssh_ops;
+pub mod supervisor;
+pub mod transfer_store;
+pub mod tty;
 
 use error::CoreError;
 use serde_json::{json, Value};

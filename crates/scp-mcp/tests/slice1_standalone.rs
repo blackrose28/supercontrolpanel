@@ -423,16 +423,19 @@ fn stdio_transport_serves_jsonrpc_discovery_calls_and_clean_eof() {
             )
             .await
             .unwrap();
-        let ok_call: serde_json::Value =
-            serde_json::from_str(&reader.next_line().await.unwrap().unwrap()).unwrap();
+        let mut responses = Vec::with_capacity(2);
+        for _ in 0..2 {
+            let line = reader.next_line().await.unwrap().unwrap();
+            responses.push(serde_json::from_str::<serde_json::Value>(&line).unwrap());
+        }
+        let ok_call = responses.iter().find(|v| v["id"] == 3).unwrap();
         assert_eq!(ok_call["result"]["isError"], false);
         assert_eq!(
             ok_call["result"]["structuredContent"]["result"][0]["id"],
             "srv-1"
         );
 
-        let denied_call: serde_json::Value =
-            serde_json::from_str(&reader.next_line().await.unwrap().unwrap()).unwrap();
+        let denied_call = responses.iter().find(|v| v["id"] == 4).unwrap();
         assert_eq!(denied_call["result"]["isError"], true);
         assert!(denied_call["result"]["content"][0]["text"]
             .as_str()

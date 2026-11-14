@@ -19,35 +19,7 @@ pub fn load_server_by_id(app: &AppHandle, server_id: &str) -> Result<Server, Str
         .ok_or_else(|| "server not found".to_string())
 }
 
-pub fn resolve_server_ssh_endpoint(
-    server: &Server,
-    operation: &str,
-) -> Result<SshEndpoint, String> {
-    if server.ssh_user.trim().is_empty() {
-        return Err(format!("SSH user is required for {operation}"));
-    }
-    match &server.connection_method {
-        ConnectionMethod::Ssh => {
-            if server.host.trim().is_empty() {
-                return Err(format!("Host is required for {operation}"));
-            }
-            Ok(SshEndpoint {
-                user: server.ssh_user.trim().to_string(),
-                host: server.host.trim().to_string(),
-                port: server.ssh_port,
-            })
-        }
-        ConnectionMethod::Boundary => Ok(SshEndpoint {
-            user: server.ssh_user.trim().to_string(),
-            host: "127.0.0.1".to_string(),
-            port: if server.boundary_listen_port == 0 {
-                6222
-            } else {
-                server.boundary_listen_port
-            },
-        }),
-    }
-}
+pub use scp_core::ssh_ops::{resolve_server_ssh_endpoint, ssh_target};
 
 pub fn add_common_ssh_options(cmd: &mut Command, port_flag: &str, port: u16) {
     cmd.arg(port_flag)
@@ -56,10 +28,6 @@ pub fn add_common_ssh_options(cmd: &mut Command, port_flag: &str, port: u16) {
         .arg("StrictHostKeyChecking=accept-new")
         .arg("-o")
         .arg("MACs=hmac-sha2-512");
-}
-
-pub fn ssh_target(endpoint: &SshEndpoint) -> String {
-    format!("{}@{}", endpoint.user, endpoint.host)
 }
 
 fn previous_function_session_id(

@@ -1,5 +1,6 @@
-use std::{env, net::TcpStream, path::PathBuf, sync::Arc};
+use std::{net::TcpStream, sync::Arc};
 
+use scp_core::sftp_ops::common_ssh_private_keys;
 use ssh2::{FileStat, KeyboardInteractivePrompt, Prompt, Session as SshSession};
 use tauri::AppHandle;
 
@@ -12,9 +13,7 @@ use crate::{
         ensure_boundary_tunnel_running, keyring_get_optional, keyring_server_ssh_password_account,
         load_server_by_id, lock_err, normalize_remote_transfer_path, resolve_server_ssh_endpoint,
     },
-    stores::{
-        FunctionStore, RemoteBrowserSessionState, RemoteBrowserStore,
-    },
+    stores::{FunctionStore, RemoteBrowserSessionState, RemoteBrowserStore},
 };
 
 pub fn shutdown_remote_browser_session_state(_state: &RemoteBrowserSessionState) {}
@@ -112,39 +111,6 @@ pub fn remote_kind_from_file_stat(stat: &FileStat) -> RemotePathKind {
 
 pub fn path_buf_to_remote_string(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
-}
-
-fn home_dir() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        env::var_os("USERPROFILE")
-            .map(PathBuf::from)
-            .or_else(|| env::var_os("HOME").map(PathBuf::from))
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        env::var_os("HOME").map(PathBuf::from)
-    }
-}
-
-fn common_ssh_private_keys() -> Vec<PathBuf> {
-    let Some(home) = home_dir() else {
-        return Vec::new();
-    };
-    let ssh_dir = home.join(".ssh");
-    [
-        "id_ed25519",
-        "id_ecdsa",
-        "id_ecdsa_sk",
-        "id_rsa",
-        "id_dsa",
-        "id_xmss",
-    ]
-    .into_iter()
-    .map(|name| ssh_dir.join(name))
-    .filter(|path| path.is_file())
-    .collect()
 }
 
 struct SshPasswordKeyboardPrompter<'a> {
@@ -260,12 +226,20 @@ pub fn remove_remote_sftp_path_recursive(
     sftp: &ssh2::Sftp,
     path: &std::path::Path,
 ) -> Result<(), String> {
-    let stat = sftp
-        .lstat(path)
-        .map_err(|e| format_sftp_error("failed to inspect remote path", &path.display().to_string(), e))?;
+    let stat = sftp.lstat(path).map_err(|e| {
+        format_sftp_error(
+            "failed to inspect remote path",
+            &path.display().to_string(),
+            e,
+        )
+    })?;
     if matches!(remote_kind_from_file_stat(&stat), RemotePathKind::Directory) {
         for (child_path, _) in sftp.readdir(path).map_err(|e| {
-            format_sftp_error("failed to list remote directory", &path.display().to_string(), e)
+            format_sftp_error(
+                "failed to list remote directory",
+                &path.display().to_string(),
+                e,
+            )
         })? {
             let name = child_path
                 .file_name()
@@ -276,11 +250,21 @@ pub fn remove_remote_sftp_path_recursive(
             }
             remove_remote_sftp_path_recursive(sftp, &child_path)?;
         }
-        sftp.rmdir(path)
-            .map_err(|e| format_sftp_error("failed to remove remote directory", &path.display().to_string(), e))?;
+        sftp.rmdir(path).map_err(|e| {
+            format_sftp_error(
+                "failed to remove remote directory",
+                &path.display().to_string(),
+                e,
+            )
+        })?;
     } else {
-        sftp.unlink(path)
-            .map_err(|e| format_sftp_error("failed to remove remote file", &path.display().to_string(), e))?;
+        sftp.unlink(path).map_err(|e| {
+            format_sftp_error(
+                "failed to remove remote file",
+                &path.display().to_string(),
+                e,
+            )
+        })?;
     }
     Ok(())
 }
@@ -368,13 +352,16 @@ pub fn list_remote_browser_children(
         .sftp()
         .map_err(|e| format!("failed to open sftp session: {e}"))?;
     let mut entries = Vec::new();
-    for (child_path, stat) in sftp.readdir(std::path::Path::new(&target_path)).map_err(|e| {
-        format_sftp_error(
-            "permission denied or failed listing remote folder",
-            &target_path,
-            e,
-        )
-    })? {
+    for (child_path, stat) in sftp
+        .readdir(std::path::Path::new(&target_path))
+        .map_err(|e| {
+            format_sftp_error(
+                "permission denied or failed listing remote folder",
+                &target_path,
+                e,
+            )
+        })?
+    {
         let name = child_path
             .file_name()
             .map(|value| value.to_string_lossy().to_string())
@@ -483,9 +470,10 @@ pub fn delete_remote_browser_path(
             .lstat(std::path::Path::new(&target_path))
             .map_err(|e| format_sftp_error("failed to inspect remote path", &target_path, e))?;
         if matches!(remote_kind_from_file_stat(&stat), RemotePathKind::Directory) {
-            sftp.rmdir(std::path::Path::new(&target_path)).map_err(|e| {
-                format_sftp_error("failed to remove remote directory", &target_path, e)
-            })?;
+            sftp.rmdir(std::path::Path::new(&target_path))
+                .map_err(|e| {
+                    format_sftp_error("failed to remove remote directory", &target_path, e)
+                })?;
         } else {
             sftp.unlink(std::path::Path::new(&target_path))
                 .map_err(|e| format_sftp_error("failed to remove remote file", &target_path, e))?;
@@ -500,9 +488,7 @@ mod tests {
 
     #[test]
     fn keyboard_prompter_fills_password_for_hidden_prompt() {
-        let mut p = SshPasswordKeyboardPrompter {
-            password: "secret",
-        };
+        let mut p = SshPasswordKeyboardPrompter { password: "secret" };
         let prompts = vec![Prompt {
             text: std::borrow::Cow::Borrowed("Password: "),
             echo: false,

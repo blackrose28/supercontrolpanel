@@ -67,21 +67,7 @@ fn is_windows_pid_running(pid: u32) -> bool {
     }
 }
 
-pub(crate) fn compute_openvpn_reconnect_delay_secs(
-    failure_count: u32,
-    base_seconds: u64,
-    max_seconds: u64,
-) -> u64 {
-    if failure_count <= 1 {
-        return 0;
-    }
-    let effective_base = base_seconds.max(1);
-    let effective_max = max_seconds.max(effective_base);
-    let exponent = failure_count.saturating_sub(1).min(62);
-    let factor = (1_u128 << exponent).saturating_sub(1);
-    let delay = (effective_base as u128).saturating_mul(factor);
-    delay.min(effective_max as u128) as u64
-}
+pub(crate) use scp_core::openvpn_ops::compute_openvpn_reconnect_delay_secs;
 
 pub(crate) fn mark_openvpn_connected(app: &AppHandle) {
     if let Ok(mut state) = app.state::<OpenVpnReconnectStore>().state.lock() {

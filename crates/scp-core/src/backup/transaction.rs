@@ -28,7 +28,7 @@ fn read_key(store: &mut impl SecretStore) -> Result<Zeroizing<[u8; 32]>, String>
         return Err("Invalid settings recovery key".into());
     }
     let mut key = Zeroizing::new([0u8; 32]);
-    for (index, part) in encoded.as_bytes().chunks_exact(2).enumerate() {
+    for (index, part) in encoded.as_bytes().as_chunks::<2>().0.iter().enumerate() {
         let text = std::str::from_utf8(part).map_err(|_| "Invalid recovery key")?;
         key[index] = u8::from_str_radix(text, 16).map_err(|_| "Invalid recovery key")?;
     }

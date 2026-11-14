@@ -33,6 +33,10 @@ impl KeyringBackend for OsKeyringBackend {
     }
 
     fn read_raw(&mut self, service: &str, account: &str) -> Result<Option<String>, CoreError> {
+        if let Some(path) = crate::profile::non_empty_env_path("SCPCTL_TEST_KEYRING_FILE") {
+            let map = load_test_keyring(&path)?;
+            return Ok(map.get(service).and_then(|m| m.get(account)).cloned());
+        }
         ensure_keyring_ready()?;
         let entry = Entry::new(service, account).map_err(map_keyring_err)?;
         match entry.get_password() {
@@ -48,6 +52,22 @@ impl KeyringBackend for OsKeyringBackend {
         account: &str,
         value: Option<&str>,
     ) -> Result<(), CoreError> {
+        if let Some(path) = crate::profile::non_empty_env_path("SCPCTL_TEST_KEYRING_FILE") {
+            let mut map = load_test_keyring(&path)?;
+            match value {
+                Some(secret) => {
+                    map.entry(service.to_string())
+                        .or_default()
+                        .insert(account.to_string(), secret.to_string());
+                }
+                None => {
+                    if let Some(svc) = map.get_mut(service) {
+                        svc.remove(account);
+                    }
+                }
+            }
+            return save_test_keyring(&path, &map);
+        }
         ensure_keyring_ready()?;
         let entry = Entry::new(service, account).map_err(map_keyring_err)?;
         match value {
@@ -226,9 +246,12 @@ impl<B: KeyringBackend> SecretStore for NamespacedSecretStore<B> {
 
 /// Checks Secret Service lock state via D-Bus properties without triggering an interactive prompt.
 pub fn preflight_keyring() -> KeyringHealth {
+    if crate::profile::non_empty_env_path("SCPCTL_TEST_KEYRING_FILE").is_some() {
+        return KeyringHealth::Ready;
+    }
     #[cfg(target_os = "linux")]
     {
-        use dbus_secret_service::{EncryptionType, SecretService};
+        use secret_service::{blocking::SecretService, EncryptionType};
         let ss = match SecretService::connect(EncryptionType::Plain) {
             Ok(ss) => ss,
             Err(err) => {
@@ -291,4 +314,44 @@ fn map_keyring_err(err: KeyringError) -> CoreError {
             "unlock_keyring_and_retry",
         ),
     }
+}
+
+type TestKeyringMap = HashMap<String, HashMap<String, String>>;
+
+fn load_test_keyring(path: &std::path::Path) -> Result<TestKeyringMap, CoreError> {
+    match std::fs::read(path) {
+        Ok(bytes) if bytes.is_empty() => Ok(TestKeyringMap::new()),
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| {
+            CoreError::operation_failed(
+                "keyring_error",
+                format!("Invalid test keyring file: {e}"),
+                false,
+                "configure_credentials",
+            )
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(TestKeyringMap::new()),
+        Err(e) => Err(CoreError::operation_failed(
+            "keyring_error",
+            format!("Failed to read test keyring file: {e}"),
+            false,
+            "configure_credentials",
+        )),
+    }
+}
+
+fn save_test_keyring(path: &std::path::Path, map: &TestKeyringMap) -> Result<(), CoreError> {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let bytes = serde_json::to_vec(map).map_err(|e| {
+        CoreError::operation_failed(
+            "keyring_error",
+            e.to_string(),
+            false,
+            "configure_credentials",
+        )
+    })?;
+    crate::backup::io::atomic_write(path, &bytes, true).map_err(|e| {
+        CoreError::operation_failed("keyring_error", e, false, "configure_credentials")
+    })
 }

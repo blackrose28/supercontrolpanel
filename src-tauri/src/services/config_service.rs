@@ -72,61 +72,9 @@ pub fn save_sync_settings_to_disk(
     fs::write(path, encoded).map_err(|e| format!("failed to write sync settings: {e}"))
 }
 
-pub fn detect_openvpn_executable_path() -> Option<String> {
-    detect_openvpn_executable_checked().ok().flatten()
-}
-
-/// MCP needs to distinguish an absent executable from locator/filesystem failures.
-/// The existing Option-returning desktop helper keeps its fallback contract.
-pub fn detect_openvpn_executable_checked() -> Result<Option<String>, String> {
-    #[cfg(target_os = "windows")]
-    let (locator, candidates): (&str, &[&str]) = (
-        "where",
-        &[
-            r"C:\Program Files\OpenVPN\bin\openvpn.exe",
-            r"C:\Program Files\OpenVPN Connect\bin\openvpn.exe",
-            r"C:\Program Files (x86)\OpenVPN\bin\openvpn.exe",
-        ],
-    );
-    #[cfg(not(target_os = "windows"))]
-    let (locator, candidates): (&str, &[&str]) = (
-        "which",
-        &[
-            "/usr/sbin/openvpn",
-            "/usr/local/sbin/openvpn",
-            "/opt/homebrew/sbin/openvpn",
-        ],
-    );
-    #[cfg(target_os = "windows")]
-    if let Some(path) = common_openvpn_path(candidates)? {
-        return Ok(Some(path));
-    }
-
-    let located = match Command::new(locator).arg("openvpn").output() {
-        Ok(output) => openvpn_locator_result(output.status.code(), &output.stdout),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(_) => Err("OpenVPN executable detection failed".into()),
-    };
-    if let Ok(Some(path)) = located {
-        return Ok(Some(path));
-    }
-    if let Some(path) = common_openvpn_path(candidates)? {
-        return Ok(Some(path));
-    }
-    located
-}
-
-fn common_openvpn_path(candidates: &[&str]) -> Result<Option<String>, String> {
-    for candidate in candidates {
-        match fs::metadata(candidate) {
-            Ok(metadata) if metadata.is_file() => return Ok(Some((*candidate).into())),
-            Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(_) => return Err("OpenVPN executable detection failed".into()),
-        }
-    }
-    Ok(None)
-}
+pub use scp_core::openvpn_ops::{
+    detect_openvpn_executable_checked, detect_openvpn_executable_path, openvpn_locator_result,
+};
 
 pub fn keyring_entry(account: &str) -> Result<Entry, String> {
     Entry::new(KEYRING_SERVICE, account).map_err(|e| format!("keyring: {e}"))
@@ -341,20 +289,6 @@ mod mcp_policy_settings_tests {
             default_mcp_allowed_tool_categories()
         );
     }
-}
-
-fn openvpn_locator_result(status: Option<i32>, stdout: &[u8]) -> Result<Option<String>, String> {
-    if status == Some(1) {
-        return Ok(None);
-    }
-    if status != Some(0) {
-        return Err("OpenVPN executable detection failed".into());
-    }
-    std::str::from_utf8(stdout)
-        .ok()
-        .and_then(|value| value.lines().map(str::trim).find(|line| !line.is_empty()))
-        .map(|line| Some(line.to_owned()))
-        .ok_or_else(|| "OpenVPN executable detection failed".into())
 }
 
 #[cfg(test)]

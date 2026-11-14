@@ -119,9 +119,9 @@ npm run helper:run -- status
 npm run helper:run -- openvpn status
 ```
 
-## Standalone CLI and stdio MCP (Slice 1)
+## Standalone CLI and stdio MCP (Slices 1–2)
 
-The independent Rust workspace (`scp-core`, `scp-mcp`, `scp-cli`) builds `scpctl` without Tauri, GTK/WebKit, or HTTP dependencies and executes cleanly with the desktop app closed:
+The independent Rust workspace (`scp-core`, `scp-mcp`, `scp-cli`) builds `scpctl` without Tauri, GTK/WebKit, `libdbus-sys`, or HTTP dependencies and executes cleanly with the desktop app closed:
 
 ```sh
 cargo build --locked --release -p scp-cli
@@ -129,9 +129,9 @@ cargo run --locked -p scp-cli -- schema --json
 cargo run --locked -p scp-cli -- capabilities --no-profile --json
 ```
 
-Implemented Slice 1 commands on `target/release/scpctl`:
+Implemented Slice 1–2 commands on `target/release/scpctl`:
 
-- Profile-free discovery: `--help`, `--version`, `schema [--command <CMD>] --json`, `capabilities --no-profile [--json]`.
+- Profile-free discovery: `--help`, `--version`, `schema [--command <CMD>] --json`, `capabilities --no-profile [--json]`, `openvpn detect [--json]`.
 - Profile-backed read-only inspection (acquires exclusive `owner.lock`, rejects desktop config paths, runs journal recovery before loading config):
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] capabilities [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] status [--function-id <ID>] [--json]`
@@ -139,9 +139,18 @@ Implemented Slice 1 commands on `target/release/scpctl`:
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] server get --server-id <ID> [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] config paths [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings show [--json]` (secrets and tokens redacted)
-- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by profile-local `stdio-policy.json` (`sensitiveActionPolicy: "read-only"`, exposing 9 read-only tools by default or 11 read-only tools + all 6 `scp://*` resources when `"file-transfer"` is enabled). Runtime workers and mutations stay closed until Slices 2–4.
+- Profile-backed Slice 2 direct runtime workflows:
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] openvpn start --foreground [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] boundary targets search [--filter <TEXT>] [--limit <N>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] boundary auth [--interactive] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] caddy start --foreground [--folder <PATH>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server tunnel start --server-id <ID> --foreground [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server ssh --server-id <ID> --interactive`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] scp upload --server-id <ID> --local <PATH> --remote <PATH> [--recursive] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] scp download --server-id <ID> --remote <PATH> --local <PATH> [--recursive] [--overwrite] [--json]`
+- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by profile-local `stdio-policy.json` (`sensitiveActionPolicy: "read-only"`, exposing 9 read-only tools by default or 11 read-only tools + all 6 `scp://*` resources when `"file-transfer"` is enabled). Stdio MCP remains read-only until Slice 4 (`settings export`/`import` and config mutations follow in Slice 3).
 
-`src-tauri` re-exports shared models, encrypted backup primitives/journal engine, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli` and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
+`src-tauri` re-exports shared models, encrypted backup primitives/journal engine, pure runtime/service helpers, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [Slice 2 report](docs/mcp/STANDALONE_CLI_SLICE2.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli` and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
 
 ## MCP support
 

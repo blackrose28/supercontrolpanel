@@ -16,6 +16,9 @@ pub fn execute_command(req: CommandRequest) -> i32 {
     if matches!(req.subcommand, Subcommand::McpServeStdio) {
         return run_mcp_stdio(req.config_dir, req.profile);
     }
+    if matches!(req.subcommand, Subcommand::ServerSsh { .. }) {
+        return crate::runtime_cmds::execute_interactive_ssh(req);
+    }
 
     let json_mode = req.json;
     let outcome = run_shell_command(req);
@@ -50,6 +53,10 @@ fn run_shell_command(req: CommandRequest) -> ShellResult {
             runtime_id: None,
             result: capabilities_report(None::<&ProfileRuntime<OsKeyringBackend>>),
         },
+        Subcommand::OpenvpnDetect => ShellResult {
+            runtime_id: None,
+            result: crate::runtime_cmds::openvpn_detect(),
+        },
         other => run_profile_command(req.config_dir, req.profile, other),
     }
 }
@@ -71,6 +78,7 @@ fn run_profile_command(
     };
     let runtime_id = Some(rt.runtime_id().to_string());
     let result = dispatch_with_runtime(&rt, cmd);
+    rt.shutdown(std::time::Duration::from_secs(2));
     ShellResult { runtime_id, result }
 }
 
@@ -80,20 +88,7 @@ fn dispatch_with_runtime(
 ) -> Result<Value, CoreError> {
     match cmd {
         Subcommand::Capabilities { .. } => capabilities_report(Some(rt)),
-        Subcommand::Status { function_id: None } => {
-            let list = rt
-                .list_function_statuses()?
-                .iter()
-                .map(SafeFunctionStatus::from)
-                .collect::<Vec<_>>();
-            Ok(json!({ "statuses": list }))
-        }
-        Subcommand::Status {
-            function_id: Some(id),
-        } => {
-            let st = rt.get_function_status(&id)?;
-            Ok(json!(SafeFunctionStatus::from(&st)))
-        }
+        Subcommand::Status { function_id } => status_json(rt, function_id.as_deref()),
         Subcommand::ServerList { limit, after } => {
             let page = rt.list_servers(limit, after.as_deref())?;
             Ok(json!({
@@ -104,29 +99,80 @@ fn dispatch_with_runtime(
             }))
         }
         Subcommand::ServerGet { server_id } => Ok(json!(rt.get_server(&server_id)?)),
-        Subcommand::ConfigPaths => {
-            let paths = rt.profile_paths();
-            Ok(json!({
-                "appConfigPath": paths.config_path,
-                "profileDir": paths.profile_dir,
-                "serversPath": paths.servers_path,
-                "syncLocalPath": paths.sync_local_path,
-                "stdioPolicyPath": paths.stdio_policy_path
-            }))
+        Subcommand::ConfigPaths => config_paths_json(rt),
+        Subcommand::SettingsShow => settings_show_json(rt),
+        other => dispatch_runtime_ops(rt, other),
+    }
+}
+
+fn status_json(
+    rt: &ProfileRuntime<OsKeyringBackend>,
+    function_id: Option<&str>,
+) -> Result<Value, CoreError> {
+    match function_id {
+        None => {
+            let list = rt
+                .list_function_statuses()?
+                .iter()
+                .map(SafeFunctionStatus::from)
+                .collect::<Vec<_>>();
+            Ok(json!({ "statuses": list }))
         }
-        Subcommand::SettingsShow => {
-            let app_cfg = SafeAppConfig::from(&rt.get_app_config()?);
-            let sync = SafeSyncSettings::from(&rt.get_sync_settings()?);
-            let policy = rt.get_stdio_policy()?;
-            let mut val = json!({
-                "appConfig": app_cfg,
-                "syncSettings": sync,
-                "stdioPolicy": policy
-            });
-            redact_fields(&mut val);
-            Ok(val)
+        Some(id) => Ok(json!(SafeFunctionStatus::from(
+            &rt.get_function_status(id)?
+        ))),
+    }
+}
+
+fn config_paths_json(rt: &ProfileRuntime<OsKeyringBackend>) -> Result<Value, CoreError> {
+    let paths = rt.profile_paths();
+    Ok(json!({
+        "appConfigPath": paths.config_path,
+        "profileDir": paths.profile_dir,
+        "serversPath": paths.servers_path,
+        "syncLocalPath": paths.sync_local_path,
+        "stdioPolicyPath": paths.stdio_policy_path
+    }))
+}
+
+fn settings_show_json(rt: &ProfileRuntime<OsKeyringBackend>) -> Result<Value, CoreError> {
+    let app_cfg = SafeAppConfig::from(&rt.get_app_config()?);
+    let sync = SafeSyncSettings::from(&rt.get_sync_settings()?);
+    let policy = rt.get_stdio_policy()?;
+    let mut val = json!({
+        "appConfig": app_cfg,
+        "syncSettings": sync,
+        "stdioPolicy": policy
+    });
+    redact_fields(&mut val);
+    Ok(val)
+}
+
+fn dispatch_runtime_ops(
+    rt: &ProfileRuntime<OsKeyringBackend>,
+    cmd: Subcommand,
+) -> Result<Value, CoreError> {
+    match cmd {
+        Subcommand::OpenvpnStart
+        | Subcommand::CaddyStart { .. }
+        | Subcommand::ServerTunnelStart { .. } => crate::runtime_cmds::run_foreground(rt, cmd),
+        Subcommand::BoundaryTargetsSearch { filter, limit } => Ok(json!({
+            "targets": rt.search_boundary_targets(filter.as_deref(), limit)?
+        })),
+        Subcommand::BoundaryAuth { .. } => crate::runtime_cmds::run_boundary_auth(rt),
+        cmd @ (Subcommand::ScpUpload { .. } | Subcommand::ScpDownload { .. }) => {
+            crate::runtime_cmds::run_scp(rt, &cmd)
         }
-        Subcommand::Schema { .. } | Subcommand::McpServeStdio => unreachable!(),
+        Subcommand::Schema { .. }
+        | Subcommand::McpServeStdio
+        | Subcommand::OpenvpnDetect
+        | Subcommand::ServerSsh { .. }
+        | Subcommand::Capabilities { .. }
+        | Subcommand::Status { .. }
+        | Subcommand::ServerList { .. }
+        | Subcommand::ServerGet { .. }
+        | Subcommand::ConfigPaths
+        | Subcommand::SettingsShow => unreachable!(),
     }
 }
 

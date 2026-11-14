@@ -21,7 +21,7 @@ use stores::{
 };
 
 pub(crate) const OPENVPN_FUNCTION_ID: &str = "openvpn-connect";
-pub(crate) const CADDY_FUNCTION_ID: &str = "caddy-run";
+pub(crate) use scp_core::models::CADDY_FUNCTION_ID;
 pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 pub(crate) const SERVERS_FILE_NAME: &str = "servers.json";
 pub(crate) const SYNC_SETTINGS_FILE_NAME: &str = "sync-local.json";

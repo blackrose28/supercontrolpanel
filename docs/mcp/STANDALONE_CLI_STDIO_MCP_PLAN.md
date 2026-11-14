@@ -200,6 +200,8 @@ Every code increment follows repository RED → GREEN → REFACTOR: write a beha
 > **Slice 0 Linux `x86_64` verification note:** The Slice 0 feasibility gate is verified on Linux `x86_64` in [STANDALONE_CLI_SLICE0.md](./STANDALONE_CLI_SLICE0.md) and [CLI_STDIO_SLICE0.tap](./evidence/CLI_STDIO_SLICE0.tap); Windows, macOS, and GUI-free Linux CI runner checks remain tracked for target-OS matrix gates.
 >
 > **Slice 1 Linux `x86_64` verification note:** Slice 1 (`scp-core`, `scp-mcp` standalone read-only/stdio adapter, `scpctl` read-only CLI & `mcp serve --stdio`, and shared `src-tauri` re-exports) is verified on Linux `x86_64` in [STANDALONE_CLI_SLICE1.md](./STANDALONE_CLI_SLICE1.md).
+>
+> **Slice 2 Linux `x86_64` verification note:** Slice 2 (`scp-core` `ProcessSupervisor`, `tty`, `EventSink`, `transfer_store`, `file_paths`, Boundary/SSH/SCP/SFTP, OpenVPN, and Caddy runtime families, `src-tauri` pure helper delegations, and the 9 direct `scpctl` runtime commands while keeping stdio MCP read-only until Slice 4) is verified on Linux `x86_64` in [STANDALONE_CLI_SLICE2.md](./STANDALONE_CLI_SLICE2.md).
 
 Do not call a slice complete based only on mocked host tests. Record each gate's commands, exact commit/toolchain/SDK/client versions, OS/architecture, observed results, and unrun checks. A platform-specific capability may ship as explicitly unavailable; silently assuming parity is not an acceptable gate result. At least one supported target must pass a useful unattended workflow (discover server → establish a ready connection → transfer → inspect result → clean up); a catalog whose useful operations all require human interaction does not satisfy the primary outcome.
 

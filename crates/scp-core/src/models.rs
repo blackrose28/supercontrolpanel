@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 pub const DESKTOP_APP_IDENTIFIER: &str = "com.chuonglv.supercontrolpanel";
 pub const OPENVPN_FUNCTION_ID: &str = "openvpn-connect";
-pub const CADDY_FUNCTION_ID: &str = "caddy-start";
+pub const CADDY_FUNCTION_ID: &str = "caddy-run";
 pub const BOUNDARY_AUTH_FUNCTION_ID: &str = "boundary-auth";
 
 /// OS credential store service name shared across desktop and standalone namespaces.
@@ -55,6 +55,19 @@ pub enum BoundaryOidcLoginMode {
     #[default]
     Browser,
     Automated,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BoundaryTargetSummary {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub target_type: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub address: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -255,7 +268,7 @@ pub struct PtyExitPayload {
     pub reason: String,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FunctionStatus {
     pub function_id: String,
@@ -266,11 +279,27 @@ pub struct FunctionStatus {
     pub updated_at_ms: u64,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StartFunctionResult {
     pub function_id: String,
     pub session_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ScpAsyncStartResult {
+    pub transfer_id: String,
+    pub session_id: String,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ScpDownloadRequest<'a> {
+    pub server_id: &'a str,
+    pub remote_path: &'a str,
+    pub local_target: &'a str,
+    pub recursive: bool,
+    pub overwrite: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -282,7 +311,7 @@ pub struct OpenVpnLogPayload {
     pub data: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum ScpTransferState {
     Pending,
@@ -290,7 +319,7 @@ pub enum ScpTransferState {
     Error,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ScpTransferEntry {
     pub id: String,
@@ -355,6 +384,46 @@ pub struct ServersFile {
 
 pub fn new_server_id() -> String {
     format!("srv-{}", Uuid::new_v4())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RemotePathKind {
+    File,
+    Directory,
+    Symlink,
+    Other,
+    Missing,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteBrowseSession {
+    pub browser_id: String,
+    pub root_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteBrowseEntry {
+    pub name: String,
+    pub path: String,
+    pub kind: RemotePathKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteBrowseNodeInfo {
+    pub path: String,
+    pub kind: RemotePathKind,
+    pub exists: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SshEndpoint {
+    pub user: String,
+    pub host: String,
+    pub port: u16,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

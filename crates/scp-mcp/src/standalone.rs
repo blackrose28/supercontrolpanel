@@ -116,34 +116,48 @@ fn dispatch_slice1_readonly<B: KeyringBackend>(
 }
 
 fn cli_command_schemas() -> Vec<Value> {
+    let mut commands = slice1_discovery_schemas();
+    commands.extend(slice1_profile_schemas());
+    commands.extend(slice2_tunnel_vpn_schemas());
+    commands.extend(slice2_ssh_scp_schemas());
+    commands
+}
+
+fn slice1_discovery_schemas() -> Vec<Value> {
     vec![
         cmd_schema(
             "schema",
             "Print machine-readable command and MCP schemas",
             false,
             false,
-            json!({
-                "command": {"type": "string"}, "json": {"type": "boolean"}
-            }),
+            json!({"command": {"type": "string"}, "json": {"type": "boolean"}}),
         ),
         cmd_schema(
             "capabilities",
             "Inspect standalone host capabilities and profile readiness",
             false,
             false,
-            json!({
-                "noProfile": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}
-            }),
+            json!({"noProfile": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
         ),
         cmd_schema(
             "status",
             "Inspect process-local runtime and function statuses",
             true,
             false,
-            json!({
-                "functionId": {"type": "string"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}
-            }),
+            json!({"functionId": {"type": "string"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
         ),
+        cmd_schema(
+            "mcp.serve",
+            "Run MCP server over newline-delimited JSON-RPC stdio",
+            true,
+            false,
+            json!({"stdio": {"type": "boolean"}}),
+        ),
+    ]
+}
+
+fn slice1_profile_schemas() -> Vec<Value> {
+    vec![
         cmd_schema(
             "server.list",
             "List configured servers with bounded pagination",
@@ -159,36 +173,94 @@ fn cli_command_schemas() -> Vec<Value> {
             "Fetch a single server definition by exact ID",
             true,
             false,
-            json!({
-                "serverId": {"type": "string", "minLength": 1}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}
-            }),
+            json!({"serverId": {"type": "string", "minLength": 1}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
         ),
         cmd_schema(
             "config.paths",
             "Show resolved profile config file paths",
             true,
             false,
-            json!({
-                "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}
-            }),
+            json!({"json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
         ),
         cmd_schema(
             "settings.show",
             "Show redacted app config and local sync settings",
             true,
             false,
-            json!({
-                "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}
-            }),
+            json!({"json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+    ]
+}
+
+fn slice2_tunnel_vpn_schemas() -> Vec<Value> {
+    vec![
+        cmd_schema(
+            "openvpn.detect",
+            "Detect OpenVPN binary on the local host",
+            false,
+            false,
+            json!({"json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
         ),
         cmd_schema(
-            "mcp.serve",
-            "Run MCP server over newline-delimited JSON-RPC stdio",
+            "openvpn.start",
+            "Run OpenVPN foreground session until stopped",
+            true,
+            true,
+            json!({"foreground": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        cmd_schema(
+            "boundary.targets.search",
+            "Search Boundary targets from configured CLI",
             true,
             false,
-            json!({
-                "stdio": {"type": "boolean"}
-            }),
+            json!({"filter": {"type": "string"}, "limit": {"type": "integer", "minimum": 1}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        cmd_schema(
+            "boundary.auth",
+            "Authenticate against Boundary using password or interactive browser flow",
+            true,
+            true,
+            json!({"interactive": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        cmd_schema(
+            "caddy.start",
+            "Run Caddy foreground file server until stopped",
+            true,
+            true,
+            json!({"foreground": {"type": "boolean"}, "folder": {"type": "string"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+    ]
+}
+
+fn slice2_ssh_scp_schemas() -> Vec<Value> {
+    vec![
+        cmd_schema(
+            "server.tunnel.start",
+            "Run Boundary tunnel for a server in the foreground until stopped",
+            true,
+            true,
+            json!({"serverId": {"type": "string", "minLength": 1}, "foreground": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        cmd_schema(
+            "server.ssh",
+            "Open an interactive PTY SSH session to a server",
+            true,
+            true,
+            json!({"serverId": {"type": "string", "minLength": 1}, "interactive": {"type": "boolean"}}),
+        ),
+        cmd_schema(
+            "scp.upload",
+            "Upload a local file or directory to a server via SFTP/SCP",
+            true,
+            true,
+            json!({"serverId": {"type": "string", "minLength": 1}, "local": {"type": "string", "minLength": 1}, "remote": {"type": "string", "minLength": 1}, "recursive": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        cmd_schema(
+            "scp.download",
+            "Download a remote file or directory from a server via SFTP/SCP",
+            true,
+            true,
+            json!({"serverId": {"type": "string", "minLength": 1}, "remote": {"type": "string", "minLength": 1}, "local": {"type": "string", "minLength": 1}, "recursive": {"type": "boolean"}, "overwrite": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
         ),
     ]
 }
@@ -207,7 +279,7 @@ fn cmd_schema(
         "available": true,
         "destructive": destructive,
         "previewSupported": false,
-        "idempotent": true,
+        "idempotent": !destructive,
         "arguments": args
     })
 }
@@ -332,13 +404,15 @@ pub fn capabilities_report<B: KeyringBackend>(
         },
         "stdioPolicy": stdio_policy,
         "availableOperations": permitted,
+        "runtimeFamilies": {
+            "openvpn": "cli_foreground",
+            "boundary": "cli_foreground_and_query",
+            "caddy": "cli_foreground",
+            "ssh": "cli_interactive_pty",
+            "scp": "cli_one_shot"
+        },
         "unavailableFamilies": {
-            "openvpn": "runtime_not_extracted",
-            "boundary": "runtime_not_extracted",
-            "caddy": "runtime_not_extracted",
-            "ssh": "runtime_not_extracted",
-            "sftp": "runtime_not_extracted",
-            "scp": "runtime_not_extracted",
+            "sftp": "slice4_planned",
             "backup": "slice3_planned"
         }
     }))

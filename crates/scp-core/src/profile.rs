@@ -74,7 +74,7 @@ impl OwnedProfileLocation {
     }
 }
 
-fn non_empty_env_path(key: &str) -> Option<PathBuf> {
+pub(crate) fn non_empty_env_path(key: &str) -> Option<PathBuf> {
     std::env::var_os(key)
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
