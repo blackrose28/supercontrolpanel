@@ -1,12 +1,12 @@
-//! References only. Never archive the contents of external files or private keys.
-use super::{Archive, ExternalFile};
+//! External file reference inventory. Never bundles external files or private keys.
+use super::{io, Archive, ExternalFile, LOCAL_PATHS};
 use serde_json::Value;
 use std::{
     collections::BTreeSet,
     path::{Path, PathBuf},
 };
 
-pub(super) fn inventory(archive: &Archive) -> Vec<ExternalFile> {
+pub fn inventory(archive: &Archive) -> Vec<ExternalFile> {
     let mut references = BTreeSet::new();
     if let Some(local) = &archive.files["sync-local.json"] {
         collect_local(&mut references, local);
@@ -32,8 +32,9 @@ pub(super) fn inventory(archive: &Archive) -> Vec<ExternalFile> {
         .map(|(kind, path)| ExternalFile { kind, path })
         .collect()
 }
+
 fn collect_local(references: &mut BTreeSet<(String, String)>, local: &Value) {
-    for key in super::LOCAL_PATHS {
+    for key in LOCAL_PATHS {
         add(references, key, local.get(key).and_then(Value::as_str));
     }
     if let Some(folder) = local
@@ -48,6 +49,7 @@ fn collect_local(references: &mut BTreeSet<(String, String)>, local: &Value) {
         );
     }
 }
+
 fn collect_config(references: &mut BTreeSet<(String, String)>, config: &Value) {
     for (group, key) in [
         ("openvpn", "executablePath"),
@@ -84,9 +86,9 @@ fn collect_config(references: &mut BTreeSet<(String, String)>, config: &Value) {
     }
 }
 
-// Only inspect explicitly referenced OVPN files. Bounded, no symlink traversal, no recursion.
+// Inspects only explicitly referenced OVPN files (bounded, no symlinks, no recursion).
 fn inspect_ovpn(path: &str, references: &mut BTreeSet<(String, String)>) -> bool {
-    let Ok(Some(bytes)) = super::io::read_bounded(Path::new(path)) else {
+    let Ok(Some(bytes)) = io::read_bounded(Path::new(path)) else {
         return false;
     };
     let bytes = zeroize::Zeroizing::new(bytes);
@@ -108,8 +110,8 @@ fn add(refs: &mut BTreeSet<(String, String)>, kind: &str, path: Option<&str>) {
         refs.insert((kind.into(), path.into()));
     }
 }
+
 fn collect_ovpn_refs(refs: &mut BTreeSet<(String, String)>, input: &str, base: &Path) {
-    // OpenVPN supports quoted paths; parsing does not execute commands or expand variables.
     let Ok(words) = shell_words::split(input) else {
         return;
     };

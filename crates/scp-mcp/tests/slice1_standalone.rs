@@ -447,3 +447,67 @@ fn stdio_transport_serves_jsonrpc_discovery_calls_and_clean_eof() {
         assert_eq!(code, 0);
     });
 }
+
+#[test]
+fn slice3_cli_schemas_and_capabilities_are_complete() {
+    let full = standalone_schema_catalog(None).unwrap();
+    let cmds = full["commands"].as_array().unwrap();
+    assert_eq!(cmds.len(), 31);
+
+    let ops = full["mcpOperations"].as_array().unwrap();
+    assert_eq!(ops.len(), 45);
+    assert_eq!(ops.iter().filter(|o| o["available"] == true).count(), 11);
+    assert_eq!(ops.iter().filter(|o| o["available"] == false).count(), 34);
+
+    let resources = full["mcpResources"].as_array().unwrap();
+    assert_eq!(
+        resources.iter().filter(|r| r["available"] == true).count(),
+        6
+    );
+
+    let expected = [
+        ("completion", false, false, false, true),
+        ("server.upsert", true, false, true, true),
+        ("server.delete", true, true, true, false),
+        ("server.credentials.set", true, false, false, true),
+        ("server.credentials.clear", true, true, false, true),
+        ("server.rdp", true, false, false, false),
+        ("config.save", true, false, true, true),
+        ("config.patch", true, false, true, true),
+        ("config.secret.set", true, false, false, true),
+        ("config.secret.clear", true, true, false, true),
+        ("config.sync.push", true, false, true, true),
+        ("settings.patch", true, false, true, true),
+        ("settings.export", true, false, false, false),
+        ("settings.import", true, true, true, false),
+    ];
+
+    for (name, profile_required, destructive, preview_supported, idempotent) in expected {
+        let one = standalone_schema_catalog(Some(name)).unwrap();
+        let arr = one["commands"].as_array().unwrap();
+        assert_eq!(arr.len(), 1, "missing {name}");
+        let entry = &arr[0];
+        assert_eq!(entry["command"], name);
+        assert_eq!(entry["profileRequired"], profile_required, "{name}");
+        assert_eq!(entry["available"], true, "{name}");
+        assert_eq!(entry["destructive"], destructive, "{name}");
+        assert_eq!(entry["previewSupported"], preview_supported, "{name}");
+        assert_eq!(entry["idempotent"], idempotent, "{name}");
+        let args = entry["arguments"].as_object().unwrap();
+        for forbidden in ["password", "secret", "passphrase", "recoverIdentity"] {
+            assert!(
+                !args.contains_key(forbidden),
+                "{name} must not advertise unsafe arg {forbidden}"
+            );
+        }
+    }
+
+    let caps = capabilities_report(None::<&ProfileRuntime<MemoryKeyringBackend>>).unwrap();
+    assert_eq!(caps["runtimeFamilies"]["config"], "cli_local");
+    assert_eq!(caps["runtimeFamilies"]["backup"], "cli_local");
+    assert_eq!(caps["runtimeFamilies"]["rdp"], "cli_interactive_gui");
+    assert_eq!(
+        caps["unavailableFamilies"],
+        json!({"sftp": "slice4_planned"})
+    );
+}

@@ -1,4 +1,7 @@
-use crate::args::{CommandRequest, Subcommand};
+use crate::args::{BackupCommand, CommandRequest, Subcommand};
+use crate::backup_cmds::{execute_backup, execute_interactive_import, prepare_backup};
+use crate::completion::generate_completion;
+use crate::mutation_cmds::{execute_mutation, prepare_mutation};
 use scp_core::error::CoreError;
 use scp_core::profile::OwnedProfileLocation;
 use scp_core::runtime::ProfileRuntime;
@@ -16,8 +19,26 @@ pub fn execute_command(req: CommandRequest) -> i32 {
     if matches!(req.subcommand, Subcommand::McpServeStdio) {
         return run_mcp_stdio(req.config_dir, req.profile);
     }
+    if let Subcommand::Completion { shell } = &req.subcommand {
+        return match generate_completion(shell) {
+            Ok(script) => {
+                print!("{script}");
+                0
+            }
+            Err(err) => {
+                eprintln!("{err}");
+                err.exit_code()
+            }
+        };
+    }
     if matches!(req.subcommand, Subcommand::ServerSsh { .. }) {
         return crate::runtime_cmds::execute_interactive_ssh(req);
+    }
+    if matches!(
+        req.subcommand,
+        Subcommand::Backup(BackupCommand::SettingsImport { apply: true, .. })
+    ) {
+        return execute_interactive_import(req);
     }
 
     let json_mode = req.json;
@@ -57,14 +78,34 @@ fn run_shell_command(req: CommandRequest) -> ShellResult {
             runtime_id: None,
             result: crate::runtime_cmds::openvpn_detect(),
         },
-        other => run_profile_command(req.config_dir, req.profile, other),
+        Subcommand::Mutation(cmd) => match prepare_mutation(cmd) {
+            Ok(prep) => {
+                with_profile_runtime(req.config_dir, req.profile, |rt| execute_mutation(rt, prep))
+            }
+            Err(err) => ShellResult {
+                runtime_id: None,
+                result: Err(err),
+            },
+        },
+        Subcommand::Backup(cmd) => match prepare_backup(cmd) {
+            Ok(prep) => {
+                with_profile_runtime(req.config_dir, req.profile, |rt| execute_backup(rt, prep))
+            }
+            Err(err) => ShellResult {
+                runtime_id: None,
+                result: Err(err),
+            },
+        },
+        other => with_profile_runtime(req.config_dir, req.profile, |rt| {
+            dispatch_with_runtime(rt, other)
+        }),
     }
 }
 
-fn run_profile_command(
+fn with_profile_runtime(
     config_dir: Option<std::path::PathBuf>,
     profile: Option<String>,
-    cmd: Subcommand,
+    op: impl FnOnce(&ProfileRuntime<OsKeyringBackend>) -> Result<Value, CoreError>,
 ) -> ShellResult {
     let loc = OwnedProfileLocation::from_env(config_dir, profile);
     let rt = match ProfileRuntime::open(&loc.as_input(), "cli") {
@@ -77,7 +118,7 @@ fn run_profile_command(
         }
     };
     let runtime_id = Some(rt.runtime_id().to_string());
-    let result = dispatch_with_runtime(&rt, cmd);
+    let result = op(&rt);
     rt.shutdown(std::time::Duration::from_secs(2));
     ShellResult { runtime_id, result }
 }
@@ -172,7 +213,10 @@ fn dispatch_runtime_ops(
         | Subcommand::ServerList { .. }
         | Subcommand::ServerGet { .. }
         | Subcommand::ConfigPaths
-        | Subcommand::SettingsShow => unreachable!(),
+        | Subcommand::SettingsShow
+        | Subcommand::Completion { .. }
+        | Subcommand::Mutation(..)
+        | Subcommand::Backup(..) => unreachable!(),
     }
 }
 

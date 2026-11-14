@@ -92,18 +92,14 @@ fn validate_rdp_host(
     windows_server: bool,
     host: &str,
 ) -> Result<(), String> {
-    if !matches!(os, "windows" | "macos" | "linux") || !interactive || !windows_server {
-        return Err(OperationError::new(ErrorCode::CapabilityUnavailable).legacy_message());
-    }
-    // This value enters a native /v: argument or rdp:// URL; forbid URL/option syntax.
-    if host.is_empty()
-        || !host
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || ".-:[]".contains(c))
-    {
-        return Err(OperationError::new(ErrorCode::InvalidArguments).legacy_message());
-    }
-    Ok(())
+    scp_core::config_ops::validate_rdp_target(os, interactive, windows_server, host).map_err(
+        |err| match err.code() {
+            "CAPABILITY_UNAVAILABLE" => {
+                OperationError::new(ErrorCode::CapabilityUnavailable).legacy_message()
+            }
+            _ => OperationError::new(ErrorCode::InvalidArguments).legacy_message(),
+        },
+    )
 }
 
 pub(super) struct DesktopParityHost<'a>(pub &'a tauri::AppHandle);

@@ -2,6 +2,7 @@
 pub mod backup;
 pub mod boundary_ops;
 pub mod caddy_ops;
+pub mod config_ops;
 pub mod config_repo;
 pub mod error;
 pub mod events;

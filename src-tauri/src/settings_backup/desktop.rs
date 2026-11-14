@@ -1,17 +1,20 @@
 //! Narrow local Tauri surface. Passphrases never enter command logs or persisted previews.
+#[allow(unused_imports)]
+pub(super) use scp_core::backup::{describe, fingerprint};
+#[allow(unused_imports)]
+pub use scp_core::backup::{Preview, SectionSummary};
+
 use super::{
-    compile_restore, crypto, gate, io, snapshot, transaction, Archive, RestoreOptions, SecretStore,
+    compile_restore, crypto, gate, io, snapshot, transaction, validate_export_target, Archive,
+    PendingRestore, RestoreOptions, SecretStore,
 };
 use crate::{
     mcp::{mcp_runtime_status, McpRuntimeState},
     services::config_service::*,
     stores::*,
 };
-use serde::Serialize;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeMap,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -144,40 +147,39 @@ pub fn cancel_settings_backup_work(request_id: String) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) struct Pending {
-    pub(super) id: String,
-    source: Archive,
-    options: RestoreOptions,
-    fingerprint: [u8; 32],
-    revision: u64,
-    pub(super) expires: Instant,
+pub(super) struct Pending(PendingRestore);
+
+impl std::ops::Deref for Pending {
+    type Target = PendingRestore;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
+
+impl std::ops::DerefMut for Pending {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 impl Pending {
     pub(super) fn new(
         source: Archive,
         options: RestoreOptions,
         destination: &Archive,
     ) -> Result<Self, String> {
-        Ok(Self {
-            id: uuid::Uuid::new_v4().to_string(),
+        PendingRestore::new(
             source,
             options,
-            fingerprint: fingerprint(destination)?,
-            revision: gate::revision(),
-            expires: Instant::now() + Duration::from_secs(600),
-        })
+            destination,
+            gate::revision(),
+            Duration::from_secs(600),
+        )
+        .map(Self)
     }
-    pub(super) fn verify_identity(&self, id: &str) -> Result<(), String> {
-        if self.id != id || Instant::now() > self.expires {
-            return Err("Preview expired or replaced; preview the backup again".into());
-        }
-        Ok(())
-    }
+
     pub(super) fn verify_destination(&self, destination: &Archive) -> Result<(), String> {
-        if self.revision != gate::revision() || self.fingerprint != fingerprint(destination)? {
-            return Err("Settings changed since preview; preview the backup again".into());
-        }
-        Ok(())
+        self.0.verify_destination(destination, gate::revision())
     }
 }
 static PENDING: OnceLock<Mutex<Option<Pending>>> = OnceLock::new();
@@ -198,128 +200,6 @@ pub fn recover_startup(app: &AppHandle) -> Result<(), String> {
     transaction::recover(&directory(app)?, &mut OsSecrets).map_err(|error| {
         gate::block();
         format!("Settings restore recovery is required: {error}. Keep the recovery journal and OS-keyring account; unlock the keyring and restart.")
-    })
-}
-
-pub(super) fn fingerprint(archive: &Archive) -> Result<[u8; 32], String> {
-    // Exclude volatile snapshot metadata; hash settings + known credential presence/values.
-    let mut hash = Sha256::new();
-    for name in super::FILES {
-        hash.update(name.as_bytes());
-        hash.update(
-            Zeroizing::new(
-                serde_json::to_vec(&archive.files[name])
-                    .map_err(|_| "Could not fingerprint settings")?,
-            )
-            .as_slice(),
-        );
-    }
-    hash.update(
-        Zeroizing::new(
-            serde_json::to_vec(&archive.credentials)
-                .map_err(|_| "Could not fingerprint credentials")?,
-        )
-        .as_slice(),
-    );
-    Ok(hash.finalize().into())
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Preview {
-    pub id: String,
-    pub source_platform: String,
-    pub source_version: String,
-    pub created_at_ms: u64,
-    pub servers: usize,
-    pub sections: Vec<SectionSummary>,
-    pub credentials_set: usize,
-    pub credentials_deleted: usize,
-    pub credentials_kept: usize,
-    pub credential_actions: Vec<Value>,
-    pub external_files: Vec<Value>,
-    pub executable_configuration: Value,
-    pub warnings: Vec<String>,
-}
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SectionSummary {
-    name: String,
-    state: String,
-    changed: bool,
-}
-
-pub(super) fn describe(
-    source: &Archive,
-    destination: &Archive,
-    options: &RestoreOptions,
-) -> Result<Preview, String> {
-    let changes = compile_restore(source, destination, options)?;
-    let sections = super::FILES
-        .iter()
-        .map(|name| SectionSummary {
-            name: name.to_string(),
-            state: if !changes.files.contains_key(*name) {
-                "unselected"
-            } else if source.files[*name].is_some() {
-                "included"
-            } else {
-                "absent"
-            }
-            .into(),
-            changed: changes
-                .files
-                .get(*name)
-                .is_some_and(|value| value != &destination.files[*name]),
-        })
-        .collect();
-    let local = source.files["sync-local.json"].as_ref();
-    let config = source.files["config.json"].as_ref();
-    let paths: BTreeMap<_, _> = super::LOCAL_PATHS
-        .iter()
-        .map(|key| {
-            (
-                *key,
-                local
-                    .and_then(|v| v.get(key))
-                    .cloned()
-                    .unwrap_or(Value::Null),
-            )
-        })
-        .collect();
-    let mut warnings = vec![
-        "Replaces selected sections. Unselected sections remain unchanged. Missing selected credentials are deleted; removed servers lose their saved SSH passwords.".into(),
-        "Archived Boundary app tokens and telemetry keys are not restored. The destination telemetry key is kept. Changing Boundary controller/auth identity deletes the destination app token and requires a fresh login.".into(),
-        "External files, Boundary CLI credentials, SSH-agent keys, deleted-server keyring entries, live sessions, queues, and logs are not bundled. Settings alone do not make a new machine connection-ready.".into(),
-        "Review executable paths, arguments, sync root and privilege settings. MCP and CC stay disabled; activate them deliberately after import.".into(),
-    ];
-    if source.platform != std::env::consts::OS {
-        warnings.push("Backup paths came from a different platform. Preserve local paths or remap them in Config after import.".into());
-    }
-    if options.local && options.recover_identity {
-        warnings.push("Same-device recovery selected: original CC identity and MCP token will be restored, with both services disabled.".into());
-    }
-    let external_files = source.external_files.iter().map(|reference| json!({"kind":reference.kind,"path":reference.path,"existsHere":Path::new(&reference.path).exists()})).collect();
-    Ok(Preview {
-        id: String::new(),
-        source_platform: source.platform.clone(),
-        source_version: source.app_version.clone(),
-        created_at_ms: source.created_at_ms,
-        servers: source.server_ids()?.len(),
-        sections,
-        credentials_set: changes.credentials.values().filter(|v| v.is_some()).count(),
-        credentials_deleted: changes.credentials.values().filter(|v| v.is_none()).count(),
-        credentials_kept: destination.credentials.keys().filter(|account| !changes.credentials.contains_key(*account)).count(),
-        credential_actions: destination.credentials.keys().chain(changes.credentials.keys()).collect::<std::collections::BTreeSet<_>>().into_iter().map(|account| {
-            json!({"account":account,"action":match changes.credentials.get(account) { Some(Some(_)) => "set", Some(None) => "delete", None => "keep" }})
-        }).collect(),
-        external_files,
-        executable_configuration: json!({"sourcePaths": paths, "preserveDestinationPaths":options.preserve_paths,"pathOverrides":options.path_overrides,
-            "openvpnExtraArgs":config.and_then(|v| v.pointer("/openvpn/extraArgs")),
-            "legacyOpenvpnCommand":config.and_then(|v| v.pointer("/openvpn/command")),
-            "terminateOpenVpnWhenHelperExits":config.and_then(|v| v.pointer("/openvpn/terminateOpenVpnWhenHelperExits")),
-            "sshOptions":config.and_then(|v| v.pointer("/boundary/connectSshOptions"))}),
-        warnings,
     })
 }
 
@@ -448,17 +328,10 @@ pub async fn export_settings_backup(
     }
     tauri::async_runtime::spawn_blocking(move || {
         let _guard = gate::maintain()?;
-        let archive = snapshot(&directory(&app)?, &mut &work)?;
+        let dir = directory(&app)?;
+        let archive = snapshot(&dir, &mut &work)?;
         work.check()?;
-        let output = PathBuf::from(path);
-        if !output.is_absolute() { return Err("Select an absolute backup destination".into()); }
-        // Do not allow a backup to replace its own source or recovery files.
-        let parent = output.parent().ok_or("Invalid backup destination")?.canonicalize().map_err(|_| "Backup directory does not exist")?;
-        let profile = directory(&app)?.canonicalize().map_err(|_| "Settings directory does not exist")?;
-        if parent == profile && output.file_name().is_some_and(|n| {
-            let name = n.to_string_lossy().to_ascii_lowercase();
-            super::FILES.contains(&name.as_str()) || name == transaction::JOURNAL_FILE
-        }) { return Err("Backup destination cannot replace application settings".into()); }
+        let output = validate_export_target(Path::new(&path), &dir, true)?;
         let bytes = crypto::encrypt(&archive, &passphrase)?;
         work.check()?;
         io::atomic_write(&output, &bytes, overwrite)?;

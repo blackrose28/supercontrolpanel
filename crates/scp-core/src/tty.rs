@@ -1,7 +1,9 @@
-//! Terminal inspection, raw/mode restoration guard, and OS termination signals.
+//! Terminal inspection, raw/mode restoration guard, TTY prompts, and OS termination signals.
+use crate::error::CoreError;
 use std::io::IsTerminal;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
+use zeroize::{Zeroize, Zeroizing};
 
 const SIG_NONE: u8 = 0;
 const SIG_INTERRUPT: u8 = 1;
@@ -293,6 +295,322 @@ pub fn terminate_child(child: &mut std::process::Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+const MAX_TTY_INPUT_BYTES: usize = 65_536;
+
+/// Reads a single visible line from the controlling terminal, interruptible by `SignalWatcher`.
+pub fn read_tty_line(prompt: &str, watcher: Option<&SignalWatcher>) -> Result<String, CoreError> {
+    let raw = read_tty_impl(prompt, true, watcher)?;
+    Ok(raw.to_string())
+}
+
+/// Reads a single line with terminal echo disabled, always restoring echo on return or interrupt.
+pub fn read_tty_secret(
+    prompt: &str,
+    watcher: Option<&SignalWatcher>,
+) -> Result<Zeroizing<String>, CoreError> {
+    read_tty_impl(prompt, false, watcher)
+}
+
+#[cfg(unix)]
+struct UnixTtyEchoGuard {
+    fd: std::os::fd::RawFd,
+    saved: Option<libc::termios>,
+}
+
+#[cfg(unix)]
+impl UnixTtyEchoGuard {
+    fn disable_echo(fd: std::os::fd::RawFd) -> Result<Self, CoreError> {
+        let mut current = unsafe { std::mem::zeroed::<libc::termios>() };
+        if unsafe { libc::tcgetattr(fd, &mut current) } != 0 {
+            return Err(CoreError::capability_unavailable(
+                "tty_required",
+                "Interactive terminal (/dev/tty) does not support echo control",
+                "run_in_tty_or_use_file",
+            ));
+        }
+        let saved = current;
+        current.c_lflag &= !(libc::ECHO | libc::ECHOE | libc::ECHOK);
+        current.c_lflag |= libc::ECHONL;
+        if unsafe { libc::tcsetattr(fd, libc::TCSANOW, &current) } != 0 {
+            return Err(CoreError::operation_failed(
+                "tty_mode_failed",
+                "Failed to disable terminal echo for secret prompt",
+                false,
+                "run_in_tty_or_use_file",
+            ));
+        }
+        Ok(Self {
+            fd,
+            saved: Some(saved),
+        })
+    }
+}
+
+#[cfg(unix)]
+impl Drop for UnixTtyEchoGuard {
+    fn drop(&mut self) {
+        if let Some(saved) = self.saved.take() {
+            unsafe {
+                libc::tcsetattr(self.fd, libc::TCSANOW, &saved);
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn read_tty_impl(
+    prompt: &str,
+    echo: bool,
+    watcher: Option<&SignalWatcher>,
+) -> Result<Zeroizing<String>, CoreError> {
+    use std::fs::OpenOptions;
+    use std::io::Write;
+    use std::os::fd::AsRawFd;
+
+    let mut tty = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|_| {
+            CoreError::capability_unavailable(
+                "tty_required",
+                "Interactive terminal (/dev/tty) is required",
+                "run_in_tty_or_use_file",
+            )
+        })?;
+    if !tty.is_terminal() {
+        return Err(CoreError::capability_unavailable(
+            "tty_required",
+            "Controlling terminal (/dev/tty) is not interactive",
+            "run_in_tty_or_use_file",
+        ));
+    }
+    let fd = tty.as_raw_fd();
+    let _echo_guard = if echo {
+        None
+    } else {
+        Some(UnixTtyEchoGuard::disable_echo(fd)?)
+    };
+
+    tty.write_all(prompt.as_bytes()).map_err(|e| {
+        CoreError::operation_failed(
+            "tty_write_failed",
+            format!("Failed to write terminal prompt: {e}"),
+            false,
+            "run_in_tty_or_use_file",
+        )
+    })?;
+    let _ = tty.flush();
+
+    let mut buf = Zeroizing::new(Vec::<u8>::with_capacity(128));
+    loop {
+        if watcher.and_then(SignalWatcher::signal).is_some() {
+            if !echo {
+                let _ = tty.write_all(b"\n");
+                let _ = tty.flush();
+            }
+            return Err(CoreError::interrupted(
+                "Interrupted while waiting for terminal input",
+            ));
+        }
+        let mut pfd = libc::pollfd {
+            fd,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let rc = unsafe { libc::poll(&mut pfd, 1, 50) };
+        if rc < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(CoreError::operation_failed(
+                "tty_read_failed",
+                format!("Terminal poll failed: {err}"),
+                false,
+                "run_in_tty_or_use_file",
+            ));
+        }
+        if rc == 0 {
+            continue;
+        }
+        if pfd.revents & (libc::POLLERR | libc::POLLHUP | libc::POLLNVAL) != 0
+            && pfd.revents & libc::POLLIN == 0
+        {
+            return Err(CoreError::invalid_arguments(
+                "tty_eof",
+                "Terminal input closed before completion",
+            ));
+        }
+        let mut byte = [0u8; 1];
+        let n = unsafe { libc::read(fd, byte.as_mut_ptr().cast(), 1) };
+        if n < 0 {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            return Err(CoreError::operation_failed(
+                "tty_read_failed",
+                format!("Terminal read failed: {err}"),
+                false,
+                "run_in_tty_or_use_file",
+            ));
+        }
+        if n == 0 {
+            if buf.is_empty() {
+                return Err(CoreError::invalid_arguments(
+                    "tty_eof",
+                    "Terminal input closed unexpectedly",
+                ));
+            }
+            break;
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        if buf.len() >= MAX_TTY_INPUT_BYTES {
+            byte.zeroize();
+            return Err(CoreError::invalid_arguments(
+                "input_too_large",
+                "Terminal input exceeds maximum allowed size",
+            ));
+        }
+        buf.push(byte[0]);
+        byte.zeroize();
+    }
+    while buf.last() == Some(&b'\r') {
+        buf.pop();
+    }
+    if !echo {
+        // Ensure cursor advances cleanly on virtual PTYs that ignore ECHONL.
+        let _ = tty.write_all(b"\r\n");
+        let _ = tty.flush();
+    }
+    let text = String::from_utf8(std::mem::take(&mut *buf)).map_err(|_| {
+        CoreError::invalid_arguments("invalid_utf8", "Terminal input must be valid UTF-8")
+    })?;
+    Ok(Zeroizing::new(text))
+}
+
+#[cfg(windows)]
+fn read_tty_impl(
+    prompt: &str,
+    echo: bool,
+    watcher: Option<&SignalWatcher>,
+) -> Result<Zeroizing<String>, CoreError> {
+    use std::fs::OpenOptions;
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::windows::io::AsRawHandle;
+
+    const ENABLE_ECHO_INPUT: u32 = 0x0004;
+
+    if !is_interactive_tty() {
+        return Err(CoreError::capability_unavailable(
+            "tty_required",
+            "Interactive console is required",
+            "run_in_tty_or_use_file",
+        ));
+    }
+    let mut conout = OpenOptions::new()
+        .write(true)
+        .open("CONOUT$")
+        .map_err(|_| {
+            CoreError::capability_unavailable(
+                "tty_required",
+                "Interactive console output is unavailable",
+                "run_in_tty_or_use_file",
+            )
+        })?;
+    let conin = OpenOptions::new().read(true).open("CONIN$").map_err(|_| {
+        CoreError::capability_unavailable(
+            "tty_required",
+            "Interactive console input is unavailable",
+            "run_in_tty_or_use_file",
+        )
+    })?;
+
+    struct WinEchoGuard {
+        handle: *mut core::ffi::c_void,
+        saved_mode: Option<u32>,
+    }
+    impl Drop for WinEchoGuard {
+        fn drop(&mut self) {
+            if let Some(mode) = self.saved_mode.take() {
+                unsafe {
+                    SetConsoleMode(self.handle, mode);
+                }
+            }
+        }
+    }
+
+    let handle = conin.as_raw_handle();
+    let _guard = if echo {
+        None
+    } else {
+        let mut mode = 0u32;
+        if unsafe { GetConsoleMode(handle, &mut mode) } == 0 {
+            return Err(CoreError::capability_unavailable(
+                "tty_required",
+                "Interactive console does not support echo control",
+                "run_in_tty_or_use_file",
+            ));
+        }
+        let saved = mode;
+        if unsafe { SetConsoleMode(handle, mode & !ENABLE_ECHO_INPUT) } == 0 {
+            return Err(CoreError::operation_failed(
+                "tty_mode_failed",
+                "Failed to disable console echo for secret prompt",
+                false,
+                "run_in_tty_or_use_file",
+            ));
+        }
+        Some(WinEchoGuard {
+            handle,
+            saved_mode: Some(saved),
+        })
+    };
+
+    conout.write_all(prompt.as_bytes()).map_err(|e| {
+        CoreError::operation_failed("tty_write_failed", e.to_string(), false, "run_in_tty")
+    })?;
+    let _ = conout.flush();
+    if watcher.and_then(SignalWatcher::signal).is_some() {
+        return Err(CoreError::interrupted(
+            "Interrupted while waiting for console input",
+        ));
+    }
+    let mut line = Zeroizing::new(String::new());
+    let mut reader = BufReader::new(conin);
+    let n = reader.read_line(&mut line).map_err(|e| {
+        CoreError::operation_failed("tty_read_failed", e.to_string(), false, "run_in_tty")
+    })?;
+    if watcher.and_then(SignalWatcher::signal).is_some() {
+        return Err(CoreError::interrupted(
+            "Interrupted while waiting for console input",
+        ));
+    }
+    if n == 0 {
+        return Err(CoreError::invalid_arguments(
+            "tty_eof",
+            "Console input closed unexpectedly",
+        ));
+    }
+    if line.len() > MAX_TTY_INPUT_BYTES {
+        return Err(CoreError::invalid_arguments(
+            "input_too_large",
+            "Console input exceeds maximum allowed size",
+        ));
+    }
+    while line.ends_with('\n') || line.ends_with('\r') {
+        line.pop();
+    }
+    if !echo {
+        let _ = conout.write_all(b"\r\n");
+        let _ = conout.flush();
+    }
+    Ok(line)
 }
 
 #[cfg(test)]

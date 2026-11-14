@@ -2358,6 +2358,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
@@ -2375,6 +2376,8 @@ dependencies = [
  "secret-service",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
+ "shell-words",
  "ssh2",
  "tempfile",
  "tokio",

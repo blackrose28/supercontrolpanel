@@ -12,6 +12,7 @@ path = "src/main.rs"
 scp-core = { path = "../scp-core" }
 scp-mcp = { path = "../scp-mcp", features = ["stdio"] }
 serde_json = "1"
+zeroize = "1"
 
 [dev-dependencies]
 russh = { version = "0.65.1", default-features = false, features = ["ring", "flate2"] }

@@ -212,14 +212,11 @@ fn cleanup(dir: &Path, store: &mut impl SecretStore) -> Result<(), String> {
 
 impl Drop for Journal {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.files
-            .values_mut()
-            .flatten()
-            .for_each(|bytes| bytes.zeroize());
-        self.credentials
-            .values_mut()
-            .flatten()
-            .for_each(|secret| secret.zeroize());
+        for buf in self.files.values_mut().flatten() {
+            zeroize::Zeroize::zeroize(buf);
+        }
+        for val in self.credentials.values_mut().flatten() {
+            zeroize::Zeroize::zeroize(val);
+        }
     }
 }

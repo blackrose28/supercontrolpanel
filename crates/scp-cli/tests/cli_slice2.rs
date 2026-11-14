@@ -786,7 +786,7 @@ fn cli_schema_and_capabilities_slice2_surface() {
     assert!(schema.status.success());
     let sbody = parse_single_json(&schema);
     let cmds = sbody["data"]["commands"].as_array().unwrap();
-    assert_eq!(cmds.len(), 17);
+    assert_eq!(cmds.len(), 31);
     for name in [
         "openvpn.detect",
         "openvpn.start",
@@ -820,8 +820,9 @@ fn cli_schema_and_capabilities_slice2_surface() {
         9
     );
     assert!(cbody["data"]["runtimeFamilies"].is_object());
+    assert_eq!(cbody["data"]["runtimeFamilies"]["backup"], "cli_local");
     assert_eq!(
-        cbody["data"]["unavailableFamilies"]["backup"],
-        "slice3_planned"
+        cbody["data"]["unavailableFamilies"],
+        json!({"sftp": "slice4_planned"})
     );
 }

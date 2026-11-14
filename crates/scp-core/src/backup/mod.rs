@@ -1,7 +1,15 @@
-//! Shared encrypted backup transaction engine, IO helpers, and primitives.
+//! Shared encrypted backup transaction engine, IO helpers, archives, and primitives.
+pub mod archive;
 pub mod crypto;
 pub mod io;
+pub mod references;
 pub mod transaction;
+
+pub use archive::{
+    compile_restore, describe, fingerprint, is_valid_server_id, known_accounts, snapshot,
+    snapshot_with_version, validate_export_target, Archive, ExternalFile, PendingRestore, Preview,
+    RestoreOptions, SectionSummary,
+};
 
 use crate::models::{
     KEYRING_BOUNDARY_OIDC_OTP_SECRET, KEYRING_BOUNDARY_OIDC_PASSWORD, KEYRING_BOUNDARY_PASSWORD,
@@ -48,13 +56,17 @@ pub fn wipe_value(value: &mut Value) {
     }
 }
 
+pub(crate) fn wipe_json_and_credentials(
+    files: &mut BTreeMap<String, Option<Value>>,
+    credentials: &mut BTreeMap<String, Option<String>>,
+) {
+    use zeroize::Zeroize;
+    files.values_mut().flatten().for_each(wipe_value);
+    credentials.values_mut().flatten().for_each(String::zeroize);
+}
+
 impl Drop for Changes {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.files.values_mut().flatten().for_each(wipe_value);
-        self.credentials
-            .values_mut()
-            .flatten()
-            .for_each(|value| value.zeroize());
+        wipe_json_and_credentials(&mut self.files, &mut self.credentials);
     }
 }

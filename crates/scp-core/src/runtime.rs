@@ -296,6 +296,34 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         &self.runtime_state
     }
 
+    pub(crate) fn get_servers_snapshot(&self) -> Vec<Server> {
+        self.servers.lock().clone()
+    }
+
+    pub(crate) fn replace_servers_snapshot(&self, next: Vec<Server>) {
+        *self.servers.lock() = next;
+    }
+
+    pub(crate) fn replace_app_config_and_sync(&self, cfg: AppConfig, sync: SyncSettings) {
+        let _prev_cfg = std::mem::replace(&mut *self.app_config.lock(), cfg);
+        let _prev_sync = std::mem::replace(&mut *self.sync_settings.lock(), sync);
+        self.gate.changed();
+    }
+
+    pub(crate) fn reload_persisted_state(&self) -> Result<(), CoreError> {
+        let mut servers = load_servers(&self.profile_paths, &self.gate)?;
+        servers.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.name.cmp(&b.name)));
+        let sync_settings = load_sync_settings(&self.profile_paths, &self.gate)?;
+        let app_config = {
+            let mut secrets = self.secrets.lock();
+            load_app_config_and_migrate(&self.profile_paths, &self.gate, &mut secrets)?
+        };
+        *self.servers.lock() = servers;
+        *self.sync_settings.lock() = sync_settings;
+        *self.app_config.lock() = app_config;
+        Ok(())
+    }
+
     pub fn keyring_health(&self) -> KeyringHealth {
         self.secrets.lock().preflight()
     }

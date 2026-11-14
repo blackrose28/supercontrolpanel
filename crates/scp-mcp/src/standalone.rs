@@ -120,6 +120,7 @@ fn cli_command_schemas() -> Vec<Value> {
     commands.extend(slice1_profile_schemas());
     commands.extend(slice2_tunnel_vpn_schemas());
     commands.extend(slice2_ssh_scp_schemas());
+    commands.extend(slice3_config_backup_schemas());
     commands
 }
 
@@ -263,6 +264,137 @@ fn slice2_ssh_scp_schemas() -> Vec<Value> {
             json!({"serverId": {"type": "string", "minLength": 1}, "remote": {"type": "string", "minLength": 1}, "local": {"type": "string", "minLength": 1}, "recursive": {"type": "boolean"}, "overwrite": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
         ),
     ]
+}
+
+fn slice3_config_backup_schemas() -> Vec<Value> {
+    let json_args = json!({
+        "file": {"type": "string"},
+        "stdin": {"type": "boolean"},
+        "preview": {"type": "boolean"},
+        "expectedRevision": {"type": "string"},
+        "json": {"type": "boolean"},
+        "nonInteractive": {"type": "boolean"}
+    });
+    let specs: &[(&str, &str, bool, bool, bool, bool, Value)] = &[
+        (
+            "completion",
+            "Generate shell completion script for scpctl without opening a profile",
+            false,
+            false,
+            false,
+            true,
+            json!({"shell": {"type": "string", "enum": ["bash", "zsh", "fish", "powershell"]}}),
+        ),
+        ("server.upsert", "Create or update a server record in the active CLI profile", true, false, true, true, json_args.clone()),
+        (
+            "server.delete",
+            "Delete a server record and its scoped credentials from the active CLI profile",
+            true,
+            true,
+            true,
+            false,
+            json!({"serverId": {"type": "string", "minLength": 1}, "preview": {"type": "boolean"}, "expectedRevision": {"type": "string"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        (
+            "server.credentials.set",
+            "Store a server SSH password in the profile-scoped keyring via file, stdin, or TTY",
+            true,
+            false,
+            false,
+            true,
+            json!({"serverId": {"type": "string", "minLength": 1}, "secretFile": {"type": "string"}, "secretStdin": {"type": "boolean"}, "interactive": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        (
+            "server.credentials.clear",
+            "Clear a server SSH password from the profile-scoped keyring",
+            true,
+            true,
+            false,
+            true,
+            json!({"serverId": {"type": "string", "minLength": 1}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        (
+            "server.rdp",
+            "Launch the native OS RDP client for a Windows server with an interactive GUI session",
+            true,
+            false,
+            false,
+            false,
+            json!({"serverId": {"type": "string", "minLength": 1}, "interactive": {"type": "boolean"}}),
+        ),
+        ("config.save", "Replace full shared app config from JSON file or stdin", true, false, true, true, json_args.clone()),
+        ("config.patch", "Merge patch into shared app config from JSON file or stdin", true, false, true, true, json_args.clone()),
+        (
+            "config.secret.set",
+            "Store a profile-scoped config secret in the OS keyring via file, stdin, or TTY",
+            true,
+            false,
+            false,
+            true,
+            json!({"key": {"type": "string", "minLength": 1}, "secretFile": {"type": "string"}, "secretStdin": {"type": "boolean"}, "interactive": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        (
+            "config.secret.clear",
+            "Clear a profile-scoped config secret from the OS keyring",
+            true,
+            true,
+            false,
+            true,
+            json!({"key": {"type": "string", "minLength": 1}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        (
+            "config.sync.push",
+            "Write redacted app-config JSON files into the configured Git repo app-config directory",
+            true,
+            false,
+            true,
+            true,
+            json!({"repoRoot": {"type": "string"}, "preview": {"type": "boolean"}, "expectedRevision": {"type": "string"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        ("settings.patch", "Patch local non-privileged CLI profile settings", true, false, true, true, json_args),
+        (
+            "settings.export",
+            "Export an encrypted .scpbak archive using passphrase file, stdin, or interactive TTY",
+            true,
+            false,
+            false,
+            false,
+            json!({"output": {"type": "string", "minLength": 1}, "overwrite": {"type": "boolean"}, "passphraseFile": {"type": "string"}, "passphraseStdin": {"type": "boolean"}, "interactive": {"type": "boolean"}, "json": {"type": "boolean"}, "nonInteractive": {"type": "boolean"}}),
+        ),
+        (
+            "settings.import",
+            "Preview or interactively apply an encrypted .scpbak archive into the active CLI profile",
+            true,
+            true,
+            true,
+            false,
+            json!({
+                "input": {"type": "string", "minLength": 1},
+                "preview": {"type": "boolean"},
+                "apply": {"type": "boolean"},
+                "interactive": {"type": "boolean"},
+                "passphraseFile": {"type": "string"},
+                "passphraseStdin": {"type": "boolean"},
+                "noShared": {"type": "boolean"},
+                "noServers": {"type": "boolean"},
+                "noLocal": {"type": "boolean"},
+                "noSecrets": {"type": "boolean"},
+                "useSourcePaths": {"type": "boolean"},
+                "remap": {"type": "array", "items": {"type": "string"}},
+                "json": {"type": "boolean"},
+                "nonInteractive": {"type": "boolean"}
+            }),
+        ),
+    ];
+    specs
+        .iter()
+        .map(|(cmd, desc, prof, destr, prev, idem, args)| {
+            let mut entry = cmd_schema(cmd, desc, *prof, *destr, args.clone());
+            entry["previewSupported"] = json!(*prev);
+            entry["idempotent"] = json!(*idem);
+            entry
+        })
+        .collect()
 }
 
 fn cmd_schema(
@@ -409,11 +541,13 @@ pub fn capabilities_report<B: KeyringBackend>(
             "boundary": "cli_foreground_and_query",
             "caddy": "cli_foreground",
             "ssh": "cli_interactive_pty",
-            "scp": "cli_one_shot"
+            "scp": "cli_one_shot",
+            "config": "cli_local",
+            "backup": "cli_local",
+            "rdp": "cli_interactive_gui"
         },
         "unavailableFamilies": {
-            "sftp": "slice4_planned",
-            "backup": "slice3_planned"
+            "sftp": "slice4_planned"
         }
     }))
 }

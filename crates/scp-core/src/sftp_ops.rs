@@ -97,6 +97,10 @@ impl RemoteBrowserStore {
         Some((browser_id, temp_tunnel))
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.sessions.lock().is_empty()
+    }
+
     fn drain_all(&self) -> Vec<(String, String, bool)> {
         self.server_to_browser.lock().clear();
         let drained: Vec<(String, Arc<Mutex<BrowserSession>>)> =

@@ -119,7 +119,7 @@ npm run helper:run -- status
 npm run helper:run -- openvpn status
 ```
 
-## Standalone CLI and stdio MCP (Slices 1–2)
+## Standalone CLI and stdio MCP (Slices 1–3)
 
 The independent Rust workspace (`scp-core`, `scp-mcp`, `scp-cli`) builds `scpctl` without Tauri, GTK/WebKit, `libdbus-sys`, or HTTP dependencies and executes cleanly with the desktop app closed:
 
@@ -129,9 +129,9 @@ cargo run --locked -p scp-cli -- schema --json
 cargo run --locked -p scp-cli -- capabilities --no-profile --json
 ```
 
-Implemented Slice 1–2 commands on `target/release/scpctl`:
+Implemented Slice 1–3 commands on `target/release/scpctl` (`31` commands total):
 
-- Profile-free discovery: `--help`, `--version`, `schema [--command <CMD>] --json`, `capabilities --no-profile [--json]`, `openvpn detect [--json]`.
+- Profile-free discovery: `--help`, `--version`, `schema [--command <CMD>] --json`, `capabilities --no-profile [--json]`, `openvpn detect [--json]`, `completion <bash|zsh|fish|powershell>` (also `--shell`).
 - Profile-backed read-only inspection (acquires exclusive `owner.lock`, rejects desktop config paths, runs journal recovery before loading config):
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] capabilities [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] status [--function-id <ID>] [--json]`
@@ -148,9 +148,24 @@ Implemented Slice 1–2 commands on `target/release/scpctl`:
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] server ssh --server-id <ID> --interactive`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] scp upload --server-id <ID> --local <PATH> --remote <PATH> [--recursive] [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] scp download --server-id <ID> --remote <PATH> --local <PATH> [--recursive] [--overwrite] [--json]`
-- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by profile-local `stdio-policy.json` (`sensitiveActionPolicy: "read-only"`, exposing 9 read-only tools by default or 11 read-only tools + all 6 `scp://*` resources when `"file-transfer"` is enabled). Stdio MCP remains read-only until Slice 4 (`settings export`/`import` and config mutations follow in Slice 3).
+- Profile-backed Slice 3 configuration, credential, RDP, and encrypted `.scpbak` backup workflows (inline `--password`/`--secret`/`--passphrase`/`--recover-identity` flags are rejected with exit `2`; `--interactive` and `--json` cannot be combined):
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server upsert (--file <PATH> | --stdin) [--preview] [--expected-revision <REV>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server delete --server-id <ID> [--preview] [--expected-revision <REV>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server credentials set --server-id <ID> (--secret-file <PATH> | --secret-stdin | --interactive) [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server credentials clear --server-id <ID> [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server rdp --server-id <ID> --interactive`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] config save (--file <PATH> | --stdin) [--preview] [--expected-revision <REV>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] config patch (--file <PATH> | --stdin) [--preview] [--expected-revision <REV>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] config secret set --key <KEY> (--secret-file <PATH> | --secret-stdin | --interactive) [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] config secret clear --key <KEY> [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] config sync push [--repo-root <DIR>] [--preview] [--expected-revision <REV>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings patch (--file <PATH> | --stdin) [--preview] [--expected-revision <REV>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings export --output <PATH> [--overwrite] (--passphrase-file <PATH> | --passphrase-stdin | --interactive) [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings import --input <PATH> --preview (--passphrase-file <PATH> | --passphrase-stdin | --interactive) [--no-shared] [--no-servers] [--no-local] [--no-secrets] [--use-source-paths] [--remap <KEY=PATH>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings import --input <PATH> --apply --interactive [--passphrase-file <PATH> | --passphrase-stdin] [--no-shared] [--no-servers] [--no-local] [--no-secrets] [--use-source-paths] [--remap <KEY=PATH>]`
+- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by profile-local `stdio-policy.json` (`sensitiveActionPolicy: "read-only"`, exposing 9 read-only tools by default or 11 read-only tools + all 6 `scp://*` resources when `"file-transfer"` is enabled). Stdio MCP remains read-only until Slice 4.
 
-`src-tauri` re-exports shared models, encrypted backup primitives/journal engine, pure runtime/service helpers, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [Slice 2 report](docs/mcp/STANDALONE_CLI_SLICE2.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli` and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
+`src-tauri` re-exports shared models, encrypted `.scpbak` backup engine primitives/references, pure runtime/RDP/config helpers, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [Slice 2 report](docs/mcp/STANDALONE_CLI_SLICE2.md), [Slice 3 report](docs/mcp/STANDALONE_CLI_SLICE3.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli` and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
 
 ## MCP support
 
