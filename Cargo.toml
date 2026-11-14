@@ -1,4 +1,4 @@
 [workspace]
 members = ["crates/scp-core", "crates/scp-mcp", "crates/scp-cli"]
-exclude = ["src-tauri", "experiments/mcp-http-slice0"]
+exclude = ["src-tauri", "experiments/mcp-http-slice0", "experiments/cli-stdio-slice0"]
 resolver = "2"

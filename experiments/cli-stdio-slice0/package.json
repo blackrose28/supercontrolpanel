@@ -1,0 +1,11 @@
+{
+  "name": "scp-cli-stdio-slice0",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test --test-concurrency=1 tests/*.test.mjs" },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.4.0",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "@modelcontextprotocol/inspector": "2.14.0"
+  }
+}

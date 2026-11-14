@@ -1,0 +1,74 @@
+TAP version 13
+# Subtest: legacy official SDK (stdio): discovery, resource, success, denial and concurrent batch
+ok 1 - legacy official SDK (stdio): discovery, resource, success, denial and concurrent batch
+  ---
+  duration_ms: 56.097414
+  type: 'test'
+  ...
+# {"era":"legacy","revision":"2025-11-25","sentMethods":["initialize","notifications/initialized","tools/list","tools/call","tools/call","resources/list","resources/read","tools/call","tools/call","tools/call","tools/call"]}
+# Subtest: modern official SDK (stdio): discovery, resource, success, denial and concurrent batch
+ok 2 - modern official SDK (stdio): discovery, resource, success, denial and concurrent batch
+  ---
+  duration_ms: 59.425237
+  type: 'test'
+  ...
+# {"era":"modern","revision":"2026-07-28","sentMethods":["tools/list","tools/call","tools/call","resources/list","resources/read","tools/call","tools/call","tools/call","tools/call"]}
+# Subtest: Inspector CLI real client (stdio): modern discovery, call and resource
+ok 3 - Inspector CLI real client (stdio): modern discovery, call and resource
+  ---
+  duration_ms: 964.113767
+  type: 'test'
+  ...
+# {"era":"modern","tools":{"result":{"tools":[{"name":"probe_echo","description":"Isolated stdio probe echo supporting deny and noisy pipe/PTY children","inputSchema":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"]},"outputSchema":{"additionalProperties":false,"properties":{"noisyChildReaped":{"type":"boolean"},"value":{"type":"string"}},"required":["value","noisyChildReaped"],"type":"object"}},{"name":"probe_hold","description":"Isolated stdio probe hold testing worker saturation, abort signals, and child reaping","inputSchema":{"type":"object","additionalProperties":false,"properties":{"value":{"type":"string"}},"required":["value"]}}]}},"called":{"result":{"content":[{"type":"text","text":"{\\"noisyChildReaped\\":false,\\"value\\":\\"inspector\\"}"}],"structuredContent":{"noisyChildReaped":false,"value":"inspector"},"isError":false}},"resource":{"result":{"contents":[{"uri":"probe://status","mimeType":"application/json","text":"{\\"server\\":\\"scpctl-stdio-spike\\",\\"transport\\":\\"stdio\\"}"}],"ttlMs":0,"cacheScope":"private"}}}
+# Subtest: Inspector CLI real client (stdio): legacy discovery, call and resource
+ok 4 - Inspector CLI real client (stdio): legacy discovery, call and resource
+  ---
+  duration_ms: 963.222934
+  type: 'test'
+  ...
+# {"era":"legacy","tools":{"result":{"tools":[{"name":"probe_echo","description":"Isolated stdio probe echo supporting deny and noisy pipe/PTY children","inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"noisyChildReaped":{"type":"boolean"},"value":{"type":"string"}},"required":["value","noisyChildReaped"],"additionalProperties":false}},{"name":"probe_hold","description":"Isolated stdio probe hold testing worker saturation, abort signals, and child reaping","inputSchema":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}}]}},"called":{"result":{"content":[{"type":"text","text":"{\\"noisyChildReaped\\":false,\\"value\\":\\"inspector\\"}"}],"structuredContent":{"noisyChildReaped":false,"value":"inspector"},"isError":false}},"resource":{"result":{"contents":[{"uri":"probe://status","mimeType":"application/json","text":"{\\"server\\":\\"scpctl-stdio-spike\\",\\"transport\\":\\"stdio\\"}"}]}}}
+# Subtest: modern raw server/discover followed by stdin EOF exits 0 without error
+ok 5 - modern raw server/discover followed by stdin EOF exits 0 without error
+  ---
+  duration_ms: 6.144954
+  type: 'test'
+  ...
+# Subtest: legacy (stdio): AbortController cancellation releases probe_hold server work
+ok 6 - legacy (stdio): AbortController cancellation releases probe_hold server work
+  ---
+  duration_ms: 7.815063
+  type: 'test'
+  ...
+# Subtest: modern (stdio): AbortController cancellation releases probe_hold server work
+ok 7 - modern (stdio): AbortController cancellation releases probe_hold server work
+  ---
+  duration_ms: 12.196868
+  type: 'test'
+  ...
+# Subtest: stdout stays pure NDJSON with noisy PTY+pipe children and recovers from invalid/oversized frames
+ok 8 - stdout stays pure NDJSON with noisy PTY+pipe children and recovers from invalid/oversized frames
+  ---
+  duration_ms: 45.618917
+  type: 'test'
+  ...
+# Subtest: worker saturation + stdin EOF exits within 2s and reaps supervised child PIDs
+ok 9 - worker saturation + stdin EOF exits within 2s and reaps supervised child PIDs
+  ---
+  duration_ms: 205.37179
+  type: 'test'
+  ...
+# Subtest: stalled stdout writer aborts within 2.5s and reaps supervised child PIDs
+ok 10 - stalled stdout writer aborts within 2.5s and reaps supervised child PIDs
+  ---
+  duration_ms: 722.217896
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3348.964264
