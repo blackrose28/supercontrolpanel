@@ -9,7 +9,8 @@ default-run = "super-control-panel"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-scp-mcp = { path = "../crates/scp-mcp" }
+scp-core = { path = "../crates/scp-core" }
+scp-mcp = { path = "../crates/scp-mcp", features = ["sdk"] }
 axum = "=0.8.8"
 rmcp = { version = "=3.9.0", features = ["transport-streamable-http-server"] }
 # Platform features required — without them keyring uses an in-memory mock per Entry,

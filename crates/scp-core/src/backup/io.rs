@@ -23,6 +23,7 @@ pub fn read_bounded(path: &Path) -> Result<Option<Vec<u8>>, String> {
     }
     Ok(Some(data))
 }
+
 fn crypto_limit() -> u64 {
     super::crypto::MAX_BYTES as u64
 }
@@ -89,7 +90,7 @@ fn reject_unsafe_target(path: &Path, overwrite: bool) -> Result<(), String> {
     }
 }
 
-pub(super) fn sync_directory(path: &Path) -> Result<(), String> {
+pub fn sync_directory(path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     File::open(path)
         .and_then(|f| f.sync_all())

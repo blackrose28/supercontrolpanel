@@ -1,39 +1,19 @@
 //! Local-only encrypted settings backups. Never expose Archive or Changes over IPC/MCP.
-mod crypto;
 pub mod desktop;
 pub mod gate;
-mod io;
 mod references;
-mod transaction;
 
 use crate::services::config_service::*;
+pub(crate) use scp_core::backup::{
+    crypto, io, transaction, wipe_value, CONFIGURED, FILES, LOCAL_PATHS,
+};
+pub use scp_core::backup::{Changes, SecretStore};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::Path,
 };
-
-const FILES: [&str; 3] = ["config.json", "servers.json", "sync-local.json"];
-const CONFIGURED: [&str; 5] = [
-    KEYRING_OPENVPN_PASSWORD,
-    KEYRING_OPENVPN_OTP_SECRET,
-    KEYRING_BOUNDARY_PASSWORD,
-    KEYRING_BOUNDARY_OIDC_PASSWORD,
-    KEYRING_BOUNDARY_OIDC_OTP_SECRET,
-];
-const LOCAL_PATHS: [&str; 5] = [
-    "repoRoot",
-    "openvpnExecutablePath",
-    "openvpnOvpnPath",
-    "boundaryCliPath",
-    "caddyFolder",
-];
-
-pub trait SecretStore {
-    fn read(&mut self, account: &str) -> Result<Option<String>, String>;
-    fn write(&mut self, account: &str, value: Option<&str>) -> Result<(), String>;
-}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -77,11 +57,6 @@ impl Default for RestoreOptions {
             path_overrides: BTreeMap::new(),
         }
     }
-}
-
-pub struct Changes {
-    files: BTreeMap<String, Option<Value>>,
-    credentials: BTreeMap<String, Option<String>>,
 }
 
 fn known_accounts(ids: &[String]) -> Vec<String> {
@@ -408,26 +383,7 @@ fn boundary_identity(archive: &Archive) -> Vec<Option<String>> {
 #[cfg(test)]
 mod tests;
 
-fn wipe_value(value: &mut Value) {
-    use zeroize::Zeroize;
-    match value {
-        Value::String(text) => text.zeroize(),
-        Value::Array(items) => items.iter_mut().for_each(wipe_value),
-        Value::Object(fields) => fields.values_mut().for_each(wipe_value),
-        _ => {}
-    }
-}
 impl Drop for Archive {
-    fn drop(&mut self) {
-        use zeroize::Zeroize;
-        self.files.values_mut().flatten().for_each(wipe_value);
-        self.credentials
-            .values_mut()
-            .flatten()
-            .for_each(|value| value.zeroize());
-    }
-}
-impl Drop for Changes {
     fn drop(&mut self) {
         use zeroize::Zeroize;
         self.files.values_mut().flatten().for_each(wipe_value);

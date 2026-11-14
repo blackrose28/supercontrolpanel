@@ -1,6 +1,6 @@
 # Standalone CLI and stdio MCP plan
 
-Status: Slice 0 Linux x86_64 feasibility gate complete (ready for Slice 1 on Linux); Windows, macOS, and GUI-free CI runner checks remain open OS/matrix gates. Independent core/MCP/CLI packages (`scp-core`, `scp-mcp`, `scp-cli`), shared registry extraction, profile-free `scpctl schema --json`, and isolated platform + `stdio` MCP feasibility spikes in `experiments/cli-stdio-slice0` are verified. See the [operation ledger](STANDALONE_CLI_OPERATION_LEDGER.md), [Slice 0 report](STANDALONE_CLI_SLICE0.md), and [stdio TAP evidence](evidence/CLI_STDIO_SLICE0.tap).
+Status: Slice 0 Linux `x86_64` feasibility gate and **Slice 1** (shared `scp-core` / `scp-mcp` crates, profile owner lease, namespaced keyring store, startup journal recovery, `scpctl` read-only CLI commands, read-only `scpctl mcp serve --stdio`, and `src-tauri` shared re-exports) are **complete on Linux `x86_64`**. Windows, macOS, and GUI-free CI runner checks plus Slices 2–5 remain open gates. See the [operation ledger](STANDALONE_CLI_OPERATION_LEDGER.md), [Slice 0 report](STANDALONE_CLI_SLICE0.md), [Slice 1 report](STANDALONE_CLI_SLICE1.md), and [stdio TAP evidence](evidence/CLI_STDIO_SLICE0.tap).
 Extracted on 2026-11-11 from Work 3 in [the combined roadmap](SETTINGS_BACKUP_STREAMABLE_HTTP_STANDALONE_CLI_PLAN.md).
 Refined against repository baseline `1fa4669` on 2026-11-11; recheck the source before each implementation slice.
 
@@ -198,6 +198,8 @@ Every code increment follows repository RED → GREEN → REFACTOR: write a beha
 | 5. Release/migration | Independently packaged artifacts and versioned docs/client examples for each supported target | Install in an environment without the desktop/GUI stack; native keyring/elevation/session smoke tests support each claimed capability. Publish checksums, prerequisite/minimum-platform requirements, qualification gaps, and helper migration guidance. |
 
 > **Slice 0 Linux `x86_64` verification note:** The Slice 0 feasibility gate is verified on Linux `x86_64` in [STANDALONE_CLI_SLICE0.md](./STANDALONE_CLI_SLICE0.md) and [CLI_STDIO_SLICE0.tap](./evidence/CLI_STDIO_SLICE0.tap); Windows, macOS, and GUI-free Linux CI runner checks remain tracked for target-OS matrix gates.
+>
+> **Slice 1 Linux `x86_64` verification note:** Slice 1 (`scp-core`, `scp-mcp` standalone read-only/stdio adapter, `scpctl` read-only CLI & `mcp serve --stdio`, and shared `src-tauri` re-exports) is verified on Linux `x86_64` in [STANDALONE_CLI_SLICE1.md](./STANDALONE_CLI_SLICE1.md).
 
 Do not call a slice complete based only on mocked host tests. Record each gate's commands, exact commit/toolchain/SDK/client versions, OS/architecture, observed results, and unrun checks. A platform-specific capability may ship as explicitly unavailable; silently assuming parity is not an acceptable gate result. At least one supported target must pass a useful unattended workflow (discover server → establish a ready connection → transfer → inspect result → clean up); a catalog whose useful operations all require human interaction does not satisfy the primary outcome.
 

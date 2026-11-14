@@ -1,64 +1,11 @@
 //! Server inventory (metadata) persisted in `servers.json`.
 
-use serde::{Deserialize, Serialize};
+use scp_core::models::ServersFile;
+#[allow(unused_imports)]
+pub use scp_core::models::{new_server_id, ConnectionMethod, Server, ServerOs, ServerService};
 use std::fs;
 use tauri::AppHandle;
 use tauri::Manager;
-use uuid::Uuid;
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ServerOs {
-    Linux,
-    Windows,
-}
-
-impl Default for ServerOs {
-    fn default() -> Self {
-        ServerOs::Linux
-    }
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ConnectionMethod {
-    Ssh,
-    Boundary,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct ServerService {
-    pub name: String,
-    pub port: u16,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct Server {
-    pub id: String,
-    pub name: String,
-    pub host: String,
-    #[serde(default)]
-    pub os: ServerOs,
-    pub connection_method: ConnectionMethod,
-    pub ssh_port: u16,
-    pub ssh_user: String,
-    #[serde(default)]
-    pub boundary_target_id: String,
-    /// Listen port for Boundary tunnel (boundary connect -listen-port). Used when connection_method is Boundary.
-    #[serde(default)]
-    pub boundary_listen_port: u16,
-    #[serde(default)]
-    pub services: Vec<ServerService>,
-}
-
-#[derive(Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-struct ServersFile {
-    #[serde(default)]
-    servers: Vec<Server>,
-}
 
 fn servers_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app
@@ -90,8 +37,4 @@ pub fn save_servers(app: &AppHandle, servers: &[Server]) -> Result<(), String> {
     };
     let json = serde_json::to_string_pretty(&file).map_err(|e| format!("encode servers: {e}"))?;
     fs::write(path, json).map_err(|e| format!("write servers: {e}"))
-}
-
-pub fn new_server_id() -> String {
-    format!("srv-{}", Uuid::new_v4())
 }

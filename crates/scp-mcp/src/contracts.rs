@@ -23,23 +23,35 @@ pub struct OperationError {
     pub retryable: bool,
 }
 impl OperationError {
-    pub fn new(code: ErrorCode) -> Self {
-        let message = match code {
-            ErrorCode::PolicyDenied => "MCP policy denied this operation. Use local desktop settings or controls.",
-            ErrorCode::InvalidArguments => "Invalid MCP arguments or protected configuration fields.",
-            ErrorCode::CapabilityUnavailable => "This MCP operation is unavailable on this host or requires local setup/review. Check the local desktop, platform/client support and server configuration.",
-            ErrorCode::NotFound => "Requested item was not found.",
-            ErrorCode::Conflict => "Operation conflicts with current state. Query state before retrying.",
-            ErrorCode::Cancelled => "Operation was cancelled. Query state before retrying.",
-            ErrorCode::Timeout => "Operation timed out. Query state before retrying.",
-            ErrorCode::OperationFailed => "Operation failed. Inspect the local desktop for details; query state before retrying.",
+    fn for_host(code: ErrorCode, standalone: bool) -> Self {
+        let message = match (code, standalone) {
+            (ErrorCode::PolicyDenied, false) => "MCP policy denied this operation. Use local desktop settings or controls.",
+            (ErrorCode::PolicyDenied, true) => "MCP policy denied this operation. Configure local stdio policy to allow permitted operations.",
+            (ErrorCode::InvalidArguments, _) => "Invalid MCP arguments or protected configuration fields.",
+            (ErrorCode::CapabilityUnavailable, false) => "This MCP operation is unavailable on this host or requires local setup/review. Check the local desktop, platform/client support and server configuration.",
+            (ErrorCode::CapabilityUnavailable, true) => "This MCP operation is unavailable on this standalone host or requires local setup.",
+            (ErrorCode::NotFound, _) => "Requested item was not found.",
+            (ErrorCode::Conflict, _) => "Operation conflicts with current state. Query state before retrying.",
+            (ErrorCode::Cancelled, _) => "Operation was cancelled. Query state before retrying.",
+            (ErrorCode::Timeout, _) => "Operation timed out. Query state before retrying.",
+            (ErrorCode::OperationFailed, false) => "Operation failed. Inspect the local desktop for details; query state before retrying.",
+            (ErrorCode::OperationFailed, true) => "Operation failed on this standalone host; query state before retrying.",
         };
         Self {
             code,
             message,
-            retryable: false,
+            retryable: standalone && matches!(code, ErrorCode::Timeout),
         }
     }
+
+    pub fn new(code: ErrorCode) -> Self {
+        Self::for_host(code, false)
+    }
+
+    pub fn standalone_new(code: ErrorCode) -> Self {
+        Self::for_host(code, true)
+    }
+
     pub fn legacy_message(&self) -> String {
         format!(
             "{}: {}",
@@ -49,18 +61,18 @@ impl OperationError {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
-    Desktop,
-    InteractiveDesktop,
+    Runtime,
+    InteractiveHost,
     ProtectedImport,
     ReviewedGit,
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Lifetime {
     Query,
     Request,
-    DesktopOwned,
+    HostOwned,
     Stop,
     Mutation,
 }
@@ -133,7 +145,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Search Boundary targets (check local Boundary authentication on failure)",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -143,7 +155,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Detect OpenVPN executable",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -153,8 +165,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Launch RDP on the interactive desktop (requires an installed client)",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::InteractiveDesktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::InteractiveHost,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -163,7 +175,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Set SSH password in OS keyring (write-only)",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -173,7 +185,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Clear SSH password from OS keyring",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -183,7 +195,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "App overview",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -193,7 +205,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "List function statuses",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: Some(("scp://status/functions", "Function statuses", "status")),
     },
@@ -203,7 +215,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Get one function status",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -213,7 +225,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "OpenVPN status",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: Some(("scp://status/openvpn", "OpenVPN status", "status")),
     },
@@ -223,7 +235,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Boundary status",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: Some(("scp://status/boundary", "Boundary status", "status")),
     },
@@ -233,7 +245,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "List servers",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: Some(("scp://servers/list", "Servers list", "inventory")),
     },
@@ -243,7 +255,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Get server",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -253,7 +265,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Get config paths",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: Some(("scp://config/paths", "Config paths", "config")),
     },
@@ -263,8 +275,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Start OpenVPN",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -273,7 +285,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Stop OpenVPN",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Stop,
         resource: None,
     },
@@ -283,8 +295,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Start Boundary auth",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -293,7 +305,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Stop Boundary auth",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Stop,
         resource: None,
     },
@@ -303,8 +315,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Start server tunnel",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -313,7 +325,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Stop server tunnel",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Stop,
         resource: None,
     },
@@ -323,8 +335,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Start server SSH",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -333,7 +345,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Stop server SSH",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Stop,
         resource: None,
     },
@@ -343,8 +355,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Start Caddy",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -353,7 +365,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Stop Caddy",
         category: "runtime-control",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Stop,
         resource: None,
     },
@@ -363,7 +375,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Create or update server",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -373,7 +385,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Delete server",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -383,7 +395,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Save full app config",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -393,7 +405,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Patch app config",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -403,7 +415,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Get device-local sync settings",
         category: "read-only",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -413,7 +425,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Patch device-local sync settings",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -423,8 +435,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Open remote browser session",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -433,7 +445,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Close remote browser session",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Stop,
         resource: None,
     },
@@ -443,7 +455,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "List remote browser children",
         category: "file-transfer",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -453,7 +465,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Stat remote browser path",
         category: "file-transfer",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -463,7 +475,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Create remote directory",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Request,
         resource: None,
     },
@@ -473,7 +485,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Delete remote path",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Request,
         resource: None,
     },
@@ -483,7 +495,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Run SCP upload",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Request,
         resource: None,
     },
@@ -493,7 +505,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Run SCP download",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Request,
         resource: None,
     },
@@ -503,8 +515,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Start PTY-backed SCP upload",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -513,8 +525,8 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Start PTY-backed SCP download",
         category: "file-transfer",
         read_only: false,
-        capability: Capability::Desktop,
-        lifetime: Lifetime::DesktopOwned,
+        capability: Capability::Runtime,
+        lifetime: Lifetime::HostOwned,
         resource: None,
     },
     Operation {
@@ -523,7 +535,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "List SCP transfers",
         category: "file-transfer",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: Some((
             "scp://status/transfers",
@@ -537,7 +549,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Get one SCP transfer",
         category: "file-transfer",
         read_only: true,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Query,
         resource: None,
     },
@@ -557,7 +569,7 @@ pub static OPERATIONS: &[Operation] = &[
         title: "Push synced config to repo",
         category: "config-mutation",
         read_only: false,
-        capability: Capability::Desktop,
+        capability: Capability::Runtime,
         lifetime: Lifetime::Mutation,
         resource: None,
     },
@@ -590,37 +602,111 @@ pub fn resource_operation(uri: &str) -> Option<&'static Operation> {
         .iter()
         .find(|op| op.resource.is_some_and(|resource| resource.0 == uri))
 }
+pub fn is_valid_category(category: &str) -> bool {
+    matches!(
+        category,
+        "read-only" | "runtime-control" | "config-mutation" | "file-transfer"
+    )
+}
+
+pub fn is_slice1_standalone_extracted(handler: Handler) -> bool {
+    matches!(
+        handler,
+        Handler::AppGetOverview
+            | Handler::FunctionStatusList
+            | Handler::FunctionStatusGet
+            | Handler::OpenvpnGetStatus
+            | Handler::BoundaryGetStatus
+            | Handler::ServersList
+            | Handler::ServerGet
+            | Handler::ConfigGetPaths
+            | Handler::SyncSettingsGet
+            | Handler::ScpTransferList
+            | Handler::ScpTransferGet
+    )
+}
+
+pub fn map_core_error(err: &scp_core::error::CoreError) -> OperationError {
+    let code = match err.code {
+        "POLICY_DENIED" => ErrorCode::PolicyDenied,
+        "INVALID_ARGUMENTS" => ErrorCode::InvalidArguments,
+        "CAPABILITY_UNAVAILABLE" => ErrorCode::CapabilityUnavailable,
+        "NOT_FOUND" => ErrorCode::NotFound,
+        "CONFLICT" => ErrorCode::Conflict,
+        "TIMEOUT" => ErrorCode::Timeout,
+        "INTERRUPTED" => ErrorCode::Cancelled,
+        _ => ErrorCode::OperationFailed,
+    };
+    OperationError::standalone_new(code)
+}
+
+fn authorize_checked(
+    name: &str,
+    read_only_only: bool,
+    valid_policy: bool,
+    categories: &[&str],
+    standalone: bool,
+) -> Result<&'static Operation, OperationError> {
+    let mk_err = |code| OperationError::for_host(code, standalone);
+    let op = operation(name).ok_or_else(|| mk_err(ErrorCode::NotFound))?;
+    if !valid_policy
+        || categories.iter().any(|c| !is_valid_category(c))
+        || !categories.contains(&op.category)
+        || (read_only_only && !op.read_only)
+    {
+        return Err(mk_err(ErrorCode::PolicyDenied));
+    }
+    let available = match op.capability {
+        Capability::Runtime if standalone => is_slice1_standalone_extracted(op.handler),
+        Capability::Runtime => true,
+        Capability::InteractiveHost if !standalone => cfg!(any(
+            target_os = "windows",
+            target_os = "macos",
+            target_os = "linux"
+        )),
+        Capability::InteractiveHost | Capability::ProtectedImport | Capability::ReviewedGit => {
+            false
+        }
+    };
+    if !available {
+        return Err(mk_err(ErrorCode::CapabilityUnavailable));
+    }
+    Ok(op)
+}
+
 pub fn authorize(
     name: &str,
     policy: &str,
     categories: &[&str],
 ) -> Result<&'static Operation, OperationError> {
-    let op = operation(name).ok_or_else(|| OperationError::new(ErrorCode::NotFound))?;
-    if !matches!(policy, "allow-with-token" | "require-ui-approval")
-        || categories.iter().any(|c| {
-            !matches!(
-                *c,
-                "read-only" | "runtime-control" | "config-mutation" | "file-transfer"
-            )
-        })
-        || !categories.contains(&op.category)
-        || (policy == "require-ui-approval" && !op.read_only)
-    {
-        return Err(OperationError::new(ErrorCode::PolicyDenied));
-    }
-    let available = match op.capability {
-        Capability::Desktop => true,
-        Capability::InteractiveDesktop => cfg!(any(
-            target_os = "windows",
-            target_os = "macos",
-            target_os = "linux"
-        )),
-        Capability::ProtectedImport | Capability::ReviewedGit => false,
-    };
-    if !available {
-        return Err(OperationError::new(ErrorCode::CapabilityUnavailable));
-    }
-    Ok(op)
+    authorize_checked(
+        name,
+        policy == "require-ui-approval",
+        matches!(policy, "allow-with-token" | "require-ui-approval"),
+        categories,
+        false,
+    )
+}
+
+pub fn authorize_standalone(
+    name: &str,
+    policy: &scp_core::models::StdioPolicy,
+) -> Result<&'static Operation, OperationError> {
+    let cats: Vec<&str> = policy
+        .allowed_tool_categories
+        .iter()
+        .map(String::as_str)
+        .collect();
+    authorize_checked(
+        name,
+        policy.sensitive_action_policy == "read-only",
+        matches!(
+            policy.sensitive_action_policy.as_str(),
+            "read-only" | "allow-local-policy"
+        ),
+        &cats,
+        true,
+    )
 }
 
 /// Authorize and validate before the trusted host can touch stores or invoke actions.
@@ -740,7 +826,7 @@ mod tests {
         for op in OPERATIONS {
             assert_eq!(
                 authorize(op.name, "require-ui-approval", CATEGORIES).is_ok(),
-                op.read_only && matches!(op.capability, Capability::Desktop),
+                op.read_only && matches!(op.capability, Capability::Runtime),
                 "{}",
                 op.name
             );

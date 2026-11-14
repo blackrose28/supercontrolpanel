@@ -4,7 +4,28 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+[features]
+default = []
+sdk = ["dep:rmcp", "dep:tokio", "dep:tokio-util"]
+stdio = [
+    "sdk",
+    "rmcp/transport-io",
+    "tokio/io-std",
+    "tokio/io-util",
+    "tokio/macros",
+    "tokio/rt-multi-thread",
+    "tokio/signal",
+    "tokio/sync",
+    "tokio/time",
+]
+
 [dependencies]
 scp-core = { path = "../scp-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+rmcp = { version = "=3.9.0", default-features = false, features = ["base64", "macros", "server"], optional = true }
+tokio = { version = "1", optional = true }
+tokio-util = { version = "0.7", features = ["rt"], optional = true }
+
+[dev-dependencies]
+tempfile = "3"

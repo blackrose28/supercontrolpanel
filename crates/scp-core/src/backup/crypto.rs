@@ -98,19 +98,14 @@ pub fn decrypt<T: DeserializeOwned>(bytes: &[u8], passphrase: &str) -> Result<T,
     serde_json::from_slice(&plain).map_err(|_| "Invalid or unsupported backup payload".into())
 }
 
-pub(super) fn seal(
-    key: &[u8; 32],
-    nonce: &[u8; 12],
-    bytes: &[u8],
-    aad: &[u8],
-) -> Result<Vec<u8>, String> {
+pub fn seal(key: &[u8; 32], nonce: &[u8; 12], bytes: &[u8], aad: &[u8]) -> Result<Vec<u8>, String> {
     Aes256Gcm::new_from_slice(key)
         .map_err(|_| "Invalid encryption key")?
         .encrypt(Nonce::from_slice(nonce), Payload { msg: bytes, aad })
         .map_err(|_| "Backup encryption failed".into())
 }
 
-pub(super) fn open(
+pub fn open(
     key: &[u8; 32],
     nonce: &[u8; 12],
     bytes: &[u8],

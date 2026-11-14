@@ -1,6 +1,6 @@
 # Settings backup, standards-based MCP, and standalone CLI plan
 
-Status: Work 1 desktop implementation added; native release qualification remains. Work 2 Slices 1–6 are implemented; release qualification limits are recorded in its dedicated plan. Work 3 Slice 0 Linux x86_64 feasibility (shared registry, `scpctl schema --json`, platform spikes, and `stdio` MCP harness) is verified in `experiments/cli-stdio-slice0` and `STANDALONE_CLI_SLICE0.md`; Slices 1–5 and Windows/macOS/GUI-free-runner qualification remain open.
+Status: Work 1 desktop implementation added; native release qualification remains. Work 2 Slices 1–6 are implemented; release qualification limits are recorded in its dedicated plan. Work 3 Slice 0 feasibility (`STANDALONE_CLI_SLICE0.md`) and **Slice 1** (`scp-core`, `scp-mcp`, `scpctl` read-only CLI + `mcp serve --stdio`, and shared `src-tauri` re-exports in `STANDALONE_CLI_SLICE1.md`) are verified on Linux `x86_64`; Slices 2–5 and Windows/macOS/GUI-free-runner qualification remain open.
 Assessment and review date: 2026-11-11.
 
 ## Requested outcomes and feasibility

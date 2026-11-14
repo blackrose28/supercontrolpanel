@@ -1,186 +1,19 @@
 use std::{fs, path::PathBuf, process::Command};
 
-use uuid::Uuid;
-
 use keyring::{Entry, Error as KeyringError};
 use portable_pty::CommandBuilder;
-use serde::{Deserialize, Serialize};
+#[allow(unused_imports)]
+pub use scp_core::models::{
+    decode_sync_settings, default_app_config, default_mcp_allowed_tool_categories,
+    default_mcp_bind_address, default_mcp_port, default_mcp_sensitive_action_policy,
+    generate_mcp_auth_token, keyring_server_ssh_password_account, ConfigPaths, SyncSettings,
+    SyncSettingsPatch, KEYRING_BOUNDARY_APP_TOKEN, KEYRING_BOUNDARY_OIDC_OTP_SECRET,
+    KEYRING_BOUNDARY_OIDC_PASSWORD, KEYRING_BOUNDARY_PASSWORD, KEYRING_CC_TELEMETRY_QUEUE_KEY,
+    KEYRING_OPENVPN_OTP_SECRET, KEYRING_OPENVPN_PASSWORD, KEYRING_SERVICE, STATIC_KEYRING_ACCOUNTS,
+};
 use tauri::{AppHandle, Manager};
 
-use crate::models::{
-    default_openvpn_reconnect_base_seconds, default_openvpn_reconnect_max_seconds, AppConfig,
-    AppRuntimeConfig, BoundaryConfig, OpenVpnConfig,
-};
-
-/// OS credential store: Windows Credential Manager, macOS Keychain, Linux Secret Service.
-pub const KEYRING_SERVICE: &str = "com.example.supercontrolpanel";
-pub const KEYRING_OPENVPN_PASSWORD: &str = "openvpn_password";
-pub const KEYRING_OPENVPN_OTP_SECRET: &str = "openvpn_otp_secret";
-pub const KEYRING_BOUNDARY_PASSWORD: &str = "boundary_password";
-pub const KEYRING_BOUNDARY_OIDC_PASSWORD: &str = "boundary_oidc_password";
-pub const KEYRING_BOUNDARY_OIDC_OTP_SECRET: &str = "boundary_oidc_otp_secret";
-pub const KEYRING_BOUNDARY_APP_TOKEN: &str = "boundary_app_token";
-
-/// OS keyring account for optional per-server SSH password (SFTP / remote browser / SCP agent paths).
-pub fn keyring_server_ssh_password_account(server_id: &str) -> String {
-    format!("server_ssh_password:{server_id}")
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSettings {
-    #[serde(default)]
-    pub repo_root: String,
-    #[serde(default)]
-    pub openvpn_executable_path: String,
-    #[serde(default)]
-    pub openvpn_ovpn_path: String,
-    #[serde(default)]
-    pub boundary_cli_path: String,
-    #[serde(default)]
-    pub caddy_folder: String,
-    #[serde(default)]
-    pub mcp_enabled: bool,
-    #[serde(default = "default_mcp_bind_address")]
-    pub mcp_bind_address: String,
-    #[serde(default = "default_mcp_port")]
-    pub mcp_port: u16,
-    #[serde(default = "generate_mcp_auth_token")]
-    pub mcp_auth_token: String,
-    #[serde(default = "default_mcp_allowed_tool_categories")]
-    pub mcp_allowed_tool_categories: Vec<String>,
-    #[serde(default = "default_mcp_sensitive_action_policy")]
-    pub mcp_sensitive_action_policy: String,
-    #[serde(default)]
-    pub cc_enabled: bool,
-    #[serde(default)]
-    pub cc_server_url: String,
-    #[serde(default)]
-    pub cc_auth_mode: String,
-    #[serde(default)]
-    pub cc_agent_token: String,
-    #[serde(default)]
-    pub cc_device_id: String,
-    #[serde(default)]
-    pub cc_device_name: String,
-    #[serde(default)]
-    pub first_run_completed: bool,
-}
-
-impl Default for SyncSettings {
-    fn default() -> Self {
-        Self {
-            repo_root: String::new(),
-            openvpn_executable_path: String::new(),
-            openvpn_ovpn_path: String::new(),
-            boundary_cli_path: String::new(),
-            caddy_folder: String::new(),
-            mcp_enabled: false,
-            mcp_bind_address: default_mcp_bind_address(),
-            mcp_port: default_mcp_port(),
-            mcp_auth_token: generate_mcp_auth_token(),
-            mcp_allowed_tool_categories: default_mcp_allowed_tool_categories(),
-            mcp_sensitive_action_policy: default_mcp_sensitive_action_policy(),
-            cc_enabled: false,
-            cc_server_url: String::new(),
-            cc_auth_mode: String::from("token"),
-            cc_agent_token: String::new(),
-            cc_device_id: String::new(),
-            cc_device_name: String::new(),
-            first_run_completed: false,
-        }
-    }
-}
-
-#[derive(Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncSettingsPatch {
-    #[serde(default)]
-    pub repo_root: Option<String>,
-    #[serde(default)]
-    pub openvpn_executable_path: Option<String>,
-    #[serde(default)]
-    pub openvpn_ovpn_path: Option<String>,
-    #[serde(default)]
-    pub boundary_cli_path: Option<String>,
-    #[serde(default)]
-    pub caddy_folder: Option<String>,
-    #[serde(default)]
-    pub mcp_enabled: Option<bool>,
-    #[serde(default)]
-    pub mcp_bind_address: Option<String>,
-    #[serde(default)]
-    pub mcp_port: Option<u16>,
-    #[serde(default)]
-    pub mcp_auth_token: Option<String>,
-    #[serde(default)]
-    pub mcp_allowed_tool_categories: Option<Vec<String>>,
-    #[serde(default)]
-    pub mcp_sensitive_action_policy: Option<String>,
-    #[serde(default)]
-    pub cc_enabled: Option<bool>,
-    #[serde(default)]
-    pub cc_server_url: Option<String>,
-    #[serde(default)]
-    pub cc_auth_mode: Option<String>,
-    #[serde(default)]
-    pub cc_agent_token: Option<String>,
-    #[serde(default)]
-    pub cc_device_id: Option<String>,
-    #[serde(default)]
-    pub cc_device_name: Option<String>,
-    #[serde(default)]
-    pub first_run_completed: Option<bool>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfigPaths {
-    pub app_config_path: String,
-}
-
-pub fn default_mcp_bind_address() -> String {
-    "127.0.0.1".to_string()
-}
-
-pub fn default_mcp_port() -> u16 {
-    46739
-}
-
-pub fn default_mcp_allowed_tool_categories() -> Vec<String> {
-    vec!["read-only".to_string(), "runtime-control".to_string()]
-}
-
-pub fn default_mcp_sensitive_action_policy() -> String {
-    "require-ui-approval".to_string()
-}
-
-pub fn generate_mcp_auth_token() -> String {
-    Uuid::new_v4().simple().to_string()
-}
-
-pub fn default_app_config() -> AppConfig {
-    AppConfig {
-        app: AppRuntimeConfig {
-            default_terminal_cols: 120,
-            default_terminal_rows: 36,
-        },
-        openvpn: OpenVpnConfig {
-            command: String::new(),
-            executable_path: String::new(),
-            ovpn_path: String::new(),
-            extra_args: String::new(),
-            username: String::new(),
-            password: String::new(),
-            otp_secret: String::new(),
-            terminate_open_vpn_when_helper_exits: false,
-            auto_reconnect_enabled: false,
-            auto_reconnect_base_seconds: default_openvpn_reconnect_base_seconds(),
-            auto_reconnect_max_seconds: default_openvpn_reconnect_max_seconds(),
-        },
-        boundary: BoundaryConfig::default(),
-    }
-}
+use crate::models::AppConfig;
 
 pub fn config_file_path(app: &AppHandle, config_file_name: &str) -> Result<PathBuf, String> {
     let dir = app
@@ -224,21 +57,6 @@ pub fn load_sync_settings_from_disk(
     let raw =
         fs::read_to_string(&path).map_err(|e| format!("failed to read sync settings: {e}"))?;
     decode_sync_settings(&raw)
-}
-
-fn decode_sync_settings(raw: &str) -> Result<SyncSettings, String> {
-    let mut settings: SyncSettings =
-        serde_json::from_str(raw).map_err(|e| format!("invalid sync settings format: {e}"))?;
-    if settings.mcp_auth_token.trim().is_empty() {
-        settings.mcp_auth_token = generate_mcp_auth_token();
-    }
-    if settings.mcp_bind_address.trim().is_empty() {
-        settings.mcp_bind_address = default_mcp_bind_address();
-    }
-    if settings.mcp_port == 0 {
-        settings.mcp_port = default_mcp_port();
-    }
-    Ok(settings)
 }
 
 pub fn save_sync_settings_to_disk(
@@ -417,21 +235,6 @@ pub fn apply_boundary_token_arg_if_present_builder(cmd: &mut CommandBuilder) -> 
     }
     Ok(())
 }
-
-/// Keyring account for CC telemetry queue encryption key (mirrors the private
-/// constant in `cc::telemetry_queue_crypto`).
-pub const KEYRING_CC_TELEMETRY_QUEUE_KEY: &str = "cc-telemetry-queue-key";
-
-/// All *static* (non-dynamic) keyring accounts our app may store.
-const STATIC_KEYRING_ACCOUNTS: &[&str] = &[
-    KEYRING_OPENVPN_PASSWORD,
-    KEYRING_OPENVPN_OTP_SECRET,
-    KEYRING_BOUNDARY_PASSWORD,
-    KEYRING_BOUNDARY_OIDC_PASSWORD,
-    KEYRING_BOUNDARY_OIDC_OTP_SECRET,
-    KEYRING_BOUNDARY_APP_TOKEN,
-    KEYRING_CC_TELEMETRY_QUEUE_KEY,
-];
 
 /// Populate the global keyring cache by bulk-reading every known secret from
 /// the OS credential store.  This is called **once** during app startup so

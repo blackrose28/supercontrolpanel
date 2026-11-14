@@ -1,42 +1,41 @@
-use std::io::{self, Write};
+mod args;
+mod commands;
+
+use args::{parse_args, ParsedCli};
+use commands::{execute_command, write_json_line};
+use scp_core::error_envelope;
 use std::process::ExitCode;
 
+fn print_help() {
+    println!(
+        "scpctl {}\n\nUsage:\n  scpctl [--config-dir <DIR>] [--profile <NAME>] <command> [flags]\n\nCommands:\n  schema [--command <CMD>] --json\n  capabilities [--no-profile] [--json]\n  status [--function-id <ID>] [--json]\n  server list [--limit <N>] [--after <ID>] [--json]\n  server get --server-id <ID> [--json]\n  config paths [--json]\n  settings show [--json]\n  mcp serve --stdio\n\nDiscovery (`--help`, `--version`, `schema`, `capabilities --no-profile`) never opens a profile.",
+        env!("CARGO_PKG_VERSION")
+    );
+}
+
 fn main() -> ExitCode {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
-    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
-    let value = match args.as_slice() {
-        ["--help"] => {
-            println!("scpctl: standalone discovery preview\n\nUsage:\n  scpctl schema --json\n  scpctl --version\n\nRuntime commands and stdio serving are not implemented yet.\nDiscovery never opens a profile or contacts the desktop.");
-            return ExitCode::SUCCESS;
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    let code = match parse_args(&raw_args) {
+        Ok(ParsedCli::Help) => {
+            print_help();
+            0
         }
-        ["--version"] => {
+        Ok(ParsedCli::Version) => {
             println!("scpctl {}", env!("CARGO_PKG_VERSION"));
-            return ExitCode::SUCCESS;
+            0
         }
-        ["schema", "--json"] => {
-            let mut catalog = scp_mcp::standalone_catalog();
-            catalog["commands"] = serde_json::json!([{
-                "name":"schema","arguments":["--json"],"opensProfile":false,
-                "inputSchema":{"type":"object","additionalProperties":false},
-                "output":"versioned-result-envelope"
-            }]);
-            scp_core::success(catalog)
-        }
-        _ => {
-            // Even failed stdio startup must reserve stdout for protocol messages.
-            if args.first() == Some(&"mcp") || !args.contains(&"--json") {
-                eprintln!("Unsupported command or arguments. Run scpctl --help.");
-                return ExitCode::from(2);
+        Ok(ParsedCli::Command(req)) => execute_command(req),
+        Err(parse_err) => {
+            if parse_err.is_mcp || !parse_err.wants_json {
+                eprintln!("{}", parse_err.error.message);
+                parse_err.error.exit_code()
+            } else {
+                write_json_line(
+                    &error_envelope(None, &parse_err.error),
+                    parse_err.error.exit_code(),
+                )
             }
-            scp_core::invalid_arguments()
         }
     };
-    let exit = if value["ok"] == true { 0 } else { 2 };
-    let stdout = io::stdout();
-    let mut out = stdout.lock();
-    if serde_json::to_writer(&mut out, &value).is_err() || out.write_all(b"\n").is_err() {
-        eprintln!("Unable to write command result.");
-        return ExitCode::FAILURE;
-    }
-    ExitCode::from(exit)
+    ExitCode::from(code.clamp(0, 255) as u8)
 }

@@ -10,5 +10,11 @@ path = "src/main.rs"
 
 [dependencies]
 scp-core = { path = "../scp-core" }
-scp-mcp = { path = "../scp-mcp" }
+scp-mcp = { path = "../scp-mcp", features = ["stdio"] }
 serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(unix)'.dev-dependencies]
+libc = "0.2"

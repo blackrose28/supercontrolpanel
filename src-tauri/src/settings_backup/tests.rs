@@ -592,6 +592,8 @@ fn backup_rejects_server_ids_that_could_escape_ui_attributes() {
     let mut source = fixture();
     let id = "srv-\" onclick=\"alert(1)";
     source.files.insert("servers.json".into(), Some(json!({"servers":[{"id":id,"name":"s","host":"h","connectionMethod":"ssh","sshPort":22,"sshUser":"u"}]})));
-    source.credentials.insert(keyring_server_ssh_password_account(id), None);
+    source
+        .credentials
+        .insert(keyring_server_ssh_password_account(id), None);
     assert!(source.validate().is_err());
 }

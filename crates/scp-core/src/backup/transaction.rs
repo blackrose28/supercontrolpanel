@@ -1,5 +1,6 @@
 //! Idempotent undo journal. Key lives in a dedicated OS account outside the backup set.
-use super::{crypto, io, Changes, SecretStore, FILES};
+use super::{crypto, io, Changes, SecretStore, CONFIGURED, FILES};
+use crate::models::KEYRING_BOUNDARY_APP_TOKEN;
 use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};
@@ -7,7 +8,7 @@ use zeroize::Zeroizing;
 
 pub const JOURNAL_ACCOUNT: &str = "settings-restore-recovery-v1";
 pub const JOURNAL_FILE: &str = "settings-restore-journal.enc";
-pub(super) const DONE: &[u8] = b"SCP-RESTORE-DONE-1";
+pub const DONE: &[u8] = b"SCP-RESTORE-DONE-1";
 const AAD: &[u8] = b"SCP-RESTORE-JOURNAL-1";
 
 #[derive(Serialize, Deserialize)]
@@ -20,7 +21,9 @@ struct Journal {
 }
 
 fn read_key(store: &mut impl SecretStore) -> Result<Zeroizing<[u8; 32]>, String> {
-    let encoded = Zeroizing::new(store.read(JOURNAL_ACCOUNT)?.ok_or("Recovery key missing. Keep the journal and restore OS-keyring access before retrying startup.")?);
+    let encoded = Zeroizing::new(store.read(JOURNAL_ACCOUNT)?.ok_or(
+        "Recovery key missing. Keep the journal and restore OS-keyring access before retrying startup.",
+    )?);
     if encoded.len() != 64 {
         return Err("Invalid settings recovery key".into());
     }
@@ -85,12 +88,11 @@ pub fn prepare(dir: &Path, changes: &Changes, store: &mut impl SecretStore) -> R
     if *read_key(store)? != *key {
         return Err("Recovery key was not durably persisted; import aborted".into());
     }
-    // No mutation has occurred until this durable encrypted undo snapshot exists.
     save_journal(dir, &journal, &key, existing.is_some())
 }
 
 fn allowed_recovery_account(account: &str) -> bool {
-    (super::CONFIGURED.contains(&account) || account == super::KEYRING_BOUNDARY_APP_TOKEN)
+    (CONFIGURED.contains(&account) || account == KEYRING_BOUNDARY_APP_TOKEN)
         || account
             .strip_prefix("server_ssh_password:")
             .is_some_and(|id| {
@@ -98,10 +100,9 @@ fn allowed_recovery_account(account: &str) -> bool {
             })
 }
 
-fn load_journal(
-    dir: &Path,
-    store: &mut impl SecretStore,
-) -> Result<Option<(Journal, Zeroizing<[u8; 32]>)>, String> {
+type LoadedJournal = Option<(Journal, Zeroizing<[u8; 32]>)>;
+
+fn load_journal(dir: &Path, store: &mut impl SecretStore) -> Result<LoadedJournal, String> {
     let Some(bytes) = io::read_bounded(&dir.join(JOURNAL_FILE))? else {
         return Ok(None);
     };
@@ -132,7 +133,6 @@ fn load_journal(
 }
 
 pub fn commit(dir: &Path, changes: &Changes, store: &mut impl SecretStore) -> Result<(), String> {
-    // Stage the new bytes before journaling/mutating. No plaintext staging files.
     let staged: BTreeMap<_, _> = changes
         .files
         .iter()
@@ -165,11 +165,10 @@ pub fn commit(dir: &Path, changes: &Changes, store: &mut impl SecretStore) -> Re
     cleanup(dir, store)
 }
 
-pub(super) fn mark_committed(dir: &Path, store: &mut impl SecretStore) -> Result<(), String> {
+pub fn mark_committed(dir: &Path, store: &mut impl SecretStore) -> Result<(), String> {
     let (mut journal, key) =
         load_journal(dir, store)?.ok_or("Missing recovery journal after import")?;
     journal.committed = true;
-    // Once this marker is durable, startup retains the imported revision.
     save_journal(dir, &journal, &key, true)
 }
 
@@ -201,14 +200,11 @@ pub fn recover(dir: &Path, store: &mut impl SecretStore) -> Result<(), String> {
 }
 
 fn cleanup(dir: &Path, store: &mut impl SecretStore) -> Result<(), String> {
-    // A durably published non-secret tombstone makes a resurrected deletion safe even
-    // on filesystems without a portable directory-flush API (notably Windows).
     io::atomic_write(&dir.join(JOURNAL_FILE), DONE, true)?;
     fs::remove_file(dir.join(JOURNAL_FILE)).map_err(|_| {
         "Settings committed/recovered, but journal cleanup failed; retry startup recovery"
     })?;
     io::sync_directory(dir)?;
-    // An orphaned key is harmless and overwritten by prepare; never remove it before journal removal is durable.
     store
         .write(JOURNAL_ACCOUNT, None)
         .map_err(|_| "Settings committed/recovered; unused recovery key cleanup failed".to_string())

@@ -24,23 +24,20 @@ fn schema_is_one_json_envelope_without_profile_or_desktop() {
     assert_eq!(result["ok"], true);
     assert!(result["runtimeId"].is_null());
     assert!(result["error"].is_null());
-    assert_eq!(result["data"]["commands"][0]["name"], "schema");
-    assert_eq!(
-        result["data"]["mcpOperations"].as_array().unwrap().len(),
-        45
-    );
-    assert_eq!(result["data"]["mcpResources"].as_array().unwrap().len(), 6);
-    assert!(result["data"]["mcpOperations"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .all(|op| op["available"] == false));
+    assert_eq!(result["data"]["commands"][0]["command"], "schema");
+    let ops = result["data"]["mcpOperations"].as_array().unwrap();
+    assert_eq!(ops.len(), 45);
+    assert_eq!(ops.iter().filter(|op| op["available"] == true).count(), 11);
+    assert_eq!(ops.iter().filter(|op| op["available"] == false).count(), 34);
+    let resources = result["data"]["mcpResources"].as_array().unwrap();
+    assert_eq!(resources.len(), 6);
+    assert!(resources.iter().all(|r| r["available"] == true));
 }
 
 #[test]
 fn unsupported_commands_fail_without_claiming_runtime_access() {
     for args in [
-        vec!["status", "--json"],
+        vec!["unknown-cmd", "--json"],
         vec!["schema", "--json", "--interactive"],
         vec!["mcp", "serve", "--stdio", "--json"],
     ] {

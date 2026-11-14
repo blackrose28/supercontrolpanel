@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -22,41 +22,11 @@ fn telemetry_session_id_for_cc_ingest(
     )
 }
 
-pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
+#[allow(unused_imports)]
+pub use scp_core::models::{default_function_statuses, now_ms};
 
 pub fn lock_err<T>(mutex: &Mutex<T>) -> Result<std::sync::MutexGuard<'_, T>, String> {
     mutex.lock().map_err(|_| "mutex poisoned".to_string())
-}
-
-pub fn default_function_statuses(
-    openvpn_function_id: &str,
-    caddy_function_id: &str,
-    boundary_auth_function_id: &str,
-) -> HashMap<String, FunctionStatus> {
-    let mut statuses = HashMap::new();
-    for (id, msg) in [
-        (openvpn_function_id, "Ready"),
-        (caddy_function_id, "Ready"),
-        (boundary_auth_function_id, "Not authenticated"),
-    ] {
-        statuses.insert(
-            id.to_string(),
-            FunctionStatus {
-                function_id: id.to_string(),
-                state: "idle".to_string(),
-                message: msg.to_string(),
-                boundary_token_source: None,
-                session_id: None,
-                updated_at_ms: now_ms(),
-            },
-        );
-    }
-    statuses
 }
 
 pub fn upsert_function_status(

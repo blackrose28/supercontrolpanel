@@ -134,9 +134,11 @@ fn dispatch_mcp_tool(
         | super::contracts::Handler::DetectOpenvpnExecutable
         | super::contracts::Handler::ServerRdpStart
         | super::contracts::Handler::ServerSshPasswordSet
-        | super::contracts::Handler::ServerSshPasswordClear => {
-            super::parity::dispatch(operation.handler, &args, &super::parity::DesktopParityHost(app))?
-        }
+        | super::contracts::Handler::ServerSshPasswordClear => super::parity::dispatch(
+            operation.handler,
+            &args,
+            &super::parity::DesktopParityHost(app),
+        )?,
         // Exhaustive matching makes adding an advertised operation require a host decision.
         super::contracts::Handler::AppGetOverview => {
             let function_store = app.state::<FunctionStore>();

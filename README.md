@@ -76,6 +76,10 @@ Super Control Panel is a PTY-driven desktop control panel where each feature can
 
 ```text
 .
+├─ crates/
+│  ├─ scp-core/        # headless profile lease, secrets, backup engine, runtime state
+│  ├─ scp-mcp/         # shared MCP operation registry, schemas, DTOs, stdio host
+│  └─ scp-cli/         # standalone `scpctl` binary
 ├─ src/
 │  ├─ main.ts          # multi-page UI + status/log/event bridge
 │  └─ styles.css
@@ -115,18 +119,29 @@ npm run helper:run -- status
 npm run helper:run -- openvpn status
 ```
 
-## Standalone CLI discovery preview
+## Standalone CLI and stdio MCP (Slice 1)
 
-The independent Rust workspace starts the standalone CLI work. It currently supports metadata discovery only:
+The independent Rust workspace (`scp-core`, `scp-mcp`, `scp-cli`) builds `scpctl` without Tauri, GTK/WebKit, or HTTP dependencies and executes cleanly with the desktop app closed:
 
 ```sh
-cargo run --locked -p scp-cli -- schema --json
 cargo build --locked --release -p scp-cli
+cargo run --locked -p scp-cli -- schema --json
+cargo run --locked -p scp-cli -- capabilities --no-profile --json
 ```
 
-`target/release/scpctl` supports `--help` and `--version`. Discovery emits one versioned JSON envelope without opening a profile, reading credentials, contacting the desktop or starting HTTP. All 45 catalog operations and six resources are marked unavailable until their runtime families pass extraction gates. Profile-backed commands and stdio serving are not implemented yet. The existing helper remains the client for desktop-owned sessions.
+Implemented Slice 1 commands on `target/release/scpctl`:
 
-The shared `scp-mcp` package supplies the desktop's unchanged operation registry, schemas, policy and safe DTOs; `scp-core` starts the host-independent shell result contract. The desktop retains its existing package/build paths. See the [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md) and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run independent tests with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`; desktop tests still use `cargo test --manifest-path src-tauri/Cargo.toml`.
+- Profile-free discovery: `--help`, `--version`, `schema [--command <CMD>] --json`, `capabilities --no-profile [--json]`.
+- Profile-backed read-only inspection (acquires exclusive `owner.lock`, rejects desktop config paths, runs journal recovery before loading config):
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] capabilities [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] status [--function-id <ID>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server list [--limit <N>] [--after <ID>] [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] server get --server-id <ID> [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] config paths [--json]`
+  - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings show [--json]` (secrets and tokens redacted)
+- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by profile-local `stdio-policy.json` (`sensitiveActionPolicy: "read-only"`, exposing 9 read-only tools by default or 11 read-only tools + all 6 `scp://*` resources when `"file-transfer"` is enabled). Runtime workers and mutations stay closed until Slices 2–4.
+
+`src-tauri` re-exports shared models, encrypted backup primitives/journal engine, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli` and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
 
 ## MCP support
 
