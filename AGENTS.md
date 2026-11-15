@@ -17,6 +17,7 @@ Maintain the PTY-driven function runner: features launch/control PTYs and report
 - `src-tauri/src/mcp/`: localhost HTTP MCP transport, tools, resources; design docs in `docs/mcp/`.
 - `crates/{scp-core,scp-mcp,scp-cli}/`: independent Rust workspace for shared runtime/backup core, desktop+stdio MCP adapters, and standalone `scpctl` CLI; agent guide and release docs in `docs/mcp/`.
 - `scripts/{package-scpctl.mjs,install-scpctl.sh}`, `Dockerfile.cli`, `examples/standalone-cli/`: standalone CLI packaging, checksum-verified prefix installer, and headless workflow examples.
+- `app/`: independent Gradle/Kotlin/Compose Android app consuming `scpmobile.aar` (TOFU host-key screen, OpenShell terminal); build/test notes in `app/README.md`; tests `./gradlew :app:testDebugUnitTest` in `app/`.
 - `src-tauri/tauri.conf.json`: desktop build and window configuration.
 
 Install: `npm install`. Develop: `npm run tauri dev`. Build: `npm run tauri build`.
