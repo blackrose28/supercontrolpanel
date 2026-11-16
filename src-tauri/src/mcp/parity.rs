@@ -93,7 +93,7 @@ fn validate_rdp_host(
     host: &str,
 ) -> Result<(), String> {
     scp_core::config_ops::validate_rdp_target(os, interactive, windows_server, host).map_err(
-        |err| match err.code() {
+        |err| match err.code {
             "CAPABILITY_UNAVAILABLE" => {
                 OperationError::new(ErrorCode::CapabilityUnavailable).legacy_message()
             }

@@ -15,7 +15,7 @@ axum = "=0.8.8"
 rmcp = { version = "=3.9.0", features = ["transport-streamable-http-server"] }
 # Platform features required — without them keyring uses an in-memory mock per Entry,
 # so set_password "succeeds" but the next get_password always misses (see keyring docs).
-keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-sync-persistent"] }
+keyring = { version = "3", features = ["windows-native", "apple-native", "linux-native-async-persistent", "async-io", "crypto-rust"] }
 portable-pty = "0.8"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "cookies", "json", "rustls-tls"] }
 serde = { version = "1", features = ["derive"] }
