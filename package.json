@@ -19,7 +19,8 @@
     "cli:build": "cargo build --locked -p scp-cli",
     "cli:release": "cargo build --locked --release -p scp-cli",
     "cli:test": "cargo test --locked -p scp-core -p scp-mcp -p scp-cli",
-    "cli:package": "node scripts/package-scpctl.mjs"
+    "cli:package": "node scripts/package-scpctl.mjs",
+    "cli:install": "node scripts/install-scpctl-local.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

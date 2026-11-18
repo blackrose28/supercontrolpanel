@@ -37,7 +37,7 @@ Test commands (run in the applicable package):
 - Admin frontend: Vitest + React Testing Library, `npm test -- --run`; `*.test.ts` / `*.test.tsx`.
 - NestJS backend: Jest, `npm test` (filter with `-- --testPathPattern=<file>`); `*.spec.ts`.
 - Tauri backend: `cargo test` in `src-tauri`; `#[cfg(test)]` modules or `tests/`.
-- Standalone CLI workspace: `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`, `scp-mcp` default vs `--all-features`, and `node --test experiments/cli-stdio-slice0/tests/slice{1_production_stdio,4_production_stdio,5_release_qualification}.mjs`.
+- Standalone CLI workspace: `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`, `scp-mcp` default vs `--all-features`, and `node --test experiments/cli-stdio-slice0/tests/slice{1_production_stdio,4_production_stdio,5_release_qualification}.mjs experiments/cli-stdio-slice0/tests/cli_install.mjs`.
 
 Use Ripwire from the repository root before broad code searches/whole-file reads:
 
