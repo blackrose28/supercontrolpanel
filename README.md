@@ -163,7 +163,7 @@ Implemented Slice 1–5 commands and workflows on `target/release/scpctl` (`31` 
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings export --output <PATH> [--overwrite] (--passphrase-file <PATH> | --passphrase-stdin | --interactive) [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings import --input <PATH> --preview (--passphrase-file <PATH> | --passphrase-stdin | --interactive) [--no-shared] [--no-servers] [--no-local] [--no-secrets] [--use-source-paths] [--remap <KEY=PATH>] [--json]`
   - `scpctl [--config-dir <DIR>] [--profile <NAME>] settings import --input <PATH> --apply --interactive [--passphrase-file <PATH> | --passphrase-stdin] [--no-shared] [--no-servers] [--no-local] [--no-secrets] [--use-source-paths] [--remap <KEY=PATH>]`
-- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by live-reloaded, fail-closed `stdio-policy.json`: `11` read-only tools + all `6` `scp://*` resources under default `read-only` policy (`15` tools when `"file-transfer"` is added), and `41` callable tools under `"allow-local-policy"` with all `4` categories (`4` desktop/interactive operations remain excluded with `CAPABILITY_UNAVAILABLE`).
+- Stdio MCP server: `scpctl [--config-dir <DIR>] [--profile <NAME>] mcp serve --stdio` serves newline-delimited JSON-RPC over stdin/stdout (diagnostics on stderr only), governed by live-reloaded, fail-closed `stdio-policy.json`: `11` read-only tools + `5` `scp://*` resources under default `read-only` policy (adding `"file-transfer"` gives `15` tools and the sixth resource, `scp://status/transfers`), and `41` callable tools under `"allow-local-policy"` with all `4` categories (`4` desktop/interactive operations remain excluded with `CAPABILITY_UNAVAILABLE`).
 
 Release packaging, installation, agent examples, and CI helpers (`package.json` scripts `cli:build`, `cli:release`, `cli:test`, `cli:package`):
 
@@ -173,6 +173,112 @@ Release packaging, installation, agent examples, and CI helpers (`package.json` 
 - Runnable headless agent workflows: [`examples/standalone-cli/shell-agent-workflow.mjs`](examples/standalone-cli/shell-agent-workflow.mjs) and [`examples/standalone-cli/stdio-mcp-agent-workflow.mjs`](examples/standalone-cli/stdio-mcp-agent-workflow.mjs)
 
 `src-tauri` re-exports shared models, encrypted `.scpbak` backup engine primitives/references, pure runtime/RDP/config helpers, and the MCP registry/SDK adapter from `scp-core` and `scp-mcp`, while retaining its existing package/build paths. See the [Agent guide](docs/mcp/STANDALONE_CLI_AGENT_GUIDE.md), [Slice 1 report](docs/mcp/STANDALONE_CLI_SLICE1.md), [Slice 2 report](docs/mcp/STANDALONE_CLI_SLICE2.md), [Slice 3 report](docs/mcp/STANDALONE_CLI_SLICE3.md), [Slice 4 report](docs/mcp/STANDALONE_CLI_SLICE4.md), [Slice 5 report](docs/mcp/STANDALONE_CLI_SLICE5.md), [standalone plan](docs/mcp/STANDALONE_CLI_STDIO_MCP_PLAN.md), and [operation ledger](docs/mcp/STANDALONE_CLI_OPERATION_LEDGER.md). Run workspace checks with `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`, installed-prefix/stdio qualification with `node --test experiments/cli-stdio-slice0/tests/slice{1_production_stdio,4_production_stdio,5_release_qualification}.mjs`, and desktop checks with `cargo test --manifest-path src-tauri/Cargo.toml`.
+
+### Drive scpctl with an AI agent (restore a backup and operate it end to end)
+
+This walks you through letting an AI agent (Claude Code, or any MCP client) restore an encrypted `.scpbak` settings backup with `scpctl` and then operate it over stdio MCP. A few steps need you, a human, at a real terminal; the agent does the rest.
+
+#### 1. What you must set up first (the agent cannot do these for you)
+
+| Need | Why | How to check |
+| --- | --- | --- |
+| **A running Secret Service keyring** (Linux: `gnome-keyring` or KeePassXC, on a session D-Bus, collection unlocked; macOS Keychain and Windows Credential Manager work out of the box) | `settings import` snapshots the destination's keyring even into an empty profile, so without one it fails with `backup_snapshot_failed`. Credential tools fail with `keyring_unavailable`. | `scpctl capabilities --json` → `data.keyring.state` must be `"ready"` (`"unavailable"` shows `org.freedesktop.secrets` was not found). On a headless Linux box, start one in the shell that runs `scpctl`: `dbus-run-session -- bash`, then `echo -n "" \| gnome-keyring-daemon --unlock --components=secrets`. |
+| **A real terminal for the apply step** | `settings import --apply` requires `--interactive` and a TTY. It is deliberately unavailable over MCP and under `--non-interactive` (exit `4`). | You run it yourself (step 3). |
+| **A passphrase file** | Backups are encrypted (minimum 12 characters). Keep the passphrase out of chat and shell history. | `umask 077; printf '%s' '<passphrase>' > ~/.scp-passphrase` |
+| **`ssh` and `scp` on `PATH`, and trusted host keys** | SSH, SFTP and SCP always run with `StrictHostKeyChecking=yes` and `BatchMode=yes`. Unknown hosts fail with `host_key_untrusted`. | `ssh-keyscan -H <host> >> ~/.ssh/known_hosts` (or a file named by `SCPCTL_SSH_KNOWN_HOSTS`); verify the fingerprint out of band. For key auth set `SCPCTL_SSH_IDENTITY_FILE=<key>`. |
+| **Tools and files the backup points to** | A backup holds settings, not binaries. Paths such as `boundaryCliPath`, `openvpnExecutablePath`, `openvpnOvpnPath`, `caddyFolder` and `repoRoot` may not exist on the new machine, and `external files` in the preview shows `existsHere: false`. | Install the tools (`boundary`, `openvpn`, `caddy`, `git`), copy the `.ovpn`/key files, then either place them at the same paths or import with `--remap <KEY=PATH>` / fix them later with `settings patch`. |
+| **SSH passwords** | Saved SSH passwords are not always in a backup; the preview lists `server_ssh_password:<id>` as `set` or `delete`. | Set missing ones with `scpctl server credentials set --server-id <ID> --interactive` or the `server_ssh_password_set` MCP tool. |
+
+Boundary-routed servers also need the Boundary controller reachable and a login (OIDC credentials are restored from the backup). OpenVPN needs `sudo` with a working password prompt on Linux/macOS. `server rdp`, `config_sync_pull` and `config_git_pull/push` are not available over stdio.
+
+#### 2. Preview the import (safe, read-only; the agent can run this)
+
+```sh
+scpctl --config-dir ~/.config/scpctl --profile ops settings import \
+  --input ./backup.scpbak --preview --passphrase-file ~/.scp-passphrase \
+  --json --non-interactive
+```
+
+Check `data.servers`, `data.sections`, `data.credentialActions` (`set` / `keep` / `delete`), `data.externalFiles[].existsHere` and `data.warnings`. A wrong passphrase gives `backup_decrypt_failed` (exit `2`); a missing file gives `backup_not_found` (exit `6`). Always use a dedicated `--config-dir`, never a desktop profile directory.
+
+#### 3. Apply the import (you, in a terminal)
+
+```sh
+scpctl --config-dir ~/.config/scpctl --profile ops settings import \
+  --input ./backup.scpbak --apply --interactive --passphrase-file ~/.scp-passphrase
+```
+
+Review the preview, then answer `yes`. Other answers: `no`, `sections <list>`, `paths <preserve|source>`, `remap <key=path>`, `show`. MCP and Command Center stay disabled after import by design.
+
+#### 4. Allow the agent to act (stdio policy)
+
+The default policy is read-only (`11` tools). Create `<profileDir>/stdio-policy.json` (find the directory with `scpctl config paths --json`) to widen it; it is live-reloaded and fail-closed, so a corrupt file drops every tool and call to `POLICY_DENIED`:
+
+```json
+{"sensitiveActionPolicy":"allow-local-policy","allowedToolCategories":["read-only","runtime-control","config-mutation","file-transfer"]}
+```
+
+Start narrower if you prefer: `["read-only","file-transfer"]` adds the four remote SFTP browser read tools (`15` tools) and the `scp://status/transfers` resource.
+
+#### 5. Register the MCP server with your agent client
+
+```json
+{
+  "mcpServers": {
+    "scpctl": {
+      "command": "scpctl",
+      "args": ["--config-dir", "/home/me/.config/scpctl", "--profile", "ops", "mcp", "serve", "--stdio"],
+      "env": { "SCPCTL_SSH_KNOWN_HOSTS": "/home/me/.ssh/known_hosts" }
+    }
+  }
+}
+```
+
+Claude Code: `claude mcp add scpctl -- scpctl --config-dir ~/.config/scpctl --profile ops mcp serve --stdio`. The MCP server holds the profile's `owner.lock` for its lifetime, so shell `scpctl` calls on the same profile (and a second server) exit `5` (`profile_owner_conflict`) while it runs. Run CLI-only steps (import, export) before starting the agent, or use a second profile. The server must also be launched in the same D-Bus session as the keyring.
+
+#### Agent prompt
+
+Paste this to your agent after steps 1-5 (replace the paths):
+
+```text
+You have the scpctl MCP server (stdio) for profile "ops". Do not print secrets,
+passphrases or tokens, and do not run anything outside this profile.
+
+1. Call app_get_overview, sync_settings_get, config_get_paths and servers_list.
+   Report how many servers were restored and which use connectionMethod "ssh"
+   vs "boundary".
+2. For each external path in sync_settings_get (openvpnExecutablePath,
+   openvpnOvpnPath, boundaryCliPath, caddyFolder, repoRoot), tell me whether it
+   is empty or missing on this machine and what I must install or configure.
+   Do not guess paths and do not edit them without asking.
+3. For each "ssh" server, check my known_hosts for the host. If a host key is
+   missing, tell me the exact `ssh-keyscan -H <host>` command to run; do not add
+   keys yourself.
+4. Once I confirm a server, run remote_browser_open, remote_browser_list_children
+   on "/", then remote_browser_close. For transfers use scp_start_upload /
+   scp_start_download, poll scp_transfer_list for the returned sessionId, then
+   scp_transfer_get. Confirm overwrites with me first.
+5. Before any mutation (server_upsert, server_delete, config_save*), state what
+   will change and ask me. If a call times out, inspect state (server_get,
+   scp_transfer_list) before retrying.
+6. Summarize failures with their error code and reason, and what I should do.
+```
+
+#### Verify and troubleshoot
+
+- Sanity checks: `scpctl schema --json` (contracts), `scpctl capabilities --json` (keyring, available operations, stdio policy), `scpctl status --json`.
+- Exit codes: `2` invalid arguments/wrong passphrase, `3` policy denied, `4` capability unavailable (no TTY, keyring or tool missing), `5` conflict (stale `--expected-revision`, existing output file, `owner.lock` busy), `6` not found, `7` timeout.
+
+| Symptom | Cause and fix |
+| --- | --- |
+| `backup_snapshot_failed` / `keyring_unavailable` | No unlocked Secret Service. Do step 1. |
+| `CAPABILITY_UNAVAILABLE` on SSH/SFTP/SCP tools | Usually `host_key_untrusted`; add the host key. The MCP text is generic, so run the same operation through the CLI (`--json`) to see the `reason`. |
+| `POLICY_DENIED` | Widen `stdio-policy.json` (step 4), or the file is corrupt. |
+| Tool count is `11`, not `41` | The policy file is missing or read-only. |
+| `profile_owner_conflict` | Another `scpctl` or MCP server owns the profile. Stop it first. |
+| `Invalid tool arguments` (`-32602`) | Wrong or extra arguments; the schemas are strict. Use `tools/list` or `scpctl schema --command <name> --json`. |
+
+See the [Agent guide](docs/mcp/STANDALONE_CLI_AGENT_GUIDE.md) for the full contracts, JSON envelope and transport limits.
 
 ## MCP support
 

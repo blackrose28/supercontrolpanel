@@ -375,3 +375,64 @@ fn release_assets_and_completion_bundle_exist() {
         assert!(meta.len() > 0, "empty Slice 5 asset: {}", p.display());
     }
 }
+
+#[test]
+fn readme_documents_agent_driven_restore_and_accurate_default_policy() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    let readme = fs::read_to_string(repo_root.join("README.md")).unwrap();
+    for needle in [
+        "Drive scpctl with an AI agent",
+        "Agent prompt",
+        "org.freedesktop.secrets",
+        "settings import",
+        "ssh-keyscan",
+        "stdio-policy.json",
+        "backup_snapshot_failed",
+        "keyring_unavailable",
+    ] {
+        assert!(readme.contains(needle), "README missing `{needle}`");
+    }
+    assert!(
+        !readme.contains("all `6` `scp://*` resources under default"),
+        "README overstates default-policy resources; `scp://status/transfers` needs file-transfer"
+    );
+    let guide =
+        fs::read_to_string(repo_root.join("docs/mcp/STANDALONE_CLI_AGENT_GUIDE.md")).unwrap();
+    assert!(
+        !guide.contains("and **`6` `scp://*` resources**. Adding"),
+        "agent guide overstates default-policy resources"
+    );
+}
+
+#[test]
+fn agent_skills_exist_with_frontmatter_and_verified_contracts() {
+    let repo_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap();
+    for (dir, must_contain) in [
+        (
+            "scpctl-setup",
+            vec!["org.freedesktop.secrets", "--apply --interactive", "stdio-policy.json", "ssh-keyscan"],
+        ),
+        (
+            "scpctl-mcp-usage",
+            vec!["server_delete", "\"id\"", "sessionId", "scp_transfer_get", "profile_owner_conflict"],
+        ),
+    ] {
+        let path = repo_root.join(".claude/skills").join(dir).join("SKILL.md");
+        let body = fs::read_to_string(&path)
+            .unwrap_or_else(|_| panic!("missing skill: {}", path.display()));
+        assert!(body.starts_with("---\n"), "{dir}: missing frontmatter");
+        assert!(body.contains(&format!("name: {dir}\n")), "{dir}: name mismatch");
+        assert!(body.contains("\ndescription: "), "{dir}: missing description");
+        for needle in must_contain {
+            assert!(body.contains(needle), "{dir}: missing `{needle}`");
+        }
+    }
+}
