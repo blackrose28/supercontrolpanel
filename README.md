@@ -293,7 +293,7 @@ With `--interactive` the same automated login runs first; if the CLI cannot use 
 | Symptom | Cause and fix |
 | --- | --- |
 | `backup_snapshot_failed` / `keyring_unavailable` | No unlocked Secret Service. Do step 1. |
-| `CAPABILITY_UNAVAILABLE` on SSH/SFTP/SCP tools | Usually `host_key_untrusted`; add the host key. The MCP text is generic, so run the same operation through the CLI (`--json`) to see the `reason`. |
+| `CAPABILITY_UNAVAILABLE` on SSH/SFTP/SCP tools | Usually `host_key_untrusted`; add the host key. The MCP error text ends with `(reason: <code>)` (for example `host_key_untrusted`, `ssh_handshake_failed`, `sftp_auth_failed`); the CLI (`--json`) reports the same `reason`. |
 | `POLICY_DENIED` | Widen `stdio-policy.json` (step 4), or the file is corrupt. |
 | Tool count is `11`, not `41` | The policy file is missing or read-only. |
 | `profile_owner_conflict` | Another `scpctl` or MCP server owns the profile. Stop it first. |

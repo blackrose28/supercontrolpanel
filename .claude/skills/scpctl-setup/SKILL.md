@@ -111,7 +111,7 @@ The server holds the profile's `owner.lock` for its lifetime: any other `scpctl`
 | Symptom | Fix |
 | --- | --- |
 | `backup_snapshot_failed`, `keyring_unavailable` | Step 2 |
-| SSH/SFTP/SCP tools return `CAPABILITY_UNAVAILABLE` | Usually `host_key_untrusted`; step 4 (MCP text is generic, the CLI `--json` shows `reason`) |
+| SSH/SFTP/SCP tools return `CAPABILITY_UNAVAILABLE` | Usually `host_key_untrusted`; step 4 (the MCP error text ends with `(reason: <code>)`, e.g. `host_key_untrusted`; the CLI `--json` shows the same `reason`) |
 | Tool count is 11 | Policy file missing or read-only (step 5) |
 | `profile_owner_conflict` | Stop the other scpctl/MCP process |
 | `POLICY_DENIED` after edit | Policy JSON is corrupt; fix it |

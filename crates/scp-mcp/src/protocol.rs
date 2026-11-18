@@ -101,7 +101,13 @@ impl SdkHost {
         )
         .await
         .map_err(|_| OperationError::for_host(ErrorCode::Timeout, standalone))?
-        .map_err(|err| OperationError::for_host(err.code, standalone))?;
+        .map_err(|err| {
+            let mapped = OperationError::for_host(err.code, standalone);
+            match err.reason {
+                Some(reason) => mapped.with_reason(reason),
+                None => mapped,
+            }
+        })?;
         if !validation::conforms(&validation::output_schema(op), &data) {
             return Err(OperationError::for_host(
                 ErrorCode::OperationFailed,

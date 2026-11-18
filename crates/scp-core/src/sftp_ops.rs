@@ -10,7 +10,7 @@ use crate::runtime::ProfileRuntime;
 use crate::secrets::KeyringBackend;
 use crate::ssh_ops::{
     connect_tcp_timeout, home_dir_from_env, host_key_untrusted, require_running_endpoint,
-    verify_session_host_key,
+    retry_transient_connect, tunnel_retry_cancel, verify_session_host_key,
 };
 use crate::supervisor::CancelToken;
 use parking_lot::Mutex;
@@ -129,7 +129,7 @@ pub(crate) fn open_remote_browser_impl<B: KeyringBackend>(
     rt: &ProfileRuntime<B>,
     server_id: &str,
     root_path: Option<&str>,
-    _cancel: &CancelToken,
+    cancel: &CancelToken,
 ) -> Result<RemoteBrowseSession, CoreError> {
     let norm_root = normalize_remote_transfer_path(
         root_path.unwrap_or("/"),
@@ -142,12 +142,14 @@ pub(crate) fn open_remote_browser_impl<B: KeyringBackend>(
     let endpoint = require_running_endpoint(rt, &server, "open_remote_browser")?;
     let (kh_path, id_path) = rt.resolved_ssh_paths();
     let password = rt.read_optional_secret(&keyring_server_ssh_password_account(&server.id));
-    let (ssh, sftp) = connect_and_open_sftp(
-        &endpoint,
-        kh_path.as_deref(),
-        id_path.as_deref(),
-        password.as_deref(),
-    )?;
+    let (ssh, sftp) = retry_transient_connect(tunnel_retry_cancel(&server, cancel), || {
+        connect_and_open_sftp(
+            &endpoint,
+            kh_path.as_deref(),
+            id_path.as_deref(),
+            password.as_deref(),
+        )
+    })?;
     if let Err(err) = sftp.readdir(Path::new(&norm_root)) {
         return Err(map_sftp_error(
             &format!("Cannot open root path {norm_root}"),

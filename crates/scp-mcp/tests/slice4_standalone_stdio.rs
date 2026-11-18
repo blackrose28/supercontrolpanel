@@ -747,3 +747,96 @@ fn stdio_host_invalidates_subscriptions_on_events_and_shuts_down_runtime_on_eof(
         assert_eq!(rt_check.supervisor().session_count(), 0);
     });
 }
+
+#[test]
+fn core_error_reason_is_surfaced_in_operation_error_text_without_leaking_details() {
+    use scp_core::error::CoreError;
+    use scp_mcp::contracts::map_core_error;
+
+    let core = CoreError::operation_failed(
+        "ssh_handshake_failed",
+        "SSH handshake with secret-host.internal:2200 failed: reset by peer",
+        true,
+        "inspect_network",
+    );
+    let mapped = map_core_error(&core);
+    assert_eq!(mapped.code, ErrorCode::OperationFailed);
+    assert_eq!(mapped.reason, Some("ssh_handshake_failed"));
+    let text = mapped.legacy_message();
+    assert!(
+        text.starts_with("OPERATION_FAILED: "),
+        "the CODE: prefix agents parse must be preserved: {text}"
+    );
+    assert!(text.contains("ssh_handshake_failed"), "{text}");
+    assert!(
+        !text.contains("secret-host") && !text.contains("reset by peer"),
+        "free-form CoreError messages must stay out of MCP text: {text}"
+    );
+    assert!(!text.to_lowercase().contains("desktop"), "{text}");
+
+    // Errors without a typed reason keep their exact legacy text.
+    assert_eq!(
+        OperationError::for_host(ErrorCode::OperationFailed, true).legacy_message(),
+        "OPERATION_FAILED: Operation failed on this standalone host; query state before retrying."
+    );
+}
+
+#[cfg(feature = "stdio")]
+#[test]
+fn stdio_tool_error_text_includes_reason_code() {
+    use scp_mcp::stdio::serve_stdio_io;
+    use std::sync::Arc;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let (tmp, rt, _backend) = setup_profile(Some(permissive_policy()));
+    // known_hosts file does not exist -> core reports host_key_untrusted.
+    rt.set_ssh_paths(Some(tmp.path().join("no-such-known_hosts")), None);
+    let rt = Arc::new(rt);
+    let tokio_rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    tokio_rt.block_on(async move {
+        let (client_in, server_in) = tokio::io::duplex(16384);
+        let (server_out, client_out) = tokio::io::duplex(16384);
+        let server_task =
+            tokio::spawn(async move { serve_stdio_io(rt, "1.3.3", server_in, server_out).await });
+        let mut writer = client_in;
+        let mut reader = BufReader::new(client_out).lines();
+        writer
+            .write_all(
+                format!(
+                    "{}\n",
+                    json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                        "protocolVersion": "2025-11-25", "capabilities": {},
+                        "clientInfo": {"name": "reason-test", "version": "1"}}})
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let _ = reader.next_line().await.unwrap().unwrap();
+        writer
+            .write_all(
+                format!(
+                    "{}\n{}\n",
+                    json!({"jsonrpc": "2.0", "method": "notifications/initialized"}),
+                    json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                           "params": {"name": "remote_browser_open", "arguments": {"serverId": "srv-1"}}})
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let msg: Value = serde_json::from_str(&reader.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(msg["id"], 2);
+        assert_eq!(msg["result"]["isError"], true);
+        let text = msg["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.starts_with("CAPABILITY_UNAVAILABLE: "), "{text}");
+        assert!(text.contains("host_key_untrusted"), "{text}");
+        assert!(!text.contains("no-such-known_hosts"), "no paths in MCP text: {text}");
+        drop(writer);
+        assert_eq!(server_task.await.unwrap(), 0);
+    });
+}

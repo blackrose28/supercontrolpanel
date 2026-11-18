@@ -51,7 +51,7 @@ Resources: `scp://status/functions|openvpn|boundary`, `scp://servers/list`, `scp
 
 ## Errors
 
-Tool failures return `isError: true` with a text starting `<CODE>: ...`; protocol-level problems are JSON-RPC errors.
+Tool failures return `isError: true` with a text starting `<CODE>: ...` and, when the core reports one, ending `(reason: <snake_case_code>)` (e.g. `ssh_handshake_failed`, `sftp_auth_failed`, `ssh_connect_failed`); protocol-level problems are JSON-RPC errors.
 
 | Result | Meaning / next step |
 | --- | --- |
@@ -59,7 +59,7 @@ Tool failures return `isError: true` with a text starting `<CODE>: ...`; protoco
 | Boundary: `Token must be provided via BOUNDARY_TOKEN`, HTTP 403, `credentials_missing` or `browser_oidc_unverified` | No usable Boundary login. For `authKind: oidc` in `automated` mode with saved credentials, call `boundary_auth_start` (headless, needs `curl`), then poll `function_status_get boundary-auth` until `authenticated` (an `error` message starts with an `oidc_*` reason code). Otherwise (browser mode, no saved credentials, `oidc_idp_unsupported`) a user must finish a browser step: ask them to run `scpctl boundary auth --interactive` in a terminal (scpctl-setup step 4b), then retry. `function_status_get boundary-auth` reporting `idle` does **not** mean logged out; check with `boundary_search_targets` |
 | `INVALID_ARGUMENTS` | Bad or protected field, missing file, bad id; fix input, do not retry unchanged |
 | `POLICY_DENIED` | Category not allowed by policy, or policy file corrupt; ask user (scpctl-setup) |
-| `CAPABILITY_UNAVAILABLE` | Often untrusted SSH host key (`host_key_untrusted`), missing keyring/binary, or an excluded op. The MCP text is generic and has no reason code. Ask the user to run the same operation via the CLI with `--json` to see `reason` (they must stop this MCP server first because of `owner.lock`, or use a second profile), or check `known_hosts` |
+| `CAPABILITY_UNAVAILABLE` | Often untrusted SSH host key (`host_key_untrusted`), missing keyring/binary, or an excluded op. Read the trailing `(reason: <code>)` in the error text (`host_key_untrusted`, `keyring_unavailable`, ...); only if it is absent ask the user to run the same operation via the CLI with `--json` (they must stop this MCP server first because of `owner.lock`, or use a second profile). For `host_key_untrusted` check `known_hosts` |
 | `CONFLICT` | Revision/overwrite conflict, or `profile_owner_conflict`; re-read state |
 | `-32602 Invalid tool arguments` / `Unknown tool` | Schema violation or tool not exposed by policy; check `tools/list` |
 | `-32002` | Unknown resource or policy denied for resource |

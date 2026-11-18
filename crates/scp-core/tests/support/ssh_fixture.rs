@@ -533,7 +533,20 @@ srv.bind(("127.0.0.1", listen_port))
 srv.listen(32)
 signal.signal(signal.SIGTERM, lambda *_: os._exit(0))
 
+# Simulates a Boundary tunnel whose upstream session is not ready yet: accepted
+# connections are closed immediately. The readiness probe counts as the first accept.
+drop_first = 0
+if target_id == "flaky-first-conn":
+    drop_first = 3
+elif target_id == "drop-all-conn":
+    drop_first = 1 << 30
+accepted = 0
+
 while True:
     client, _ = srv.accept()
+    accepted += 1
+    if accepted <= drop_first:
+        client.close()
+        continue
     threading.Thread(target=handle_conn, args=(client,), daemon=True).start()
 "#;

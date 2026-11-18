@@ -21,6 +21,10 @@ pub struct OperationError {
     pub code: ErrorCode,
     pub message: &'static str,
     pub retryable: bool,
+    /// Stable machine-readable reason from the core error contract (for example
+    /// `ssh_handshake_failed`). Always a static identifier, never free-form detail.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<&'static str>,
 }
 impl OperationError {
     pub fn for_host(code: ErrorCode, standalone: bool) -> Self {
@@ -41,7 +45,20 @@ impl OperationError {
             code,
             message,
             retryable: standalone && matches!(code, ErrorCode::Timeout),
+            reason: None,
         }
+    }
+
+    /// Attaches a stable reason code; anything that is not a lowercase snake_case
+    /// identifier is dropped so free-form text can never reach the MCP output.
+    pub fn with_reason(mut self, reason: &'static str) -> Self {
+        let is_identifier = !reason.is_empty()
+            && reason.len() <= 64
+            && reason
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        self.reason = is_identifier.then_some(reason);
+        self
     }
 
     pub fn new(code: ErrorCode) -> Self {
@@ -53,11 +70,12 @@ impl OperationError {
     }
 
     pub fn legacy_message(&self) -> String {
-        format!(
-            "{}: {}",
-            serde_json::to_value(self.code).unwrap().as_str().unwrap(),
-            self.message
-        )
+        let code = serde_json::to_value(self.code).unwrap();
+        let code = code.as_str().unwrap();
+        match self.reason {
+            Some(reason) => format!("{code}: {} (reason: {reason})", self.message),
+            None => format!("{code}: {}", self.message),
+        }
     }
 }
 
@@ -635,7 +653,7 @@ pub fn map_core_error(err: &scp_core::error::CoreError) -> OperationError {
         "INTERRUPTED" => ErrorCode::Cancelled,
         _ => ErrorCode::OperationFailed,
     };
-    OperationError::standalone_new(code)
+    OperationError::standalone_new(code).with_reason(err.reason)
 }
 
 fn authorize_checked(

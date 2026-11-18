@@ -485,3 +485,166 @@ fn boundary_tunnel_failures_one_shot_cleanup_and_caller_owned_reuse() {
         .stop_server_tunnel("srv-good", Duration::from_secs(2))
         .unwrap());
 }
+
+fn boundary_runtime_for_target(
+    fx: &SshdFixture,
+    tmp: &TempDir,
+    target_id: &str,
+) -> (ProfileRuntime<MemoryKeyringBackend>, u16) {
+    let cfg = tmp.path().join("cfg");
+    let desktop = tmp.path().join("desktop");
+    let b_port = free_port();
+    let kh = tmp.path().join("known_hosts");
+    fx.write_known_hosts(&kh, &[fx.port, b_port]);
+    ssh_fixture::seed_default_boundary_profile(
+        &cfg,
+        json!({
+            "servers": [{
+                "id": "srv-b",
+                "name": "BoundaryBox",
+                "host": "internal.box",
+                "connectionMethod": "boundary",
+                "sshPort": 22,
+                "sshUser": fx.user,
+                "boundaryTargetId": target_id,
+                "boundaryListenPort": b_port,
+            }]
+        }),
+        &fx.boundary_script,
+    );
+    let rt = ProfileRuntime::open_with_backend(
+        &ProfileLocationInput {
+            config_dir: Some(&cfg),
+            desktop_config_dir: Some(&desktop),
+            profile: Some("default"),
+            ..Default::default()
+        },
+        "test",
+        MemoryKeyringBackend::default(),
+    )
+    .unwrap();
+    rt.set_ssh_paths(Some(kh), Some(fx.user_key.clone()));
+    (rt, b_port)
+}
+
+#[test]
+fn sftp_browser_over_fresh_boundary_tunnel_retries_transient_handshake_failures() {
+    let fx = SshdFixture::start();
+    let tmp = TempDir::new().unwrap();
+    let (rt, _port) = boundary_runtime_for_target(&fx, &tmp, "flaky-first-conn");
+    let cancel = CancelToken::new();
+    rt.start_server_tunnel("srv-b", &cancel).unwrap();
+
+    let session = rt
+        .open_remote_browser("srv-b", Some(fx.remote_sandbox.to_str().unwrap()), &cancel)
+        .expect("a tunnel that drops its first connections must be retried, not fail the open");
+    assert!(!session.browser_id.is_empty());
+    rt.stop_server_tunnel("srv-b", Duration::from_secs(2))
+        .unwrap();
+}
+
+#[test]
+fn sftp_browser_over_dead_boundary_tunnel_fails_with_reason_in_bounded_time() {
+    let fx = SshdFixture::start();
+    let tmp = TempDir::new().unwrap();
+    let (rt, _port) = boundary_runtime_for_target(&fx, &tmp, "drop-all-conn");
+    let cancel = CancelToken::new();
+    rt.start_server_tunnel("srv-b", &cancel).unwrap();
+
+    let started = std::time::Instant::now();
+    let err = rt
+        .open_remote_browser("srv-b", Some(fx.remote_sandbox.to_str().unwrap()), &cancel)
+        .expect_err("a tunnel that never forwards must still fail");
+    assert_eq!(err.reason, "ssh_handshake_failed");
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "retries must be bounded, took {:?}",
+        started.elapsed()
+    );
+    rt.stop_server_tunnel("srv-b", Duration::from_secs(2))
+        .unwrap();
+}
+
+#[test]
+fn direct_ssh_connect_failures_are_not_retried() {
+    let fx = SshdFixture::start();
+    let tmp = TempDir::new().unwrap();
+    let rt = open_direct_runtime_on_port(&fx, &tmp, free_port());
+    let cancel = CancelToken::new();
+    let started = std::time::Instant::now();
+    let err = rt
+        .open_remote_browser("srv-direct", Some("/"), &cancel)
+        .expect_err("closed port must fail");
+    assert_eq!(err.reason, "ssh_connect_failed");
+    assert!(
+        started.elapsed() < Duration::from_millis(400),
+        "direct SSH must fail fast without retry backoff, took {:?}",
+        started.elapsed()
+    );
+}
+
+fn open_direct_runtime_on_port(
+    fx: &SshdFixture,
+    tmp: &TempDir,
+    port: u16,
+) -> ProfileRuntime<MemoryKeyringBackend> {
+    let cfg = tmp.path().join("cfg");
+    let desktop = tmp.path().join("desktop");
+    let kh = tmp.path().join("known_hosts");
+    fx.write_known_hosts(&kh, &[port]);
+    ssh_fixture::seed_default_boundary_profile(
+        &cfg,
+        json!({
+            "servers": [{
+                "id": "srv-direct",
+                "name": "Direct",
+                "host": "127.0.0.1",
+                "connectionMethod": "ssh",
+                "sshPort": port,
+                "sshUser": fx.user,
+            }]
+        }),
+        &fx.boundary_script,
+    );
+    let rt = ProfileRuntime::open_with_backend(
+        &ProfileLocationInput {
+            config_dir: Some(&cfg),
+            desktop_config_dir: Some(&desktop),
+            profile: Some("default"),
+            ..Default::default()
+        },
+        "test",
+        MemoryKeyringBackend::default(),
+    )
+    .unwrap();
+    rt.set_ssh_paths(Some(kh), Some(fx.user_key.clone()));
+    rt
+}
+
+#[test]
+fn scp_upload_over_fresh_boundary_tunnel_retries_transient_preflight_failures() {
+    let fx = SshdFixture::start();
+    let tmp = TempDir::new().unwrap();
+    let (rt, _port) = boundary_runtime_for_target(&fx, &tmp, "flaky-first-conn");
+    let cancel = CancelToken::new();
+    rt.start_server_tunnel("srv-b", &cancel).unwrap();
+
+    let local = tmp.path().join("flaky-upload.txt");
+    fs::write(&local, b"through-a-flaky-tunnel").unwrap();
+    let entry = rt
+        .scp_upload(
+            "srv-b",
+            local.to_str().unwrap(),
+            fx.remote_sandbox.to_str().unwrap(),
+            false,
+            &cancel,
+        )
+        .expect("SCP pre-flight host-key check must retry transient tunnel failures");
+    assert_eq!(entry.state, ScpTransferState::Success);
+    assert_eq!(
+        fs::read(fx.remote_sandbox.join("flaky-upload.txt")).unwrap(),
+        b"through-a-flaky-tunnel"
+    );
+    rt.stop_server_tunnel("srv-b", Duration::from_secs(2))
+        .unwrap();
+}

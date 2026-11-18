@@ -210,6 +210,57 @@ pub(crate) fn connect_tcp_timeout(
     })
 }
 
+/// Backoff before each retry of a transient SSH connect to a freshly started Boundary tunnel
+/// (the local port can accept connections slightly before the upstream session forwards).
+const TUNNEL_CONNECT_BACKOFF: [Duration; 3] = [
+    Duration::from_millis(250),
+    Duration::from_millis(500),
+    Duration::from_millis(1000),
+];
+
+/// Returns the cancel token to retry with when `server` is reached through a Boundary tunnel.
+/// Direct SSH servers return `None` so connect failures stay immediate.
+pub(crate) fn tunnel_retry_cancel<'a>(
+    server: &Server,
+    cancel: &'a CancelToken,
+) -> Option<&'a CancelToken> {
+    (server.connection_method == ConnectionMethod::Boundary).then_some(cancel)
+}
+
+fn is_transient_connect_error(err: &CoreError) -> bool {
+    err.retryable && matches!(err.reason, "ssh_handshake_failed" | "ssh_connect_failed")
+}
+
+/// Runs an SSH connect attempt, retrying bounded times with backoff on transient
+/// connect/handshake failures when `retry` is `Some` (Boundary tunnels only).
+/// Authentication, host-key and other non-transient errors are returned immediately.
+pub(crate) fn retry_transient_connect<T>(
+    retry: Option<&CancelToken>,
+    mut attempt: impl FnMut() -> Result<T, CoreError>,
+) -> Result<T, CoreError> {
+    let Some(cancel) = retry else {
+        return attempt();
+    };
+    let mut backoffs = TUNNEL_CONNECT_BACKOFF.iter();
+    loop {
+        match attempt() {
+            Err(err) if is_transient_connect_error(&err) => {
+                let Some(delay) = backoffs.next() else {
+                    return Err(err);
+                };
+                let deadline = Instant::now() + *delay;
+                while Instant::now() < deadline {
+                    if cancel.is_cancelled() {
+                        return Err(CoreError::interrupted("SSH connect retry cancelled"));
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                }
+            }
+            other => return other,
+        }
+    }
+}
+
 pub(crate) fn host_key_untrusted(message: String) -> CoreError {
     CoreError::capability_unavailable("host_key_untrusted", message, "verify_host_key")
 }
@@ -554,9 +605,12 @@ fn build_verified_scp_args<B: KeyringBackend>(
     remote_path: &str,
     recursive: bool,
     download: bool,
+    tunnel_retry: Option<&CancelToken>,
 ) -> Result<Vec<String>, CoreError> {
     let (kh_path, id_path) = rt.resolved_ssh_paths();
-    verify_ssh_host_key(&endpoint.host, endpoint.port, kh_path.as_deref())?;
+    retry_transient_connect(tunnel_retry, || {
+        verify_ssh_host_key(&endpoint.host, endpoint.port, kh_path.as_deref())
+    })?;
     let mut args = build_scp_transport_args(endpoint, kh_path.as_deref(), id_path.as_deref())?;
     if recursive {
         args.push("-r".to_string());
@@ -632,7 +686,8 @@ fn prepare_upload_spec<'a, B: KeyringBackend>(
         "scp_upload"
     };
     let (endpoint, lease) = prepare_scp_endpoint(rt, &server, op, async_mode, cancel)?;
-    let args = build_verified_scp_args(rt, &endpoint, &local, &remote, rec, false)?;
+    let retry = tunnel_retry_cancel(&server, cancel);
+    let args = build_verified_scp_args(rt, &endpoint, &local, &remote, rec, false, retry)?;
     let spec = ScpJobSpec {
         server_id: server.id.clone(),
         title: format!("Upload to {}", server.name),
@@ -670,7 +725,8 @@ pub(crate) fn prepare_download_spec<'a, B: KeyringBackend>(
         "scp_download"
     };
     let (endpoint, lease) = prepare_scp_endpoint(rt, &server, op, async_mode, cancel)?;
-    let args = build_verified_scp_args(rt, &endpoint, &local, &remote, req.recursive, true)?;
+    let retry = tunnel_retry_cancel(&server, cancel);
+    let args = build_verified_scp_args(rt, &endpoint, &local, &remote, req.recursive, true, retry)?;
     let spec = ScpJobSpec {
         server_id: server.id.clone(),
         title: format!("Download from {}", server.name),
