@@ -58,6 +58,8 @@ Apply needs a real TTY and is intentionally unavailable over MCP and under `--no
 scpctl --config-dir <DIR> --profile <NAME> settings import --input <FILE> --apply --interactive --passphrase-file <PPFILE>
 ```
 
+**Local paths trap:** the import preserves the *destination's* paths by default, so a fresh profile ends with blank `openvpnExecutablePath`, `openvpnOvpnPath`, `boundaryCliPath`, `caddyFolder` and `repoRoot` even if the backup had them. If those paths exist on this machine, have the user answer `paths source` (or add `--use-source-paths`), or fix them afterwards with `settings patch` (preview first; path keys only). Do not copy the desktop `sync-local.json` (it holds the MCP token and CC identity). Leave `repoRoot` empty unless the user wants `config sync push` into the shared config repo.
+
 They answer `yes` (other answers: `no`, `sections <list>`, `paths <preserve|source>`, `remap <k=v>`, `show`). Afterwards verify with `server list --json --non-interactive`. MCP and Command Center stay disabled after import by design. Re-importing replaces selected sections; credentials absent from the backup are deleted.
 
 ## Step 4: machine prerequisites the backup does not carry
@@ -69,6 +71,18 @@ SSH/SFTP/SCP always run strict (`StrictHostKeyChecking=yes`, `BatchMode=yes`):
 - For each `connectionMethod: "ssh"` server, check `~/.ssh/known_hosts` (or `SCPCTL_SSH_KNOWN_HOSTS`). If missing, give the user `ssh-keyscan -H <host>` and have them verify the fingerprint.
 - Key auth: `SCPCTL_SSH_IDENTITY_FILE=<key>`. Password auth: backups may not carry SSH passwords (preview lists `server_ssh_password:<id>` as set/delete); user sets them with `scpctl server credentials set --server-id <ID> --interactive`.
 - Boundary servers additionally need the controller reachable and a login; OpenVPN needs sudo with a working password prompt.
+
+## Step 4b: Boundary login (OIDC servers)
+
+Check `config.json` -> `boundary.authKind`. A restored backup does not log you in, and the restored OIDC password/OTP secret are not used by the CLI yet. For `oidc`, ask the user to run, in their own terminal on a desktop session:
+
+```bash
+scpctl --config-dir <DIR> --profile <NAME> boundary auth --interactive
+```
+
+It runs the stock `boundary authenticate oidc`, opens the browser, and the user completes the login (up to 5 minutes); the token is stored as the profile app token. Without `--interactive`, and via MCP `boundary_auth_start`, OIDC is rejected (`webview_oidc_desktop_only` / `browser_oidc_unverified`); only `password` auth works unattended. Verify with `scpctl boundary targets search --json --non-interactive`, never with `status --function-id boundary-auth` (reports `idle` in a fresh process even when logged in). Tokens expire after roughly a day; repeat when calls fail with `Token must be provided via BOUNDARY_TOKEN` or 403. Never print the token.
+
+If the user instead logs in with the plain `boundary authenticate` command, it must carry `-token-name scpctl-<credentialNamespace>` (`profile-meta.json` in the profile dir); the default token name is ignored by scpctl.
 
 ## Step 5: stdio policy
 
@@ -101,3 +115,5 @@ The server holds the profile's `owner.lock` for its lifetime: any other `scpctl`
 | Tool count is 11 | Policy file missing or read-only (step 5) |
 | `profile_owner_conflict` | Stop the other scpctl/MCP process |
 | `POLICY_DENIED` after edit | Policy JSON is corrupt; fix it |
+| Boundary calls: `Token must be provided via BOUNDARY_TOKEN` / 403, or `webview_oidc_desktop_only` | Step 4b: `scpctl boundary auth --interactive` (OIDC login needs a user at the browser) |
+| Import left `openvpnOvpnPath`/`boundaryCliPath`/etc. blank | Default import preserves destination paths; step 3 (`paths source`) or `settings patch` |

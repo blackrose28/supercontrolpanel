@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tempfile::TempDir;
 
-use scp_core::boundary_ops::parse_boundary_targets;
+use scp_core::boundary_ops::{parse_boundary_targets, BoundaryAuthOptions};
 use scp_core::models::{
     BoundaryAuthKind, BoundaryOidcLoginMode, KEYRING_BOUNDARY_APP_TOKEN, KEYRING_BOUNDARY_PASSWORD,
 };
@@ -207,21 +207,46 @@ fn boundary_auth_capability_cleanup() {
     assert_password_auth_succeeds(script_body);
 }
 
-fn assert_oidc_rejected(script_body: &str, mode: BoundaryOidcLoginMode, expected_reason: &str) {
-    let tmp = TempDir::new().unwrap();
-    let cfg = json!({
-        "app": {"defaultTerminalCols": 120, "defaultTerminalRows": 36},
-        "boundary": {
-            "addr": "https://boundary.example.test",
-            "authMethodId": "amoidc_1",
-            "authKind": BoundaryAuthKind::Oidc,
-            "oidcLoginMode": mode
-        }
+fn oidc_cfg(mode: BoundaryOidcLoginMode, auth_method_id: Option<&str>) -> serde_json::Value {
+    let mut boundary = json!({
+        "addr": "https://boundary.example.test",
+        "authKind": BoundaryAuthKind::Oidc,
+        "oidcLoginMode": mode
     });
-    let (rt, _) = open_boundary_runtime(&tmp, cfg, "fake-boundary-oidc", script_body);
+    if let Some(id) = auth_method_id {
+        boundary["authMethodId"] = json!(id);
+    }
+    json!({
+        "app": {"defaultTerminalCols": 120, "defaultTerminalRows": 36},
+        "boundary": boundary
+    })
+}
+
+fn open_oidc_runtime(
+    script_body: &str,
+    mode: BoundaryOidcLoginMode,
+    auth_method_id: Option<&str>,
+) -> (TempDir, ProfileRuntime<MemoryKeyringBackend>) {
+    let tmp = TempDir::new().unwrap();
+    let (rt, _) = open_boundary_runtime(
+        &tmp,
+        oidc_cfg(mode, auth_method_id),
+        "fake-boundary-oidc",
+        script_body,
+    );
+    (tmp, rt)
+}
+
+fn assert_oidc_rejected(script_body: &str, mode: BoundaryOidcLoginMode, expected_reason: &str) {
+    let (_tmp, rt) = open_oidc_runtime(script_body, mode, Some("amoidc_1"));
     let err = rt.start_boundary_auth(&CancelToken::new()).unwrap_err();
     assert_eq!(err.code, "CAPABILITY_UNAVAILABLE");
     assert_eq!(err.reason, expected_reason);
+    assert!(
+        err.message.contains("scpctl boundary auth --interactive"),
+        "rejection must name the interactive fix, got: {}",
+        err.message
+    );
 }
 
 fn assert_password_auth_succeeds(script_body: &str) {
@@ -284,4 +309,110 @@ fn boundary_auth_owned_stop() {
     let _started = rt.start_boundary_auth(&cancel).unwrap();
     assert!(rt.stop_boundary_auth(Duration::from_secs(2)).unwrap());
     assert!(!rt.stop_boundary_auth(Duration::from_secs(2)).unwrap());
+}
+
+fn oidc_login_script(record: &Path) -> String {
+    format!(
+        r#"#!/usr/bin/env python3
+import json, os, sys
+with open({:?}, "a") as f:
+    f.write(json.dumps({{
+        "args": sys.argv[1:],
+        "tname": os.environ.get("BOUNDARY_TOKEN_NAME"),
+        "addr": os.environ.get("BOUNDARY_ADDR"),
+        "pw": os.environ.get("BOUNDARY_AUTH_PASSWORD"),
+    }}) + "\n")
+print("Opening returned authentication URL in your browser...")
+print(json.dumps({{"item": {{"attributes": {{"token": "tbat_from_oidc"}}}}}}))
+"#,
+        record.to_string_lossy()
+    )
+}
+
+#[test]
+fn boundary_oidc_login_runs_stock_cli_when_interactive_opted_in() {
+    for mode in [
+        BoundaryOidcLoginMode::Automated,
+        BoundaryOidcLoginMode::Browser,
+    ] {
+        let record_dir = TempDir::new().unwrap();
+        let record = record_dir.path().join("calls.jsonl");
+        let (_tmp, rt) = open_oidc_runtime(&oidc_login_script(&record), mode, Some("amoidc_1"));
+
+        // Default (non-interactive / MCP) entry point still rejects OIDC.
+        assert_eq!(
+            rt.start_boundary_auth(&CancelToken::new())
+                .unwrap_err()
+                .code,
+            "CAPABILITY_UNAVAILABLE"
+        );
+
+        let started = rt
+            .start_boundary_auth_with_options(
+                &CancelToken::new(),
+                BoundaryAuthOptions {
+                    allow_browser_oidc: true,
+                },
+            )
+            .unwrap();
+        assert!(rt
+            .supervisor()
+            .wait_for_session_exit(&started.session_id, Duration::from_secs(5)));
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let st = rt.get_function_status(&started.function_id).unwrap();
+            if st.session_id.is_none() || st.state == "authenticated" {
+                assert_eq!(st.state, "authenticated");
+                assert_eq!(st.boundary_token_source.as_deref(), Some("app"));
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "status never became authenticated"
+            );
+            std::thread::sleep(Duration::from_millis(15));
+        }
+        assert_eq!(
+            rt.read_optional_secret(KEYRING_BOUNDARY_APP_TOKEN)
+                .as_deref(),
+            Some("tbat_from_oidc")
+        );
+
+        let call: serde_json::Value =
+            serde_json::from_str(fs::read_to_string(&record).unwrap().lines().next().unwrap())
+                .unwrap();
+        assert_eq!(
+            call["args"],
+            json!([
+                "authenticate",
+                "oidc",
+                "-auth-method-id",
+                "amoidc_1",
+                "-format",
+                "json"
+            ])
+        );
+        assert_eq!(
+            call["tname"],
+            format!("scpctl-{}", rt.credential_namespace())
+        );
+        assert_eq!(call["addr"], "https://boundary.example.test");
+        assert!(call["pw"].is_null(), "no password may be injected for OIDC");
+    }
+}
+
+#[test]
+fn boundary_oidc_interactive_requires_complete_config() {
+    let (_tmp, rt) = open_oidc_runtime("#!/bin/sh\nexit 0\n", BoundaryOidcLoginMode::Browser, None);
+    let err = rt
+        .start_boundary_auth_with_options(
+            &CancelToken::new(),
+            BoundaryAuthOptions {
+                allow_browser_oidc: true,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(err.code, "INVALID_ARGUMENTS");
+    assert_eq!(err.reason, "boundary_config_incomplete");
 }

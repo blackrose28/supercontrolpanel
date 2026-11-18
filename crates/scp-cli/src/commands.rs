@@ -200,7 +200,9 @@ fn dispatch_runtime_ops(
         Subcommand::BoundaryTargetsSearch { filter, limit } => Ok(json!({
             "targets": rt.search_boundary_targets(filter.as_deref(), limit)?
         })),
-        Subcommand::BoundaryAuth { .. } => crate::runtime_cmds::run_boundary_auth(rt),
+        Subcommand::BoundaryAuth { interactive } => {
+            crate::runtime_cmds::run_boundary_auth(rt, interactive)
+        }
         cmd @ (Subcommand::ScpUpload { .. } | Subcommand::ScpDownload { .. }) => {
             crate::runtime_cmds::run_scp(rt, &cmd)
         }

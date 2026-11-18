@@ -1,6 +1,7 @@
 use crate::args::{CommandRequest, Subcommand};
+use scp_core::boundary_ops::BoundaryAuthOptions;
 use scp_core::error::CoreError;
-use scp_core::models::{StartFunctionResult, BOUNDARY_AUTH_FUNCTION_ID};
+use scp_core::models::{BoundaryAuthKind, StartFunctionResult, BOUNDARY_AUTH_FUNCTION_ID};
 use scp_core::openvpn_ops::detect_openvpn_executable_checked;
 use scp_core::profile::OwnedProfileLocation;
 use scp_core::runtime::ProfileRuntime;
@@ -20,6 +21,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const BOUNDARY_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
+/// A human completes the OIDC login (username, password, OTP) in a browser.
+const BOUNDARY_INTERACTIVE_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 
 struct CancelPump {
     done: Arc<AtomicBool>,
@@ -185,18 +188,47 @@ fn resolve_self_exited_status(
     }
 }
 
-pub fn run_boundary_auth(rt: &ProfileRuntime<OsKeyringBackend>) -> Result<Value, CoreError> {
+/// Tells an interactive user to finish the OIDC login; stderr keeps `--json` stdout pure.
+fn announce_browser_login(
+    rt: &ProfileRuntime<OsKeyringBackend>,
+    interactive: bool,
+    wait: Duration,
+) {
+    let is_oidc = rt
+        .get_app_config()
+        .is_ok_and(|cfg| cfg.boundary.auth_kind == BoundaryAuthKind::Oidc);
+    if interactive && is_oidc {
+        eprintln!(
+            "Complete the Boundary login in your browser (waiting up to {} min)...",
+            wait.as_secs() / 60
+        );
+    }
+}
+
+pub fn run_boundary_auth(
+    rt: &ProfileRuntime<OsKeyringBackend>,
+    interactive: bool,
+) -> Result<Value, CoreError> {
     let watcher = install_signal_watcher()?;
     let cancel = CancelToken::new();
     let pump = CancelPump::spawn(&watcher, &cancel);
-    let started = match rt.start_boundary_auth(&cancel) {
+    let options = BoundaryAuthOptions {
+        allow_browser_oidc: interactive,
+    };
+    let timeout = if interactive {
+        BOUNDARY_INTERACTIVE_AUTH_TIMEOUT
+    } else {
+        BOUNDARY_AUTH_TIMEOUT
+    };
+    announce_browser_login(rt, interactive, timeout);
+    let started = match rt.start_boundary_auth_with_options(&cancel, options) {
         Ok(s) => s,
         Err(err) => {
             drop(pump);
             return Err(map_start_err(&watcher, err));
         }
     };
-    let outcome = wait_boundary_auth_loop(rt, &watcher, &started);
+    let outcome = wait_boundary_auth_loop(rt, &watcher, &started, timeout);
     drop(pump);
     outcome
 }
@@ -205,8 +237,9 @@ fn wait_boundary_auth_loop(
     rt: &ProfileRuntime<OsKeyringBackend>,
     watcher: &SignalWatcher,
     started: &StartFunctionResult,
+    timeout: Duration,
 ) -> Result<Value, CoreError> {
-    let deadline = Instant::now() + BOUNDARY_AUTH_TIMEOUT;
+    let deadline = Instant::now() + timeout;
     loop {
         let exited = rt
             .supervisor()

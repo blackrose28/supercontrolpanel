@@ -37,7 +37,7 @@ Test commands (run in the applicable package):
 - Admin frontend: Vitest + React Testing Library, `npm test -- --run`; `*.test.ts` / `*.test.tsx`.
 - NestJS backend: Jest, `npm test` (filter with `-- --testPathPattern=<file>`); `*.spec.ts`.
 - Tauri backend: `cargo test` in `src-tauri`; `#[cfg(test)]` modules or `tests/`.
-- Standalone CLI workspace: `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`, `scp-mcp` default vs `--all-features`, and `node --test experiments/cli-stdio-slice0/tests/slice{1_production_stdio,4_production_stdio,5_release_qualification}.mjs experiments/cli-stdio-slice0/tests/cli_install.mjs`.
+- Standalone CLI workspace: `cargo test --locked -p scp-core -p scp-mcp -p scp-cli`, `scp-mcp` default vs `--all-features`, and `node --test experiments/cli-stdio-slice0/tests/slice{1_production_stdio,4_production_stdio,5_release_qualification}.mjs experiments/cli-stdio-slice0/tests/cli_install.mjs`. The Node suites need `target/release/scpctl` and the fixture `target/release/examples/sshd_fixture_daemon` (`cargo build --release --locked -p scp-cli && cargo build --release --locked -p scp-core --examples`); they assume a host without OpenVPN on `PATH` and without a running Secret Service, so expect environment-only failures elsewhere.
 
 Use Ripwire from the repository root before broad code searches/whole-file reads:
 

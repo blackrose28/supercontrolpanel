@@ -191,6 +191,20 @@ pub(crate) fn refresh_boundary_status_impl<B: KeyringBackend>(
     rt.get_function_status(BOUNDARY_AUTH_FUNCTION_ID)
 }
 
+/// Options for starting supervised Boundary authentication.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BoundaryAuthOptions {
+    /// Allow OIDC through the stock Boundary CLI browser login. Only set when an interactive
+    /// user is present to complete the login; headless/MCP callers keep the default `false`.
+    pub allow_browser_oidc: bool,
+}
+
+/// How a started Boundary login authenticates.
+enum BoundaryAuthPlan {
+    Password(String),
+    BrowserOidc,
+}
+
 pub(crate) fn start_boundary_auth_impl<B: KeyringBackend + 'static>(
     rt: &ProfileRuntime<B>,
     cancel: &CancelToken,
@@ -204,11 +218,29 @@ pub(crate) fn start_boundary_auth_with_size_impl<B: KeyringBackend + 'static>(
     rows: Option<u16>,
     cancel: &CancelToken,
 ) -> Result<StartFunctionResult, CoreError> {
+    start_boundary_auth_full_impl(rt, cols, rows, cancel, BoundaryAuthOptions::default())
+}
+
+pub(crate) fn start_boundary_auth_with_options_impl<B: KeyringBackend + 'static>(
+    rt: &ProfileRuntime<B>,
+    cancel: &CancelToken,
+    options: BoundaryAuthOptions,
+) -> Result<StartFunctionResult, CoreError> {
+    start_boundary_auth_full_impl(rt, None, None, cancel, options)
+}
+
+fn start_boundary_auth_full_impl<B: KeyringBackend + 'static>(
+    rt: &ProfileRuntime<B>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+    cancel: &CancelToken,
+    options: BoundaryAuthOptions,
+) -> Result<StartFunctionResult, CoreError> {
     let cfg = rt.get_app_config()?;
-    let password = validate_boundary_auth_mode(rt, &cfg)?;
+    let plan = validate_boundary_auth_mode(rt, &cfg, options)?;
     let sync = rt.get_sync_settings()?;
     let exe = resolve_checked_boundary(&sync.boundary_cli_path)?;
-    let mut launch = build_boundary_auth_launch(rt, &cfg, exe, &password);
+    let mut launch = build_boundary_auth_launch(rt, &cfg, exe, &plan);
     if let SpawnMode::Pty { cols: c, rows: r } = &mut launch.mode {
         if let Some(cols) = cols {
             *c = cols.max(80);
@@ -218,34 +250,57 @@ pub(crate) fn start_boundary_auth_with_size_impl<B: KeyringBackend + 'static>(
         }
     }
     let out_buf = Arc::new(Mutex::new(String::new()));
+    let (password, label) = match plan {
+        BoundaryAuthPlan::Password(pw) => (Some(pw), "Boundary password login"),
+        BoundaryAuthPlan::BrowserOidc => (None, "Boundary OIDC login"),
+    };
     let hooks = build_boundary_auth_hooks(rt, password, Arc::clone(&out_buf));
-    let session_id =
-        rt.start_supervised_with_hooks(launch, cancel, None, "Boundary password login", hooks)?;
+    let session_id = rt.start_supervised_with_hooks(launch, cancel, None, label, hooks)?;
     Ok(StartFunctionResult {
         function_id: BOUNDARY_AUTH_FUNCTION_ID.to_string(),
         session_id,
     })
 }
 
+const OIDC_NEEDS_INTERACTIVE_AUTOMATED: &str = "Automated Boundary OIDC requires the desktop hidden webview. Run `scpctl boundary auth --interactive` to log in through your browser instead";
+const OIDC_NEEDS_INTERACTIVE_BROWSER: &str = "Boundary OIDC login needs an interactive user. Run `scpctl boundary auth --interactive` to log in through your browser";
+
 fn validate_boundary_auth_mode<B: KeyringBackend>(
     rt: &ProfileRuntime<B>,
     cfg: &AppConfig,
-) -> Result<String, CoreError> {
+    options: BoundaryAuthOptions,
+) -> Result<BoundaryAuthPlan, CoreError> {
     match cfg.boundary.auth_kind {
+        BoundaryAuthKind::Oidc if options.allow_browser_oidc => {
+            validate_oidc_inputs(cfg)?;
+            Ok(BoundaryAuthPlan::BrowserOidc)
+        }
         BoundaryAuthKind::Oidc => match cfg.boundary.oidc_login_mode {
             BoundaryOidcLoginMode::Automated => Err(CoreError::capability_unavailable(
                 "webview_oidc_desktop_only",
-                "Automated Boundary OIDC requires the desktop hidden webview",
+                OIDC_NEEDS_INTERACTIVE_AUTOMATED,
                 "use_password_auth_or_desktop",
             )),
             BoundaryOidcLoginMode::Browser => Err(CoreError::capability_unavailable(
                 "browser_oidc_unverified",
-                "Browser Boundary OIDC is not verified on the headless CLI",
+                OIDC_NEEDS_INTERACTIVE_BROWSER,
                 "use_password_auth_or_desktop",
             )),
         },
-        BoundaryAuthKind::Password => validate_password_auth_inputs(rt, cfg),
+        BoundaryAuthKind::Password => {
+            validate_password_auth_inputs(rt, cfg).map(BoundaryAuthPlan::Password)
+        }
     }
+}
+
+fn validate_oidc_inputs(cfg: &AppConfig) -> Result<(), CoreError> {
+    if cfg.boundary.addr.trim().is_empty() || cfg.boundary.auth_method_id.trim().is_empty() {
+        return Err(CoreError::invalid_arguments(
+            "boundary_config_incomplete",
+            "Boundary addr and authMethodId are required for OIDC auth",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_password_auth_inputs<B: KeyringBackend>(
@@ -278,26 +333,40 @@ fn build_boundary_auth_launch<B: KeyringBackend>(
     rt: &ProfileRuntime<B>,
     cfg: &AppConfig,
     exe: String,
-    password: &str,
+    plan: &BoundaryAuthPlan,
 ) -> ChildLaunch {
     let (mut env, mut env_remove) = build_boundary_env(cfg, rt.credential_namespace(), None);
-    env.push(("BOUNDARY_AUTH_PASSWORD".to_string(), password.to_string()));
     env_remove.push("BOUNDARY_TOKEN".to_string());
-    ChildLaunch {
-        function_id: BOUNDARY_AUTH_FUNCTION_ID.to_string(),
-        program: exe,
-        args: vec![
+    let method_id = cfg.boundary.auth_method_id.trim().to_string();
+    let args = match plan {
+        BoundaryAuthPlan::Password(password) => {
+            env.push(("BOUNDARY_AUTH_PASSWORD".to_string(), password.clone()));
+            vec![
+                "authenticate".to_string(),
+                "password".to_string(),
+                "-auth-method-id".to_string(),
+                method_id,
+                "-login-name".to_string(),
+                cfg.boundary.login_name.trim().to_string(),
+                "-password".to_string(),
+                "env://BOUNDARY_AUTH_PASSWORD".to_string(),
+                "-format".to_string(),
+                "json".to_string(),
+            ]
+        }
+        BoundaryAuthPlan::BrowserOidc => vec![
             "authenticate".to_string(),
-            "password".to_string(),
+            "oidc".to_string(),
             "-auth-method-id".to_string(),
-            cfg.boundary.auth_method_id.trim().to_string(),
-            "-login-name".to_string(),
-            cfg.boundary.login_name.trim().to_string(),
-            "-password".to_string(),
-            "env://BOUNDARY_AUTH_PASSWORD".to_string(),
+            method_id,
             "-format".to_string(),
             "json".to_string(),
         ],
+    };
+    ChildLaunch {
+        function_id: BOUNDARY_AUTH_FUNCTION_ID.to_string(),
+        program: exe,
+        args,
         cwd: None,
         env,
         env_remove,
@@ -312,7 +381,7 @@ fn build_boundary_auth_launch<B: KeyringBackend>(
 
 fn build_boundary_auth_hooks<B: KeyringBackend + 'static>(
     rt: &ProfileRuntime<B>,
-    password: String,
+    password: Option<String>,
     out_buf: Arc<Mutex<String>>,
 ) -> SuperviseHooks {
     let out_capture = Arc::clone(&out_buf);
@@ -327,6 +396,9 @@ fn build_boundary_auth_hooks<B: KeyringBackend + 'static>(
                 buf.drain(..trim);
             }
         }
+        let Some(password) = password.as_deref() else {
+            return;
+        };
         if chunk.to_lowercase().contains("password") && !sent_pw.swap(true, Ordering::SeqCst) {
             let sup_w = Arc::clone(&sup);
             let sid_w = sid.to_string();

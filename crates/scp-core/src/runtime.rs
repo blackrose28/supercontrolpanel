@@ -847,6 +847,19 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         start_boundary_auth_impl(self, cancel)
     }
 
+    /// Starts supervised Boundary authentication with explicit options, e.g. allowing the
+    /// stock-CLI browser OIDC login for an interactive user.
+    pub fn start_boundary_auth_with_options(
+        &self,
+        cancel: &CancelToken,
+        options: crate::boundary_ops::BoundaryAuthOptions,
+    ) -> Result<StartFunctionResult, CoreError>
+    where
+        B: 'static,
+    {
+        crate::boundary_ops::start_boundary_auth_with_options_impl(self, cancel, options)
+    }
+
     /// Starts supervised Boundary authentication with optional PTY dimensions.
     pub fn start_boundary_auth_with_size(
         &self,

@@ -190,7 +190,7 @@ This walks you through letting an AI agent (Claude Code, or any MCP client) rest
 | **Tools and files the backup points to** | A backup holds settings, not binaries. Paths such as `boundaryCliPath`, `openvpnExecutablePath`, `openvpnOvpnPath`, `caddyFolder` and `repoRoot` may not exist on the new machine, and `external files` in the preview shows `existsHere: false`. | Install the tools (`boundary`, `openvpn`, `caddy`, `git`), copy the `.ovpn`/key files, then either place them at the same paths or import with `--remap <KEY=PATH>` / fix them later with `settings patch`. |
 | **SSH passwords** | Saved SSH passwords are not always in a backup; the preview lists `server_ssh_password:<id>` as `set` or `delete`. | Set missing ones with `scpctl server credentials set --server-id <ID> --interactive` or the `server_ssh_password_set` MCP tool. |
 
-Boundary-routed servers also need the Boundary controller reachable and a login (OIDC credentials are restored from the backup). OpenVPN needs `sudo` with a working password prompt on Linux/macOS. `server rdp`, `config_sync_pull` and `config_git_pull/push` are not available over stdio.
+Boundary-routed servers also need the Boundary controller reachable and a login. For OIDC servers log in with `scpctl boundary auth --interactive` (see [Boundary OIDC login on the CLI](#boundary-oidc-login-on-the-cli)); restored OIDC credentials are not used by the CLI yet. OpenVPN needs `sudo` with a working password prompt on Linux/macOS. `server rdp`, `config_sync_pull` and `config_git_pull/push` are not available over stdio.
 
 #### 2. Preview the import (safe, read-only; the agent can run this)
 
@@ -208,6 +208,8 @@ Check `data.servers`, `data.sections`, `data.credentialActions` (`set` / `keep` 
 scpctl --config-dir ~/.config/scpctl --profile ops settings import \
   --input ./backup.scpbak --apply --interactive --passphrase-file ~/.scp-passphrase
 ```
+
+**Local paths:** by default the import *preserves the destination's* executable/OVPN/CLI/Caddy/repo paths, so on a fresh profile they end up blank even if the backup had them. Answer `paths source` (or pass `--use-source-paths` / `--remap <KEY=PATH>`) when those paths exist on this machine, or fix them afterwards with `settings patch` (path keys only; it cannot change MCP/CC fields). Never copy the desktop `sync-local.json` wholesale: it carries the MCP token and Command Center identity.
 
 Review the preview, then answer `yes`. Other answers: `no`, `sections <list>`, `paths <preserve|source>`, `remap <key=path>`, `show`. MCP and Command Center stay disabled after import by design.
 
@@ -265,6 +267,22 @@ passphrases or tokens, and do not run anything outside this profile.
 6. Summarize failures with their error code and reason, and what I should do.
 ```
 
+#### Boundary OIDC login on the CLI
+
+For `authKind: "oidc"` (either `oidcLoginMode`) run, in a terminal with a desktop session:
+
+```sh
+scpctl boundary auth --interactive
+```
+
+It runs the stock `boundary authenticate oidc` for the configured auth method; the browser opens, **you complete the login**, and the token is stored as the profile's app token, the same store password login uses. No token name or Boundary flags to remember. The wait is up to 5 minutes.
+
+- Without `--interactive`, and over MCP (`boundary_auth_start`), OIDC is still rejected with `CAPABILITY_UNAVAILABLE` (`webview_oidc_desktop_only` / `browser_oidc_unverified`) because no user is present to finish the browser step. The error text names the fix. Password auth works everywhere.
+- The desktop's *automated* login (hidden webview using the saved OIDC password and OTP secret) is not available in the CLI yet; the restored OIDC credentials are unused. A headless version is designed in [`STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md`](docs/mcp/STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md).
+- Verify with `scpctl boundary targets search --json --non-interactive` (or MCP `boundary_search_targets`). Do **not** use `scpctl status --function-id boundary-auth` as the check: it reports `idle` with no token source in a fresh process even when the token is valid.
+- Tokens expire (about 24 hours on the tested controller); log in again when searches fail with `Token must be provided via BOUNDARY_TOKEN` or HTTP 403.
+- If you ever use the stock `boundary authenticate` by hand instead, it must use `-token-name scpctl-<credentialNamespace>` (from `profile-meta.json`); the default name `default` is ignored by `scpctl`.
+
 #### Verify and troubleshoot
 
 - Sanity checks: `scpctl schema --json` (contracts), `scpctl capabilities --json` (keyring, available operations, stdio policy), `scpctl status --json`.
@@ -277,6 +295,7 @@ passphrases or tokens, and do not run anything outside this profile.
 | `POLICY_DENIED` | Widen `stdio-policy.json` (step 4), or the file is corrupt. |
 | Tool count is `11`, not `41` | The policy file is missing or read-only. |
 | `profile_owner_conflict` | Another `scpctl` or MCP server owns the profile. Stop it first. |
+| `Token must be provided via BOUNDARY_TOKEN ...` / 403 on Boundary calls | No Boundary token yet or it expired. Run `scpctl boundary auth --interactive`; see [Boundary OIDC login on the CLI](#boundary-oidc-login-on-the-cli). |
 | `Invalid tool arguments` (`-32602`) | Wrong or extra arguments; the schemas are strict. Use `tools/list` or `scpctl schema --command <name> --json`. |
 
 See the [Agent guide](docs/mcp/STANDALONE_CLI_AGENT_GUIDE.md) for the full contracts, JSON envelope and transport limits.

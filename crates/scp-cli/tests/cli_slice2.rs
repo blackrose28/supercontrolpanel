@@ -206,6 +206,28 @@ else:
     assert_eq!(rows[1]["id"], "t2");
 }
 
+fn assert_interactive_oidc_login(env: &TestEnv, profile: &str) {
+    let out = env.run(
+        Some(profile),
+        &["boundary", "auth", "--interactive", "--json"],
+        &[],
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "{profile} stderr={stderr}");
+    assert!(
+        stderr.contains("Complete the Boundary login in your browser"),
+        "interactive OIDC must tell the user to finish the browser login, got: {stderr}"
+    );
+    let body = parse_single_json(&out);
+    assert_eq!(body["data"]["state"], "authenticated");
+    assert_eq!(body["data"]["boundaryTokenSource"], "app");
+    let raw = format!("{}{stderr}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        !raw.contains("tbat_cli_pw_tok"),
+        "token must not be printed"
+    );
+}
+
 #[test]
 fn cli_boundary_auth_modes() {
     let env = TestEnv::new();
@@ -239,16 +261,20 @@ fn cli_boundary_auth_modes() {
         sync.clone(),
         json!({ "servers": [] }),
     );
-    let br_out = env.run(
-        Some("oidc-browser"),
-        &["boundary", "auth", "--interactive", "--json"],
-        &[],
-    );
+    // Without --interactive OIDC is still rejected, and the message names the fix.
+    let br_out = env.run(Some("oidc-browser"), &["boundary", "auth", "--json"], &[]);
     assert_eq!(br_out.status.code(), Some(4));
-    assert_eq!(
-        parse_single_json(&br_out)["error"]["reason"],
-        "browser_oidc_unverified"
-    );
+    let br_body = parse_single_json(&br_out);
+    assert_eq!(br_body["error"]["reason"], "browser_oidc_unverified");
+    assert!(br_body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("scpctl boundary auth --interactive"));
+
+    // With --interactive both OIDC modes run the stock Boundary login and store the token.
+    for profile in ["oidc-browser", "oidc-auto"] {
+        assert_interactive_oidc_login(&env, profile);
+    }
 
     env.seed_profile(
         "pw",
@@ -264,6 +290,16 @@ fn cli_boundary_auth_modes() {
         }),
         sync,
         json!({ "servers": [] }),
+    );
+    let pw_interactive = env.run(
+        Some("pw"),
+        &["boundary", "auth", "--interactive", "--json"],
+        &[],
+    );
+    assert!(pw_interactive.status.success());
+    assert!(
+        !String::from_utf8_lossy(&pw_interactive.stderr).contains("browser"),
+        "password login must not mention a browser"
     );
     let pw_out = env.run(Some("pw"), &["boundary", "auth", "--json"], &[]);
     assert!(

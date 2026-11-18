@@ -56,6 +56,7 @@ Tool failures return `isError: true` with a text starting `<CODE>: ...`; protoco
 | Result | Meaning / next step |
 | --- | --- |
 | `NOT_FOUND` | Unknown server/transfer/function id; re-list |
+| Boundary: `Token must be provided via BOUNDARY_TOKEN`, HTTP 403, `webview_oidc_desktop_only` or `browser_oidc_unverified` | No usable Boundary login. For `authKind: oidc` the MCP server cannot log in (a user must finish a browser step): ask the user to run `scpctl boundary auth --interactive` in a terminal (scpctl-setup step 4b), then retry. `function_status_get boundary-auth` reporting `idle` does **not** mean logged out; check with `boundary_search_targets`. Do not call `boundary_auth_start` for OIDC |
 | `INVALID_ARGUMENTS` | Bad or protected field, missing file, bad id; fix input, do not retry unchanged |
 | `POLICY_DENIED` | Category not allowed by policy, or policy file corrupt; ask user (scpctl-setup) |
 | `CAPABILITY_UNAVAILABLE` | Often untrusted SSH host key (`host_key_untrusted`), missing keyring/binary, or an excluded op. The MCP text is generic and has no reason code. Ask the user to run the same operation via the CLI with `--json` to see `reason` (they must stop this MCP server first because of `owner.lock`, or use a second profile), or check `known_hosts` |

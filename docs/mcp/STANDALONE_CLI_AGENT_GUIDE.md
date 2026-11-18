@@ -32,6 +32,15 @@
    - Stdio MCP: `server_get`, `scp_transfer_list`, `scp_transfer_get`, or `scp://status/*` resources.
    Retrying with a stale `--expected-revision` deterministically fails with exit `5` (`CONFLICT`).
 
+## Boundary OIDC login
+
+- **Interactive (works today):** `scpctl boundary auth --interactive` runs the stock `boundary authenticate oidc` for the profile's auth method (both `oidcLoginMode` values). The user completes the login in the browser (up to 5 minutes); the token is stored as the profile app token. Ask the user to run it; agents cannot finish the browser step.
+- **Non-interactive / MCP:** `boundary auth` without `--interactive` and `boundary_auth_start` still return `CAPABILITY_UNAVAILABLE` for OIDC (`webview_oidc_desktop_only` for `automated`, `browser_oidc_unverified` for `browser`); only password auth runs unattended. A restored backup does not change this, and the restored OIDC password/OTP secret are not used by the CLI yet.
+- **Verify** with `boundary targets search` / MCP `boundary_search_targets`, not `status --function-id boundary-auth` (`idle` with a null token source in a fresh process even when logged in).
+- **Expiry:** tokens last about a day; re-run the login when Boundary calls fail with `Token must be provided via BOUNDARY_TOKEN` or HTTP 403.
+- **Manual stock-CLI login pitfall:** `scpctl` sets `BOUNDARY_TOKEN_NAME=scpctl-<credentialNamespace>` (`build_boundary_env`, pinned by `crates/scp-core/tests/slice2_boundary.rs`). If a user authenticates with plain `boundary authenticate`, they must pass `-token-name scpctl-<credentialNamespace>` (`profile-meta.json`), otherwise the token lands under `default` and `scpctl` ignores it.
+- Unattended login design: [`STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md`](STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md).
+
 ## Headless and non-interactive pre-provisioning
 
 - **Isolated CLI profile:** Always keep standalone CLI state separate from any desktop profile directory. Configure with `--config-dir <DIR>` (or `SCPCTL_CONFIG_DIR`) and `--profile <NAME>` (or `SCPCTL_PROFILE`). Inside `--non-interactive` mode, missing target profiles are never auto-created for mutations (`scpctl capabilities --no-profile --json` probes without creating profile state).
