@@ -1,5 +1,6 @@
 //! Headless Super Control Panel core runtime, profile locking, secrets, and backup engine.
 pub mod backup;
+pub mod boundary_oidc;
 pub mod boundary_ops;
 pub mod caddy_ops;
 pub mod config_ops;

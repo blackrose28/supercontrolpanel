@@ -197,7 +197,7 @@ fn boundary_auth_capability_cleanup() {
     assert_oidc_rejected(
         script_body,
         BoundaryOidcLoginMode::Automated,
-        "webview_oidc_desktop_only",
+        "credentials_missing",
     );
     assert_oidc_rejected(
         script_body,
@@ -352,6 +352,7 @@ fn boundary_oidc_login_runs_stock_cli_when_interactive_opted_in() {
                 &CancelToken::new(),
                 BoundaryAuthOptions {
                     allow_browser_oidc: true,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -410,6 +411,7 @@ fn boundary_oidc_interactive_requires_complete_config() {
             &CancelToken::new(),
             BoundaryAuthOptions {
                 allow_browser_oidc: true,
+                ..Default::default()
             },
         )
         .unwrap_err();

@@ -40,7 +40,7 @@ use crate::ssh_ops::{
 };
 use crate::supervisor::{
     AcceptOutcome, CancelToken, ChildLaunch, ExitCallback, OutputCallback, ProcessSupervisor,
-    SpawnMode,
+    SpawnMode, TaskBody, TaskLaunch,
 };
 use crate::transfer_store::{get_scp_transfer_entry, list_scp_transfer_entries, ScpTransferStore};
 use parking_lot::Mutex;
@@ -555,60 +555,106 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         initial_message: &str,
         hooks: SuperviseHooks,
     ) -> Result<String, CoreError> {
-        let _guard = self.gate.enter()?;
         let function_id = launch.function_id.clone();
-        reserve_launch_slots(&self.runtime_state, &function_id, port)?;
-        let req = ReservedSpawn {
-            launch,
-            port,
-            initial_message,
-            hooks,
-        };
-        let res = self.spawn_reserved(req, cancel);
+        self.start_reserved(
+            &function_id,
+            ReservedSpawn {
+                launch: LaunchKind::Child(launch),
+                port,
+                initial_message,
+                hooks,
+            },
+            cancel,
+        )
+    }
+
+    /// Like [`Self::start_supervised_with_hooks`] but runs `body` on a thread as a task session
+    /// instead of spawning a child process; slots, status and exit handling are shared.
+    pub(crate) fn start_supervised_task_with_hooks(
+        &self,
+        launch: TaskLaunch,
+        cancel: &CancelToken,
+        initial_message: &str,
+        hooks: SuperviseHooks,
+        body: TaskBody,
+    ) -> Result<String, CoreError> {
+        let function_id = launch.function_id.clone();
+        self.start_reserved(
+            &function_id,
+            ReservedSpawn {
+                launch: LaunchKind::Task(launch, body),
+                port: None,
+                initial_message,
+                hooks,
+            },
+            cancel,
+        )
+    }
+
+    /// Reserves the function/port slots, spawns, and releases the slots again on failure.
+    fn start_reserved(
+        &self,
+        function_id: &str,
+        req: ReservedSpawn<'_>,
+        cancel: &CancelToken,
+    ) -> Result<String, CoreError> {
+        let _guard = self.gate.enter()?;
+        let port = req.port;
+        reserve_launch_slots(&self.runtime_state, function_id, port)?;
+        let res = self.spawn_reserved(function_id, req, cancel);
         if res.is_err() {
-            release_launch_slots(&self.runtime_state, &function_id, port);
+            release_launch_slots(&self.runtime_state, function_id, port);
         }
         res
     }
 
     fn spawn_reserved(
         &self,
+        function_id: &str,
         req: ReservedSpawn<'_>,
         cancel: &CancelToken,
     ) -> Result<String, CoreError> {
-        let function_id = req.launch.function_id.clone();
         let state_accept = Arc::clone(&self.runtime_state);
         let sink_accept = Arc::clone(&self.event_sink);
         let initial_msg = req.initial_message.to_string();
+        let accept_function_id = function_id.to_string();
         let port = req.port;
         let on_exit = wrap_exit_callback(
             Arc::clone(&self.runtime_state),
             Arc::clone(&self.event_sink),
-            function_id.clone(),
+            function_id.to_string(),
             port,
             req.hooks.on_exit,
         );
         let on_output = wrap_output_callback(Arc::clone(&self.event_sink), req.hooks.on_output);
-        let spawn_result = self.supervisor.spawn_with_gate(
-            req.launch,
-            cancel,
-            move |session_id| {
-                let Some(status) = try_accept_launch(
-                    &state_accept,
-                    cancel,
-                    &function_id,
-                    port,
-                    session_id,
-                    &initial_msg,
-                ) else {
-                    return AcceptOutcome::CancelledBeforeAccept;
-                };
-                sink_accept.emit(DomainEvent::FunctionStatusChanged { status });
-                AcceptOutcome::Accepted(())
-            },
-            on_exit,
-            Some(on_output),
-        );
+        let on_accept = move |session_id: &str| {
+            let Some(status) = try_accept_launch(
+                &state_accept,
+                cancel,
+                &accept_function_id,
+                port,
+                session_id,
+                &initial_msg,
+            ) else {
+                return AcceptOutcome::CancelledBeforeAccept;
+            };
+            sink_accept.emit(DomainEvent::FunctionStatusChanged { status });
+            AcceptOutcome::Accepted(())
+        };
+        let spawn_result = match req.launch {
+            LaunchKind::Child(launch) => {
+                self.supervisor
+                    .spawn_with_gate(launch, cancel, on_accept, on_exit, Some(on_output))
+            }
+            LaunchKind::Task(launch, body) => self.supervisor.spawn_task_with_gate(
+                launch,
+                cancel,
+                on_accept,
+                on_exit,
+                Some(on_output),
+                body,
+            ),
+        };
         match spawn_result {
             Ok(AcceptOutcome::Accepted(sid)) => Ok(sid),
             Ok(AcceptOutcome::CancelledBeforeAccept) => Err(CoreError::interrupted(
@@ -871,6 +917,14 @@ impl<B: KeyringBackend> ProfileRuntime<B> {
         B: 'static,
     {
         start_boundary_auth_with_size_impl(self, cols, rows, cancel)
+    }
+
+    /// Reports which login a start with `options` would run, without starting anything.
+    pub fn boundary_auth_route(
+        &self,
+        options: crate::boundary_ops::BoundaryAuthOptions,
+    ) -> Result<crate::boundary_ops::BoundaryAuthRoute, CoreError> {
+        crate::boundary_ops::boundary_auth_route_impl(self, options)
     }
 
     /// Stops this runtime's active Boundary authentication process idempotently.
@@ -1274,8 +1328,13 @@ fn update_exit_status(
     Some(updated)
 }
 
+enum LaunchKind {
+    Child(ChildLaunch),
+    Task(TaskLaunch, TaskBody),
+}
+
 struct ReservedSpawn<'a> {
-    launch: ChildLaunch,
+    launch: LaunchKind,
     port: Option<u16>,
     initial_message: &'a str,
     hooks: SuperviseHooks,

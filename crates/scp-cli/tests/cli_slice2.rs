@@ -247,10 +247,12 @@ fn cli_boundary_auth_modes() {
     );
     let auto_out = env.run(Some("oidc-auto"), &["boundary", "auth", "--json"], &[]);
     assert_eq!(auto_out.status.code(), Some(4));
-    assert_eq!(
-        parse_single_json(&auto_out)["error"]["reason"],
-        "webview_oidc_desktop_only"
-    );
+    let auto_body = parse_single_json(&auto_out);
+    assert_eq!(auto_body["error"]["reason"], "credentials_missing");
+    assert!(auto_body["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("scpctl boundary auth --interactive"));
 
     env.seed_profile(
         "oidc-browser",

@@ -74,13 +74,13 @@ SSH/SFTP/SCP always run strict (`StrictHostKeyChecking=yes`, `BatchMode=yes`):
 
 ## Step 4b: Boundary login (OIDC servers)
 
-Check `config.json` -> `boundary.authKind`. A restored backup does not log you in, and the restored OIDC password/OTP secret are not used by the CLI yet. For `oidc`, ask the user to run, in their own terminal on a desktop session:
+Check `config.json` -> `boundary.authKind`. A restored backup does not log you in by itself. For `oidc` with `oidcLoginMode: automated`, the restored OIDC username/password/OTP secret are used by the headless login: run `scpctl --config-dir <DIR> --profile <NAME> boundary auth --json` (needs `curl`); no browser or user. If that fails with `oidc_idp_unsupported`, `oidc_otp_required` or `curl_not_found`, or the mode is `browser`, ask the user to run, in their own terminal on a desktop session:
 
 ```bash
 scpctl --config-dir <DIR> --profile <NAME> boundary auth --interactive
 ```
 
-It runs the stock `boundary authenticate oidc`, opens the browser, and the user completes the login (up to 5 minutes); the token is stored as the profile app token. Without `--interactive`, and via MCP `boundary_auth_start`, OIDC is rejected (`webview_oidc_desktop_only` / `browser_oidc_unverified`); only `password` auth works unattended. Verify with `scpctl boundary targets search --json --non-interactive`, never with `status --function-id boundary-auth` (reports `idle` in a fresh process even when logged in). Tokens expire after roughly a day; repeat when calls fail with `Token must be provided via BOUNDARY_TOKEN` or 403. Never print the token.
+It tries the automated login first and otherwise runs the stock `boundary authenticate oidc`: the browser opens and the user completes the login (up to 5 minutes); the token is stored as the profile app token. Without `--interactive`, `browser` mode and automated mode without saved credentials are rejected (`browser_oidc_unverified` / `credentials_missing`); `password` auth and automated OIDC work unattended (also via MCP `boundary_auth_start`). Verify with `scpctl boundary targets search --json --non-interactive`, never with `status --function-id boundary-auth` (reports `idle` in a fresh process even when logged in). Tokens expire after roughly a day; repeat when calls fail with `Token must be provided via BOUNDARY_TOKEN` or 403. Never print the token.
 
 If the user instead logs in with the plain `boundary authenticate` command, it must carry `-token-name scpctl-<credentialNamespace>` (`profile-meta.json` in the profile dir); the default token name is ignored by scpctl.
 
@@ -115,5 +115,5 @@ The server holds the profile's `owner.lock` for its lifetime: any other `scpctl`
 | Tool count is 11 | Policy file missing or read-only (step 5) |
 | `profile_owner_conflict` | Stop the other scpctl/MCP process |
 | `POLICY_DENIED` after edit | Policy JSON is corrupt; fix it |
-| Boundary calls: `Token must be provided via BOUNDARY_TOKEN` / 403, or `webview_oidc_desktop_only` | Step 4b: `scpctl boundary auth --interactive` (OIDC login needs a user at the browser) |
+| Boundary calls: `Token must be provided via BOUNDARY_TOKEN` / 403, `credentials_missing` or `oidc_*` | Step 4b: `scpctl boundary auth --json` (automated OIDC); if it reports `oidc_idp_unsupported`/`oidc_otp_required` use `--interactive` (user at the browser) |
 | Import left `openvpnOvpnPath`/`boundaryCliPath`/etc. blank | Default import preserves destination paths; step 3 (`paths source`) or `settings patch` |

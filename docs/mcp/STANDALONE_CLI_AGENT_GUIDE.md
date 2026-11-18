@@ -34,12 +34,13 @@
 
 ## Boundary OIDC login
 
-- **Interactive (works today):** `scpctl boundary auth --interactive` runs the stock `boundary authenticate oidc` for the profile's auth method (both `oidcLoginMode` values). The user completes the login in the browser (up to 5 minutes); the token is stored as the profile app token. Ask the user to run it; agents cannot finish the browser step.
-- **Non-interactive / MCP:** `boundary auth` without `--interactive` and `boundary_auth_start` still return `CAPABILITY_UNAVAILABLE` for OIDC (`webview_oidc_desktop_only` for `automated`, `browser_oidc_unverified` for `browser`); only password auth runs unattended. A restored backup does not change this, and the restored OIDC password/OTP secret are not used by the CLI yet.
+- **Automated (`oidcLoginMode: automated` + saved credentials):** `boundary auth` (any mode flags) and MCP `boundary_auth_start` log in headlessly: Boundary HTTP API + IdP form fill over `curl`, credentials only from the profile keyring (`boundary_oidc_password`, optional `boundary_oidc_otp_secret`) and `boundary.oidcUsername`. Poll `function_status_get boundary-auth`: `authenticated` on success, `error` with a message starting with a reason code otherwise (`oidc_credentials_rejected`, `oidc_otp_rejected`, `oidc_otp_required`, `oidc_idp_unsupported`, `oidc_redirect_blocked`, `oidc_token_timeout`, `oidc_network_error`, `oidc_tls_error`, ...). It runs as an in-process task session (no PTY): `session_write` is rejected. Needs `curl` on `PATH` (`curl_not_found` otherwise). A restored backup supplies the credentials.
+- **Interactive:** `scpctl boundary auth --interactive` tries the automated login first and falls back to the stock `boundary authenticate oidc` browser login on `oidc_idp_unsupported` / `oidc_otp_required` / missing `curl`; `oidcLoginMode: browser` always uses the browser (up to 5 minutes). The token is stored as the profile app token. Agents cannot finish the browser step; ask the user.
+- **Not usable unattended:** automated mode without saved credentials returns `CAPABILITY_UNAVAILABLE` / `credentials_missing` (names the missing item); `browser` mode without `--interactive` returns `browser_oidc_unverified`. Only password auth and automated OIDC run unattended.
 - **Verify** with `boundary targets search` / MCP `boundary_search_targets`, not `status --function-id boundary-auth` (`idle` with a null token source in a fresh process even when logged in).
 - **Expiry:** tokens last about a day; re-run the login when Boundary calls fail with `Token must be provided via BOUNDARY_TOKEN` or HTTP 403.
 - **Manual stock-CLI login pitfall:** `scpctl` sets `BOUNDARY_TOKEN_NAME=scpctl-<credentialNamespace>` (`build_boundary_env`, pinned by `crates/scp-core/tests/slice2_boundary.rs`). If a user authenticates with plain `boundary authenticate`, they must pass `-token-name scpctl-<credentialNamespace>` (`profile-meta.json`), otherwise the token lands under `default` and `scpctl` ignores it.
-- Unattended login design: [`STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md`](STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md).
+- Design, security rules and test plan: [`STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md`](STANDALONE_CLI_BOUNDARY_OIDC_AUTOMATION.md).
 
 ## Headless and non-interactive pre-provisioning
 

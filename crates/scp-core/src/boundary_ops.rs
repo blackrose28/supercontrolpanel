@@ -1,20 +1,25 @@
 //! Boundary CLI target search, token status checks, and capability-gated authentication.
+use crate::boundary_oidc::{
+    self, curl::CurlTransport, OidcCredentials, OidcEnv, OidcLogin, OidcToken,
+};
 use crate::error::CoreError;
 use crate::models::{
     now_ms, AppConfig, BoundaryAuthKind, BoundaryOidcLoginMode, BoundaryTargetSummary,
     FunctionStatus, StartFunctionResult, BOUNDARY_AUTH_FUNCTION_ID, KEYRING_BOUNDARY_APP_TOKEN,
-    KEYRING_BOUNDARY_PASSWORD,
+    KEYRING_BOUNDARY_OIDC_OTP_SECRET, KEYRING_BOUNDARY_OIDC_PASSWORD, KEYRING_BOUNDARY_PASSWORD,
 };
+use crate::openvpn_ops::generate_totp_code_with_offset;
 use crate::runtime::{ProfileRuntime, StatusUpdate, SuperviseHooks};
 use crate::secrets::{KeyringBackend, NamespacedSecretStore};
 use crate::ssh_ops::{build_boundary_env, resolve_boundary_executable};
-use crate::supervisor::{CancelToken, ChildLaunch, SpawnMode};
+use crate::supervisor::{CancelToken, ChildLaunch, SpawnMode, TaskBody, TaskLaunch, TaskOutcome};
 use parking_lot::Mutex;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub const DEFAULT_TARGET_SEARCH_LIMIT: usize = 50;
 pub const MAX_TARGET_SEARCH_LIMIT: usize = 100;
@@ -197,12 +202,38 @@ pub struct BoundaryAuthOptions {
     /// Allow OIDC through the stock Boundary CLI browser login. Only set when an interactive
     /// user is present to complete the login; headless/MCP callers keep the default `false`.
     pub allow_browser_oidc: bool,
+    /// Skip the headless (curl) OIDC login even when credentials are configured, e.g. to retry
+    /// in the browser after the IdP page was not recognised. Needs `allow_browser_oidc`.
+    pub skip_headless_oidc: bool,
+}
+
+/// Which login a start would run (see `ProfileRuntime::boundary_auth_route`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BoundaryAuthRoute {
+    Password,
+    /// Stock `boundary authenticate oidc` with a user at the browser.
+    BrowserOidc,
+    /// In-process Boundary HTTP API + IdP form login over `curl`, no user needed.
+    HeadlessOidc,
 }
 
 /// How a started Boundary login authenticates.
 enum BoundaryAuthPlan {
     Password(String),
     BrowserOidc,
+    HeadlessOidc(OidcCredentials),
+}
+
+pub(crate) fn boundary_auth_route_impl<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
+    options: BoundaryAuthOptions,
+) -> Result<BoundaryAuthRoute, CoreError> {
+    let cfg = rt.get_app_config()?;
+    Ok(match validate_boundary_auth_mode(rt, &cfg, options)? {
+        BoundaryAuthPlan::Password(_) => BoundaryAuthRoute::Password,
+        BoundaryAuthPlan::BrowserOidc => BoundaryAuthRoute::BrowserOidc,
+        BoundaryAuthPlan::HeadlessOidc(_) => BoundaryAuthRoute::HeadlessOidc,
+    })
 }
 
 pub(crate) fn start_boundary_auth_impl<B: KeyringBackend + 'static>(
@@ -238,6 +269,12 @@ fn start_boundary_auth_full_impl<B: KeyringBackend + 'static>(
 ) -> Result<StartFunctionResult, CoreError> {
     let cfg = rt.get_app_config()?;
     let plan = validate_boundary_auth_mode(rt, &cfg, options)?;
+    let plan = match plan {
+        BoundaryAuthPlan::HeadlessOidc(creds) => {
+            return start_headless_oidc(rt, &cfg, creds, cancel);
+        }
+        other => other,
+    };
     let sync = rt.get_sync_settings()?;
     let exe = resolve_checked_boundary(&sync.boundary_cli_path)?;
     let mut launch = build_boundary_auth_launch(rt, &cfg, exe, &plan);
@@ -252,7 +289,9 @@ fn start_boundary_auth_full_impl<B: KeyringBackend + 'static>(
     let out_buf = Arc::new(Mutex::new(String::new()));
     let (password, label) = match plan {
         BoundaryAuthPlan::Password(pw) => (Some(pw), "Boundary password login"),
-        BoundaryAuthPlan::BrowserOidc => (None, "Boundary OIDC login"),
+        BoundaryAuthPlan::BrowserOidc | BoundaryAuthPlan::HeadlessOidc(_) => {
+            (None, "Boundary OIDC login")
+        }
     };
     let hooks = build_boundary_auth_hooks(rt, password, Arc::clone(&out_buf));
     let session_id = rt.start_supervised_with_hooks(launch, cancel, None, label, hooks)?;
@@ -262,7 +301,6 @@ fn start_boundary_auth_full_impl<B: KeyringBackend + 'static>(
     })
 }
 
-const OIDC_NEEDS_INTERACTIVE_AUTOMATED: &str = "Automated Boundary OIDC requires the desktop hidden webview. Run `scpctl boundary auth --interactive` to log in through your browser instead";
 const OIDC_NEEDS_INTERACTIVE_BROWSER: &str = "Boundary OIDC login needs an interactive user. Run `scpctl boundary auth --interactive` to log in through your browser";
 
 fn validate_boundary_auth_mode<B: KeyringBackend>(
@@ -271,26 +309,176 @@ fn validate_boundary_auth_mode<B: KeyringBackend>(
     options: BoundaryAuthOptions,
 ) -> Result<BoundaryAuthPlan, CoreError> {
     match cfg.boundary.auth_kind {
-        BoundaryAuthKind::Oidc if options.allow_browser_oidc => {
-            validate_oidc_inputs(cfg)?;
-            Ok(BoundaryAuthPlan::BrowserOidc)
-        }
-        BoundaryAuthKind::Oidc => match cfg.boundary.oidc_login_mode {
-            BoundaryOidcLoginMode::Automated => Err(CoreError::capability_unavailable(
-                "webview_oidc_desktop_only",
-                OIDC_NEEDS_INTERACTIVE_AUTOMATED,
-                "use_password_auth_or_desktop",
-            )),
-            BoundaryOidcLoginMode::Browser => Err(CoreError::capability_unavailable(
-                "browser_oidc_unverified",
-                OIDC_NEEDS_INTERACTIVE_BROWSER,
-                "use_password_auth_or_desktop",
-            )),
-        },
+        BoundaryAuthKind::Oidc => validate_oidc_plan(rt, cfg, options),
         BoundaryAuthKind::Password => {
             validate_password_auth_inputs(rt, cfg).map(BoundaryAuthPlan::Password)
         }
     }
+}
+
+/// OIDC routing: `automated` mode with complete credentials logs in headlessly; otherwise an
+/// interactive caller gets the stock browser login and everyone else a clear rejection.
+fn validate_oidc_plan<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
+    cfg: &AppConfig,
+    options: BoundaryAuthOptions,
+) -> Result<BoundaryAuthPlan, CoreError> {
+    let automated = cfg.boundary.oidc_login_mode == BoundaryOidcLoginMode::Automated;
+    if automated && !options.skip_headless_oidc {
+        validate_oidc_inputs(cfg)?;
+        match collect_oidc_credentials(rt, cfg) {
+            Ok(creds) => return Ok(BoundaryAuthPlan::HeadlessOidc(creds)),
+            Err(missing) if !options.allow_browser_oidc => {
+                return Err(CoreError::capability_unavailable(
+                    "credentials_missing",
+                    format!(
+                        "Automated Boundary OIDC login needs: {}. Configure them (settings backup import, `scpctl config secret set --key boundary_oidc_password`, `scpctl config patch` for boundary.oidcUsername), or run `scpctl boundary auth --interactive` to log in through your browser",
+                        missing.join("; ")
+                    ),
+                    "configure_credentials",
+                ));
+            }
+            Err(_) => {}
+        }
+    }
+    if options.allow_browser_oidc {
+        validate_oidc_inputs(cfg)?;
+        return Ok(BoundaryAuthPlan::BrowserOidc);
+    }
+    Err(CoreError::capability_unavailable(
+        "browser_oidc_unverified",
+        OIDC_NEEDS_INTERACTIVE_BROWSER,
+        "use_password_auth_or_desktop",
+    ))
+}
+
+/// Reads the OIDC credentials from the profile keyring only (legacy plaintext config is migrated
+/// into it on load); the error lists what is missing, never values.
+fn collect_oidc_credentials<B: KeyringBackend>(
+    rt: &ProfileRuntime<B>,
+    cfg: &AppConfig,
+) -> Result<OidcCredentials, Vec<&'static str>> {
+    let non_empty = |v: Option<String>| v.filter(|s| !s.trim().is_empty());
+    let username = cfg.boundary.oidc_username.trim().to_string();
+    let password = non_empty(rt.read_optional_secret(KEYRING_BOUNDARY_OIDC_PASSWORD));
+    let otp_secret = non_empty(rt.read_optional_secret(KEYRING_BOUNDARY_OIDC_OTP_SECRET));
+    let mut missing = Vec::new();
+    if username.is_empty() {
+        missing.push("OIDC username (config boundary.oidcUsername)");
+    }
+    if password.is_none() {
+        missing.push("OIDC password (keyring account boundary_oidc_password)");
+    }
+    match password {
+        Some(password) if missing.is_empty() => Ok(OidcCredentials {
+            username,
+            password,
+            otp_secret,
+        }),
+        _ => Err(missing),
+    }
+}
+
+/// Starts the in-process headless OIDC login as a supervised task session.
+fn start_headless_oidc<B: KeyringBackend + 'static>(
+    rt: &ProfileRuntime<B>,
+    cfg: &AppConfig,
+    creds: OidcCredentials,
+    cancel: &CancelToken,
+) -> Result<StartFunctionResult, CoreError> {
+    boundary_oidc::curl::ensure_available("curl").map_err(|e| {
+        CoreError::capability_unavailable("curl_not_found", e.message, "install_curl")
+    })?;
+    let body = headless_oidc_task(
+        cfg.boundary.addr.trim().to_string(),
+        cfg.boundary.auth_method_id.trim().to_string(),
+        creds,
+        Arc::clone(rt.secrets_arc()),
+        Arc::clone(rt.runtime_state_arc()),
+    );
+    let launch = TaskLaunch {
+        function_id: BOUNDARY_AUTH_FUNCTION_ID.to_string(),
+        kind: "boundary-auth",
+    };
+    let hooks = SuperviseHooks {
+        on_output: None,
+        on_exit: None,
+    };
+    let session_id = rt.start_supervised_task_with_hooks(
+        launch,
+        cancel,
+        "Boundary OIDC login (automated)",
+        hooks,
+        body,
+    )?;
+    Ok(StartFunctionResult {
+        function_id: BOUNDARY_AUTH_FUNCTION_ID.to_string(),
+        session_id,
+    })
+}
+
+const HEADLESS_POLL_ATTEMPTS: u32 = 20;
+const HEADLESS_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+fn headless_oidc_task<B: KeyringBackend + 'static>(
+    addr: String,
+    auth_method_id: String,
+    creds: OidcCredentials,
+    secrets: Arc<Mutex<NamespacedSecretStore<B>>>,
+    state: Arc<Mutex<crate::runtime::RuntimeState>>,
+) -> TaskBody {
+    Box::new(move |ctx| {
+        let failed = |reason: String| {
+            ctx.log(&reason);
+            TaskOutcome {
+                exit_code: Some(1),
+                reason,
+            }
+        };
+        let mut transport = match CurlTransport::new() {
+            Ok(t) => t,
+            Err(e) => return failed(e.exit_reason()),
+        };
+        let cancelled = || ctx.is_cancelled();
+        let log = |line: &str| ctx.log(line);
+        let totp = |secret: &str| generate_totp_code_with_offset(secret, 0);
+        let sleep = |d: Duration| std::thread::sleep(d);
+        let env = OidcEnv {
+            cancelled: &cancelled,
+            log: &log,
+            totp: &totp,
+            sleep: &sleep,
+            poll_attempts: HEADLESS_POLL_ATTEMPTS,
+            poll_interval: HEADLESS_POLL_INTERVAL,
+        };
+        let login = OidcLogin {
+            addr: &addr,
+            auth_method_id: &auth_method_id,
+            credentials: &creds,
+        };
+        let OidcToken {
+            token,
+            expiration_time,
+        } = match boundary_oidc::run_oidc_login(&mut transport, &login, &env) {
+            Ok(t) => t,
+            Err(e) => return failed(e.exit_reason()),
+        };
+        if let Err(e) = secrets.lock().set(KEYRING_BOUNDARY_APP_TOKEN, &token) {
+            return failed(format!(
+                "oidc_token_store_failed: cannot store the Boundary token: {}",
+                e.message
+            ));
+        }
+        mark_authenticated(ctx.session_id(), "app", &state);
+        ctx.log(&match expiration_time {
+            Some(t) => format!("OIDC login succeeded. Token expires at {t}."),
+            None => "OIDC login succeeded.".to_string(),
+        });
+        TaskOutcome {
+            exit_code: Some(0),
+            reason: "automated OIDC login complete".to_string(),
+        }
+    })
 }
 
 fn validate_oidc_inputs(cfg: &AppConfig) -> Result<(), CoreError> {
@@ -362,6 +550,9 @@ fn build_boundary_auth_launch<B: KeyringBackend>(
             "-format".to_string(),
             "json".to_string(),
         ],
+        BoundaryAuthPlan::HeadlessOidc(_) => {
+            unreachable!("headless OIDC runs as a task session, never as a child launch")
+        }
     };
     ChildLaunch {
         function_id: BOUNDARY_AUTH_FUNCTION_ID.to_string(),
@@ -430,16 +621,25 @@ fn finalize_boundary_auth_success<B: KeyringBackend>(
     secrets: &Arc<Mutex<NamespacedSecretStore<B>>>,
     state: &Arc<Mutex<crate::runtime::RuntimeState>>,
 ) {
-    let mut source = "cli".to_string();
+    let mut source = "cli";
     if let Some(token) = extract_token_from_output(raw_output) {
         if secrets
             .lock()
             .set(KEYRING_BOUNDARY_APP_TOKEN, &token)
             .is_ok()
         {
-            source = "app".to_string();
+            source = "app";
         }
     }
+    mark_authenticated(session_id, source, state);
+}
+
+/// Marks the Boundary auth function authenticated if `session_id` still owns it.
+fn mark_authenticated(
+    session_id: &str,
+    source: &str,
+    state: &Arc<Mutex<crate::runtime::RuntimeState>>,
+) {
     let mut st = state.lock();
     if st
         .function_statuses
@@ -457,7 +657,7 @@ fn finalize_boundary_auth_success<B: KeyringBackend>(
                 } else {
                     "Authenticated via Boundary CLI.".into()
                 },
-                boundary_token_source: Some(source),
+                boundary_token_source: Some(source.to_string()),
                 session_id: Some(session_id.to_string()),
                 updated_at_ms: now_ms(),
             },
@@ -536,8 +736,11 @@ fn collect_redacted_secrets<B: KeyringBackend>(
     for cand in [
         app_token.map(ToOwned::to_owned),
         rt.read_optional_secret(KEYRING_BOUNDARY_PASSWORD),
+        rt.read_optional_secret(KEYRING_BOUNDARY_OIDC_PASSWORD),
+        rt.read_optional_secret(KEYRING_BOUNDARY_OIDC_OTP_SECRET),
         Some(cfg.boundary.password.clone()),
         Some(cfg.boundary.oidc_password.clone()),
+        Some(cfg.boundary.oidc_otp_secret.clone()),
     ]
     .into_iter()
     .flatten()

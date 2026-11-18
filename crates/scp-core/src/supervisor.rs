@@ -140,6 +140,8 @@ struct SessionEntry {
 }
 
 enum SessionControl {
+    /// In-process task; stopping sets the flag and waits for the body to return.
+    Task { stop: Arc<AtomicBool> },
     Pipe {
         stdin: Arc<Mutex<Option<ChildStdin>>>,
     },
@@ -169,6 +171,57 @@ enum SpawnedChild {
         kill_tree: bool,
     },
 }
+
+/// Launch spec for an in-process task session.
+#[derive(Debug, Clone)]
+pub struct TaskLaunch {
+    pub function_id: String,
+    pub kind: &'static str,
+}
+
+/// How a task ended; mirrors a child's exit code and reason.
+#[derive(Debug, Clone)]
+pub struct TaskOutcome {
+    pub exit_code: Option<i32>,
+    pub reason: String,
+}
+
+/// Handle given to a task body: logging into the function ring and cooperative cancellation.
+pub struct TaskContext {
+    session_id: String,
+    function_id: String,
+    state: Arc<Mutex<SupervisorState>>,
+    stop: Arc<AtomicBool>,
+    on_output: Option<OutputCallback>,
+}
+
+impl TaskContext {
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+
+    /// Appends `line` to the function log ring and forwards it to the output callback.
+    pub fn log(&self, line: &str) {
+        let text = format!("{line}\n");
+        self.state
+            .lock()
+            .function_logs
+            .entry(self.function_id.clone())
+            .or_default()
+            .push(text.as_bytes());
+        if let Some(cb) = &self.on_output {
+            cb(&self.session_id, &text, false);
+        }
+    }
+
+    /// True once the session was stopped. The request-scoped [`CancelToken`] only guards
+    /// acceptance (host-owned lifetime), so cancelling it later does not abort a running task.
+    pub fn is_cancelled(&self) -> bool {
+        self.stop.load(Ordering::SeqCst)
+    }
+}
+
+pub type TaskBody = Box<dyn FnOnce(&TaskContext) -> TaskOutcome + Send + 'static>;
 
 /// Supervises active child processes and PTYs across runtime families.
 #[derive(Default)]
@@ -250,6 +303,79 @@ impl ProcessSupervisor {
         let _waiter_handle = spawn_exit_waiter(waiter, readers);
     }
 
+    /// Runs `body` on a thread as a supervised session that shares the child-process contracts
+    /// (session id, stop, exit callback, function log ring). Cancelled-before-accept never runs it.
+    pub fn spawn_task_with_gate<G, E>(
+        &self,
+        launch: TaskLaunch,
+        cancel: &CancelToken,
+        on_accept: G,
+        on_exit: E,
+        on_output: Option<OutputCallback>,
+        body: TaskBody,
+    ) -> Result<AcceptOutcome<String>, CoreError>
+    where
+        G: FnOnce(&str) -> AcceptOutcome<()>,
+        E: Fn(&str, Option<i32>, &str) + Send + Sync + 'static,
+    {
+        if cancel.is_cancelled() {
+            return Ok(AcceptOutcome::CancelledBeforeAccept);
+        }
+        let session_id = next_session_id();
+        if let AcceptOutcome::CancelledBeforeAccept = on_accept(&session_id) {
+            return Ok(AcceptOutcome::CancelledBeforeAccept);
+        }
+        let stop = Arc::new(AtomicBool::new(false));
+        let exit_signal = Arc::new(ExitSignal::new());
+        {
+            let mut st = self.state.lock();
+            st.function_logs
+                .insert(launch.function_id.clone(), FunctionRing::default());
+            st.function_sessions
+                .insert(launch.function_id.clone(), session_id.clone());
+            st.sessions.insert(
+                session_id.clone(),
+                SessionEntry {
+                    kind: launch.kind,
+                    pid: None,
+                    kill_tree: false,
+                    control: SessionControl::Task {
+                        stop: Arc::clone(&stop),
+                    },
+                    exit_signal: Arc::clone(&exit_signal),
+                },
+            );
+        }
+        let ctx = TaskContext {
+            session_id: session_id.clone(),
+            function_id: launch.function_id.clone(),
+            state: Arc::clone(&self.state),
+            stop,
+            on_output,
+        };
+        let state = Arc::clone(&self.state);
+        let function_id = launch.function_id;
+        let sid = session_id.clone();
+        std::thread::spawn(move || {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body(&ctx)))
+                .unwrap_or_else(|_| TaskOutcome {
+                    exit_code: None,
+                    reason: "task panicked".to_string(),
+                });
+            {
+                let mut st = state.lock();
+                st.sessions.remove(&sid);
+                if st.function_sessions.get(&function_id).map(String::as_str) == Some(sid.as_str())
+                {
+                    st.function_sessions.remove(&function_id);
+                }
+            }
+            on_exit(&sid, outcome.exit_code, &outcome.reason);
+            exit_signal.mark_exited(outcome.exit_code, outcome.reason);
+        });
+        Ok(AcceptOutcome::Accepted(session_id))
+    }
+
     /// Writes input bytes to an active PTY or pipe stdin.
     pub fn write(&self, session_id: &str, data: &str) -> Result<(), CoreError> {
         let ctrl = {
@@ -262,6 +388,12 @@ impl ProcessSupervisor {
                 )
             })?;
             match &entry.control {
+                SessionControl::Task { .. } => {
+                    return Err(CoreError::invalid_arguments(
+                        "task_not_writable",
+                        "This session is an in-process task and does not accept input",
+                    ))
+                }
                 SessionControl::Pipe { stdin } => Ok(Arc::clone(stdin)),
                 SessionControl::Pty { writer, .. } => Err(Arc::clone(writer)),
             }
@@ -284,7 +416,7 @@ impl ProcessSupervisor {
                 )
             })?;
             match &entry.control {
-                SessionControl::Pipe { .. } => return Ok(()),
+                SessionControl::Task { .. } | SessionControl::Pipe { .. } => return Ok(()),
                 SessionControl::Pty { master, .. } => Arc::clone(master),
             }
         };
@@ -314,19 +446,29 @@ impl ProcessSupervisor {
             st.sessions.get(session_id).map(|entry| {
                 let killer = match &entry.control {
                     SessionControl::Pty { killer, .. } => Some(Arc::clone(killer)),
-                    SessionControl::Pipe { .. } => None,
+                    SessionControl::Pipe { .. } | SessionControl::Task { .. } => None,
+                };
+                let task_stop = match &entry.control {
+                    SessionControl::Task { stop } => Some(Arc::clone(stop)),
+                    _ => None,
                 };
                 (
                     entry.pid,
                     entry.kill_tree,
                     killer,
                     Arc::clone(&entry.exit_signal),
+                    task_stop,
                 )
             })
         };
-        let Some((pid, kill_tree, killer, exit_signal)) = stop_ctx else {
+        let Some((pid, kill_tree, killer, exit_signal, task_stop)) = stop_ctx else {
             return Ok(false);
         };
+        if let Some(stop) = task_stop {
+            stop.store(true, Ordering::SeqCst);
+            exit_signal.wait_timeout(timeout.max(Duration::from_millis(200)));
+            return Ok(true);
+        }
         terminate_target(pid, kill_tree, killer.as_ref(), &exit_signal, timeout);
         Ok(true)
     }

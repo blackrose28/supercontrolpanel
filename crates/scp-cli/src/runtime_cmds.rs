@@ -1,7 +1,7 @@
 use crate::args::{CommandRequest, Subcommand};
-use scp_core::boundary_ops::BoundaryAuthOptions;
+use scp_core::boundary_ops::{BoundaryAuthOptions, BoundaryAuthRoute};
 use scp_core::error::CoreError;
-use scp_core::models::{BoundaryAuthKind, StartFunctionResult, BOUNDARY_AUTH_FUNCTION_ID};
+use scp_core::models::{StartFunctionResult, BOUNDARY_AUTH_FUNCTION_ID};
 use scp_core::openvpn_ops::detect_openvpn_executable_checked;
 use scp_core::profile::OwnedProfileLocation;
 use scp_core::runtime::ProfileRuntime;
@@ -23,6 +23,8 @@ const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const BOUNDARY_AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 /// A human completes the OIDC login (username, password, OTP) in a browser.
 const BOUNDARY_INTERACTIVE_AUTH_TIMEOUT: Duration = Duration::from_secs(300);
+/// Headless OIDC chains several HTTP requests (each bounded at 30 s by curl) plus a token poll.
+const BOUNDARY_HEADLESS_AUTH_TIMEOUT: Duration = Duration::from_secs(90);
 
 struct CancelPump {
     done: Arc<AtomicBool>,
@@ -188,21 +190,27 @@ fn resolve_self_exited_status(
     }
 }
 
-/// Tells an interactive user to finish the OIDC login; stderr keeps `--json` stdout pure.
-fn announce_browser_login(
-    rt: &ProfileRuntime<OsKeyringBackend>,
-    interactive: bool,
-    wait: Duration,
-) {
-    let is_oidc = rt
-        .get_app_config()
-        .is_ok_and(|cfg| cfg.boundary.auth_kind == BoundaryAuthKind::Oidc);
-    if interactive && is_oidc {
-        eprintln!(
+/// Tells an interactive user what the login needs from them; stderr keeps `--json` stdout pure.
+fn announce_boundary_login(route: BoundaryAuthRoute, interactive: bool, wait: Duration) {
+    match route {
+        BoundaryAuthRoute::BrowserOidc if interactive => eprintln!(
             "Complete the Boundary login in your browser (waiting up to {} min)...",
             wait.as_secs() / 60
-        );
+        ),
+        BoundaryAuthRoute::HeadlessOidc if interactive => {
+            eprintln!("Logging in to Boundary with the saved OIDC credentials...");
+        }
+        _ => {}
     }
+}
+
+/// Headless outcomes where the saved credentials cannot be used but a browser login still can.
+fn should_fall_back_to_browser(err: &CoreError) -> bool {
+    err.reason == "curl_not_found"
+        || (err.reason == "boundary_auth_failed"
+            && ["oidc_idp_unsupported", "oidc_otp_required"]
+                .iter()
+                .any(|code| err.message.contains(code)))
 }
 
 pub fn run_boundary_auth(
@@ -212,25 +220,42 @@ pub fn run_boundary_auth(
     let watcher = install_signal_watcher()?;
     let cancel = CancelToken::new();
     let pump = CancelPump::spawn(&watcher, &cancel);
-    let options = BoundaryAuthOptions {
+    let mut options = BoundaryAuthOptions {
         allow_browser_oidc: interactive,
+        skip_headless_oidc: false,
     };
-    let timeout = if interactive {
-        BOUNDARY_INTERACTIVE_AUTH_TIMEOUT
-    } else {
-        BOUNDARY_AUTH_TIMEOUT
-    };
-    announce_browser_login(rt, interactive, timeout);
-    let started = match rt.start_boundary_auth_with_options(&cancel, options) {
-        Ok(s) => s,
-        Err(err) => {
-            drop(pump);
-            return Err(map_start_err(&watcher, err));
-        }
-    };
-    let outcome = wait_boundary_auth_loop(rt, &watcher, &started, timeout);
+    let mut outcome = boundary_auth_attempt(rt, &watcher, &cancel, options, interactive);
+    if interactive && matches!(&outcome, Err(err) if should_fall_back_to_browser(err)) {
+        eprintln!(
+            "Automated OIDC login cannot continue here; falling back to the browser login..."
+        );
+        options.skip_headless_oidc = true;
+        outcome = boundary_auth_attempt(rt, &watcher, &cancel, options, interactive);
+    }
     drop(pump);
     outcome
+}
+
+fn boundary_auth_attempt(
+    rt: &ProfileRuntime<OsKeyringBackend>,
+    watcher: &SignalWatcher,
+    cancel: &CancelToken,
+    options: BoundaryAuthOptions,
+    interactive: bool,
+) -> Result<Value, CoreError> {
+    let route = rt
+        .boundary_auth_route(options)
+        .map_err(|err| map_start_err(watcher, err))?;
+    let timeout = match route {
+        BoundaryAuthRoute::BrowserOidc => BOUNDARY_INTERACTIVE_AUTH_TIMEOUT,
+        BoundaryAuthRoute::HeadlessOidc => BOUNDARY_HEADLESS_AUTH_TIMEOUT,
+        BoundaryAuthRoute::Password => BOUNDARY_AUTH_TIMEOUT,
+    };
+    announce_boundary_login(route, interactive, timeout);
+    let started = rt
+        .start_boundary_auth_with_options(cancel, options)
+        .map_err(|err| map_start_err(watcher, err))?;
+    wait_boundary_auth_loop(rt, watcher, &started, timeout)
 }
 
 fn wait_boundary_auth_loop(
@@ -278,7 +303,7 @@ fn finalize_boundary_auth_status(
             }
             return Err(CoreError::operation_failed(
                 "boundary_auth_failed",
-                "Boundary authentication failed",
+                format!("Boundary authentication failed: {}", st.message),
                 false,
                 "check_credentials",
             ));
