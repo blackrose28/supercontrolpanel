@@ -43,7 +43,7 @@ Resources: `scp://status/functions|openvpn|boundary`, `scp://servers/list`, `scp
 
 **Browse remote files:** `remote_browser_open` -> `remote_browser_list_children` (start at `/` or home) -> `remote_browser_close` when done. Close the browser when switching servers or finishing; each browser is one persistent SFTP session.
 
-**Transfer:** confirm direction, paths and overwrite with the user. Use `scp_start_*` for large or recursive transfers and poll as above; use blocking `scp_upload`/`scp_download` for small files. Boundary-routed servers need a running tunnel (`server_tunnel_start`) first.
+**Transfer:** confirm direction, paths and overwrite with the user. Use `scp_start_*` for large or recursive transfers and poll as above; use blocking `scp_upload`/`scp_download` for small files. For Boundary-routed servers, blocking `scp_upload`/`scp_download` start and stop a temporary tunnel themselves (adds ~1-2 s); the async `scp_start_*` tools require a tunnel you already started with `server_tunnel_start` and otherwise fail with `CONFLICT ... (reason: tunnel_not_running)`, as does `remote_browser_open`.
 
 **Change config:** `servers_list`/`server_get` to read the current state -> show the user the intended change -> `server_upsert` or `config_save_partial` -> re-read to verify. Config secrets are never written to disk by these tools; they live in the OS keyring.
 
